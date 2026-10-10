@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>upstocks — NIFTY option data</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+{% include "_style.html" %}
+</head>
+<body>
+<main>
+  <nav><a href="/" class="on">Download</a><a href="/backtest">Backtest</a><a href="/vwap">VWAP / SMC</a></nav>
+  <h1>NIFTY 50 option premium — download</h1>
+  <p class="sub">Pick a <b>Date</b> — the NIFTY expiry that was current that day is selected for you (Upstox data back to Oct 2024). Type the strike, or switch <b>Pick by</b> to <b>Premium</b>, type a premium, and the strike trading nearest it on that date (at the time you set) is picked for you. The download is that day's candles; tick <b>Till expiry</b> for Date → expiry.</p>
+
+  {% if error %}<div class="card err">Could not load expiries from Upstox: {{ error }}</div>{% endif %}
+
+  <form class="card" id="f" onsubmit="return false">
+    <div class="grid">
+      <label>Date <input type="date" id="date" required></label>
+      <label>Expiry (auto)
+        <select id="expiry" required>
+          {% for e in expiries %}
+          <option value="{{ e.date }}" data-expired="{{ 1 if e.expired else 0 }}">{{ e.date }}{{ "  · expired" if e.expired else "" }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Pick by
+        <div class="seg" id="mode">
+          <button type="button" data-v="strike" class="on">Strike</button>
+          <button type="button" data-v="premium">Premium</button>
+        </div>
+      </label>
+      <label class="pm">Premium ₹ <input type="number" id="premium" min="0.05" step="0.05" placeholder="e.g. 300"></label>
+      <label class="pm">At time (IST) <input type="time" id="at" value="09:15" min="09:15" max="15:29"></label>
+      <label>Strike
+        <input type="text" id="strike" list="strikes" inputmode="numeric" autocomplete="off" placeholder="e.g. 22350" required>
+        <datalist id="strikes"></datalist>
+      </label>
+      <label>Type
+        <div class="seg" id="type">
+          <button type="button" data-v="CE" class="on">CE</button>
+          <button type="button" data-v="PE">PE</button>
+        </div>
+      </label>
+      <label>Interval
+        <select id="interval">
+          {% for iv in intervals %}<option value="{{ iv }}"{{ " selected" if iv == "1m" else "" }}>{{ iv }}</option>{% endfor %}
+        </select>
+      </label>
+    </div>
+    <div class="row">
+      <label class="check"><input type="checkbox" id="mh" checked> Market hours only (09:15–15:29)</label>
+      <label class="check"><input type="checkbox" id="tillexp"> Till expiry (Date → expiry, not just that day)</label>
+      <span style="flex:1"></span>
+      <button class="btn ghost pm" id="find" type="button">Find strike</button>
+      <button class="btn ghost" id="preview" type="button">Preview</button>
+      <button class="btn primary" id="dl" type="button">⬇ Download CSV</button>
+    </div>
+    <div id="out"></div>
+  </form>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const today = "{{ today }}";
+let optType = "CE";
+
+
+// Strikes of the selected expiry — the Strike box is free text (type 22350);
+// this list only feeds its suggestions and the "nearest strike" hint.
+let strikeList = [];
+
+async function loadStrikes() {
+  const exp = $("expiry").value; if (!exp) return;
+  try {
+    const r = await fetch(`/api/contracts?expiry=${exp}`).then(r => r.json());
+    if (r.error || !r.strikes) throw new Error(r.error || "no strikes");
+    strikeList = r.strikes;
+    $("strikes").innerHTML = r.strikes.map(s => `<option value="${s}">`).join("");
+  } catch (e) { strikeList = []; $("out").innerHTML = `<p class="err">Could not load strikes: ${e.message}</p>`; }
+}
+
+// Typed strike must exist for this expiry; otherwise say which ones are closest.
+function checkStrike() {
+  const v = parseFloat(String($("strike").value).trim());
+  if (!(v > 0)) throw new Error("Type a strike, e.g. 22350");
+  if (strikeList.length && !strikeList.includes(v)) {
+    const near = [...strikeList].sort((a, b) => Math.abs(a - v) - Math.abs(b - v)).slice(0, 3).sort((a, b) => a - b);
+    throw new Error(`No ${v} strike for ${$("expiry").value}. Nearest: ${near.join(", ")}`);
+  }
+  $("strike").value = String(v);
+}
+
+function query() {
+  const p = new URLSearchParams({ expiry: $("expiry").value, strike: $("strike").value, type: optType,
+    from: $("date").value, to: $("tillexp").checked ? $("expiry").value : $("date").value, interval: $("interval").value, market_hours: $("mh").checked });
+  return p.toString();
+}
+
+$("type").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  optType = b.dataset.v;
+  [...$("type").children].forEach(x => x.classList.toggle("on", x === b));
+});
+$("expiry").addEventListener("change", () => loadStrikes());
+
+// ─── Pick by premium ──────────────────────────────────────────────────────────
+// Type a premium; the server finds the strike of the selected expiry/CE-PE
+// whose price on the From date at the chosen time was nearest it.
+let mode = "strike";
+$("mode").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  mode = b.dataset.v;
+  [...$("mode").children].forEach(x => x.classList.toggle("on", x === b));
+  document.body.classList.toggle("premium-mode", mode === "premium");
+  if (mode === "premium") $("premium").focus();
+});
+
+async function findStrike() {
+  const prem = parseFloat($("premium").value);
+  if (!(prem > 0)) throw new Error("Type a premium first");
+  if (!$("date").value) throw new Error("Pick the date");
+  const q = new URLSearchParams({ expiry: $("expiry").value, type: optType, premium: prem, date: $("date").value, time: $("at").value || "09:15" });
+  $("out").innerHTML = '<p class="msg">Finding the strike nearest ₹' + prem + '…</p>';
+  const r = await fetch(`/api/find-strike?${q}`).then(r => r.json());
+  if (r.error || r.detail) throw new Error(r.error || r.detail);
+  $("strike").value = String(r.strike);
+  const near = r.nearby.map(c => c.strike === r.strike ? `<b>${c.strike} ₹${c.premium}</b>` : `${c.strike} ₹${c.premium}`).join(" · ");
+  $("out").innerHTML = `<div class="found"><b>${r.symbol}</b> was <b>₹${r.premium}</b> at ${r.at.slice(0,10)} ${r.at.slice(11,16)}
+    (you typed ₹${r.target}, diff ₹${(Math.abs(r.premium - r.target)).toFixed(2)})
+    <div class="near">Nearby: ${near}</div></div>`;
+  return r;
+}
+$("find").addEventListener("click", () => findStrike().catch(e => { $("out").innerHTML = `<p class="err">${e.message}</p>`; }));
+
+// In premium mode, Preview/Download first resolve the strike from the premium.
+async function ensureStrike() { if (mode === "premium") await findStrike(); else checkStrike(); }
+
+// Picking a date selects the expiry that was current that day — the nearest
+// expiry on or after it. The expiry list can still be changed by hand.
+function autoExpiryForDay() {
+  const f = $("date").value; if (!f) return;
+  const all = [...$("expiry").options].map(o => o.value).sort();
+  const exp = all.find(d => d >= f);
+  if (!exp) { $("out").innerHTML = `<p class="err">No NIFTY expiry on or after ${f}</p>`; return; }
+  const changed = $("expiry").value !== exp;
+  $("expiry").value = exp;
+  if (changed || !strikeList.length) loadStrikes();
+  $("out").innerHTML = `<p class="msg">${f}: expiry ${exp} selected automatically</p>`;
+}
+$("date").addEventListener("change", autoExpiryForDay);
+
+$("preview").addEventListener("click", async () => {
+  let found = "";
+  try { await ensureStrike(); found = mode === "premium" ? $("out").innerHTML : ""; }
+  catch (e) { $("out").innerHTML = `<p class="err">${e.message}</p>`; return; }
+  $("out").innerHTML = found + '<p class="msg">Loading…</p>';
+  const r = await fetch(`/api/preview?${query()}`).then(r => r.json()).catch(e => ({ error: e.message }));
+  if (r.error || r.detail) { $("out").innerHTML = found + `<p class="err">${r.error || r.detail}</p>`; return; }
+  const row = c => `<tr><td>${c[0].slice(0,10)} ${c[0].slice(11,16)}</td><td>${c[1]}</td><td>${c[2]}</td><td>${c[3]}</td><td>${c[4]}</td><td>${c[5]}</td><td>${c[6]}</td></tr>`;
+  $("out").innerHTML = found + `
+    <p><b>${r.symbol}</b> <span class="tag ${r.expired ? "exp" : "live"}">${r.expired ? "expired" : "live"}</span>
+       · ${r.from} → ${r.to} · <b>${r.count.toLocaleString()}</b> candles</p>
+    <div class="scroll"><table><thead><tr><th>Time (IST)</th><th>Open</th><th>High</th><th>Low</th><th>Close</th><th>Volume</th><th>OI</th></tr></thead>
+    <tbody>${r.head.map(row).join("")}${r.tail.length ? '<tr><td colspan="7" style="text-align:center">…</td></tr>' + r.tail.map(row).join("") : ""}</tbody></table></div>`;
+});
+
+$("dl").addEventListener("click", async () => {
+  try { await ensureStrike(); } catch (e) { $("out").innerHTML = `<p class="err">${e.message}</p>`; return; }
+  window.location = `/download?${query()}`;
+});
+
+$("date").value = today;
+autoExpiryForDay(); // also loads that expiry's strikes
+</script>
+</body>
+</html>

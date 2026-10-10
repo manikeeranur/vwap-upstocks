@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>upstocks — VWAP 9:30</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+{% include "_style.html" %}
+<style>
+  main { max-width: none; padding: 20px 24px 48px; }
+  /* ── Results table: same look as the frontend app's SMC / VWAP 9:30 tables ── */
+  .mono, table.rt, .foot { font-family: 'Space Mono', monospace; }
+  .tblwrap { margin-top: 16px; border: 1px solid var(--border); border-radius: 10px; overflow: auto; }
+  table.rt { width: 100%; min-width: 1300px; border-collapse: collapse; }
+  table.rt thead th { position: sticky; top: 0; background: #f8fafc; border-bottom: 2px solid #cbd5e1; color: #64748b;
+    font-size: 9px; font-weight: 700; letter-spacing: 1.4px; text-transform: uppercase; padding: 9px 8px; text-align: left; white-space: nowrap; }
+  table.rt td { padding: 10px 8px; border-bottom: 1px solid #f1f5f9; text-align: left; vertical-align: middle; white-space: nowrap; }
+  table.rt th:last-child, table.rt td:last-child { padding-right: 24px; }
+  table.rt th:first-child, table.rt td:first-child { padding-left: 16px; }
+  table.rt tbody tr:hover td { background: #f0f4ff !important; }
+  .v12 { font-size: 12.5px; font-weight: 700; } .v11 { font-size: 11.5px; font-weight: 700; } .v10 { font-size: 11px; font-weight: 700; }
+  .s8 { font-size: 9px; } .s7 { font-size: 8px; }
+  .tag { display: inline-block; font-size: 9px; font-weight: 700; padding: 2px 5px; border-radius: 3px; margin: 0 3px 3px 0; }
+  .muted { color: #94a3b8; } .ink { color: #1e293b; }
+  .c-up { color: #16a34a; } .c-down { color: #e11d48; } .c-amber { color: #b45309; } .c-purple { color: #7c3aed; } .c-slate { color: #64748b; }
+  .foot { display: grid; grid-template-columns: repeat(8, 1fr) 1.7fr; border: 1px solid var(--border); border-bottom: 2px solid #cbd5e1; border-radius: 10px; overflow: hidden; margin-top: 16px; background: var(--card); }
+  .foot div { padding: 14px 16px; border-right: 1px solid var(--border); } .foot div:last-child { border-right: 0; }
+  .foot .lbl { font-size: 10px; letter-spacing: 1.5px; color: #64748b; text-transform: uppercase; }
+  .foot b { display: block; font-size: 22px; margin-top: 4px; }
+  .foot .sub { font-size: 9px; color: #94a3b8; }
+  .foot .netcell { border-left: 2px solid; } .foot .netcell.up { background: #16a34a12; border-color: #16a34a; } .foot .netcell.down { background: #e11d4812; border-color: #e11d48; }
+  .foot .netcell b { font-size: 26px; font-weight: 700; }
+  .net { margin-top: 16px; padding: 16px 20px; border-radius: 10px; border: 2px solid; display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; font-family: 'Space Mono', monospace; }
+  .net.up { border-color: #16a34a; background: #16a34a0d; } .net.down { border-color: #e11d48; background: #e11d480d; }
+  .net .lbl { font-size: 11px; letter-spacing: 1.5px; color: #64748b; text-transform: uppercase; font-weight: 700; }
+  .net .val { font-size: 34px; font-weight: 700; line-height: 1.1; }
+  .net .calc { font-size: 12px; color: #64748b; }
+  @media (prefers-color-scheme: dark) {
+    table.rt thead th { background: #0d1420; border-color: #1e2a3a; } table.rt td { border-color: #0f1923; }
+    table.rt tbody tr:hover td { background: #111a2e !important; } .ink { color: #e2e8f0; }
+  }
+  @media (max-width: 900px) { .foot { grid-template-columns: repeat(2, 1fr); } .foot .netcell { grid-column: span 2; } }
+  input[type=number], input[type=time] { font: inherit; font-size: 14px; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 9px 10px; }
+  .grid { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
+  details { margin-top: 14px; } summary { cursor: pointer; color: var(--muted); font-weight: 600; }
+  .bar { height: 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 999px; overflow: hidden; margin-top: 14px; }
+  .bar div { height: 100%; width: 0; background: var(--accent); transition: width .3s; }
+  .res { font-weight: 700; } .res.SL { color: var(--pe); } .res.TARGET { color: var(--ok); } .res.EOD, .res.TIME_EXIT, .res.STAGNANT_EXIT { color: #b45309; }
+  .up { color: var(--ok); } .down { color: var(--pe); } .small { font-size: 12px; color: var(--muted); }
+  .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-top: 16px; }
+  .summary div { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+  .summary b { display: block; font-size: 18px; }
+  tr.notrade td { color: var(--muted); }
+  .why { white-space: normal; min-width: 260px; font-size: 12px; color: var(--muted); text-align: left !important; }
+</style>
+</head>
+<body>
+<main>
+  <nav><a href="/">Download</a><a href="/backtest">Backtest</a><a href="/vwap" class="on">VWAP / SMC</a></nav>
+  <h1>Strategy backtest &amp; data — VWAP 9:30 / SMC</h1>
+  <p class="sub">Runs your frontend app's VWAP 9:30 rules on Upstox data for every trading day in the range: which option it would enter, when, why, and how the trade ended. <b>Download ZIP</b> gives a summary plus each traded option's 1-minute CSV for that day — upload those on the <a href="/backtest">Backtest</a> tab to test them yourself.</p>
+
+  <div class="card">
+    <div class="grid">
+      <label style="grid-column: span 2">Rules (preset)
+        <select id="preset">
+          <option value="frontend_live" selected>VWAP 9:30 — frontend LIVE rules</option>
+          <option value="smc_live">SMC — frontend LIVE rules</option>
+        </select>
+      </label>
+      <label>From <input type="date" id="start" value="{{ start }}"></label>
+      <label>To <input type="date" id="end" value="{{ end }}"></label>
+      <label>Premium min ₹ <input type="number" id="min_premium" step="5"></label>
+      <label>Premium max ₹ <input type="number" id="max_premium" step="5"></label>
+      <label>Stop-loss % <input type="number" id="sl_pct" step="0.5"></label>
+      <label>Target % <input type="number" id="target_pct" step="1"></label>
+      <label>Entry from <input type="time" id="entry_start" step="60"></label>
+      <label>Lots <input type="number" id="lots" value="20" min="1" step="1"></label>
+      <label>Lot size <input type="number" id="lotsize" value="65" min="1" step="1"></label>
+    </div>
+    <p class="small" id="presetNote" style="margin:10px 0 0"></p>
+    <details>
+      <summary>More rules</summary>
+      <div class="grid" style="margin-top:12px">
+        <label>Candle minutes <input type="number" id="candle_minutes" min="1" step="1"></label>
+        <label>Breakeven at +% (0 = off) <input type="number" id="breakeven_pct" step="1"></label>
+        <label>Max trades / day <input type="number" id="max_trades" min="1" step="1"></label>
+        <label>Re-entry cooldown min <input type="number" id="cooldown_min" step="1"></label>
+        <label>Stagnant after hours <input type="number" id="stagnant_hours" step="0.5"></label>
+        <label>Stagnant if peak &lt; pts <input type="number" id="stagnant_points" step="1"></label>
+        <label>Time exit <input type="time" id="time_exit" step="60"></label>
+        <label>Chain strikes each side <input type="number" id="chain_strikes" step="1"></label>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px">
+        <label class="check"><input type="checkbox" id="live"> Live scan: check every minute, pick the strike by its live price, enter at the live price</label>
+        <label class="check"><input type="checkbox" id="strong_green"> Require a strong green candle (green, body bigger than both wicks)</label>
+        <label class="check"><input type="checkbox" id="atm_offsets_only"> Only ATM, ±50, ±100, ±150 strikes (the frontend backtest's rule)</label>
+        <label class="check"><input type="checkbox" id="align_checkpoints"> Round checkpoints to 5-min boundaries</label>
+        <label class="check"><input type="checkbox" id="include_entry_candle"> Check SL/target from the entry minute itself</label>
+        <label class="check"><input type="checkbox" id="time_exit_first"> 15:20 exit checked before SL/target</label>
+      </div>
+    </details>
+    <div class="row">
+      <span class="small" id="status"></span>
+      <span style="flex:1"></span>
+      <button class="btn ghost" id="pdf" type="button" disabled>⬇ Download PDF</button>
+      <button class="btn ghost" id="sumcsv" type="button" disabled>⬇ Summary CSV</button>
+      <button class="btn ghost" id="zip" type="button" disabled>⬇ Download ZIP (summary + option CSVs)</button>
+      <button class="btn primary" id="run" type="button">▶ Run</button>
+    </div>
+    <div class="bar" id="bar" hidden><div></div></div>
+    <div id="summary"></div>
+    <div class="tblwrap" id="tblwrap" hidden><table class="rt" id="tbl">
+      <thead><tr id="thead"></tr></thead>
+      <tbody id="rows"></tbody>
+    </table></div>
+    <p class="err" id="failed" hidden style="margin-top:12px"></p>
+    <details id="notradeBox" hidden style="margin-top:12px"><summary id="notradeSum"></summary><div class="small" id="notrade" style="margin-top:8px"></div></details>
+  </div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const fmt = n => (Math.round(n * 100) / 100).toFixed(2);
+let job = null, days = [], timer = null;
+
+const PRESETS = {{ presets | tojson }};
+const NUMS = ["min_premium", "max_premium", "sl_pct", "target_pct", "entry_start", "candle_minutes", "breakeven_pct", "max_trades", "cooldown_min", "stagnant_hours", "stagnant_points", "time_exit", "chain_strikes"];
+const BOOLS = ["live", "strong_green", "atm_offsets_only", "align_checkpoints", "include_entry_candle", "time_exit_first"];
+const NOTES = {
+  smc_live: "Your frontend app's SMC live scan (backend smcService runSMCScan + routes/smc.js): every minute 09:21–14:59, NIFTY 1-min candles scored for Liquidity Grab / FVG / Order Block / Breaker / SMT trap (≥2 needed, EMA-20 trend = bonus), strike nearest ATM priced ₹300–500 (then ₹225–875, ₹150–1000; ties → nearest ₹400), entry at the live price, SL 6%, T1 +12% (marker), T2 +24% (exit), SL to entry at +10%, 15:20 exit, max 2 trades (2nd only after a loss, 15 min after exit).",
+  frontend_live: "Your frontend app's live scan (backend doScan): every minute from 09:36, strike nearest ATM whose live price is ₹300–500, its last completed 5-min candle must close above VWAP and be a strong green candle, entry at the live price, SL 6% / target 30%, SL to entry at +10%, 15:20 exit, max 2 trades (2nd only after a loss, 15 min after exit).",
+};
+function applyPreset() {
+  const p = PRESETS[$("preset").value];
+  NUMS.forEach(k => { $(k).value = p[k]; });
+  BOOLS.forEach(k => { $(k).checked = !!p[k]; });
+  $("presetNote").textContent = NOTES[$("preset").value] || "";
+}
+$("preset").addEventListener("change", applyPreset);
+applyPreset();
+
+function settings() {
+  const s = { preset: $("preset").value, start: $("start").value, end: $("end").value };
+  NUMS.forEach(k => { s[k] = $(k).value; });
+  BOOLS.forEach(k => { s[k] = $(k).checked; });
+  return s;
+}
+
+const label = { SL: "🛑 SL", TARGET: "🎯 Target", TIME_EXIT: "⏱ 15:20 exit", STAGNANT_EXIT: "💤 Stagnant", EOD: "EOD" };
+
+// Same formula as the frontend app's VWAP/SMC tables (calcCharges).
+function charges(entry, exit, qty) {
+  const turnover = (entry + exit) * qty, brokerage = 40;
+  const stt = exit * qty * 0.000625, exchange = turnover * 0.00053, clearing = turnover * 0.00003;
+  const gst = (brokerage + exchange + clearing) * 0.18, sebi = turnover * 0.000001, stamp = entry * qty * 0.00003;
+  return brokerage + stt + exchange + clearing + gst + sebi + stamp;
+}
+const inr = n => (n < 0 ? "−" : "+") + "₹" + Math.abs(n).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const lakh = n => (n < 0 ? "−" : "+") + "₹" + (Math.abs(n) >= 100000 ? (Math.abs(n) / 100000).toFixed(2) + "L" : Math.abs(n).toLocaleString("en-IN", { maximumFractionDigits: 0 }));
+const ampm = t => { if (!t) return "—"; let [h, m] = t.split(":").map(Number); const ap = h >= 12 ? "PM" : "AM"; h = h % 12 || 12; return `${h}:${String(m).padStart(2, "0")} ${ap}`; };
+const STATUS = { TARGET: ["🎯", "TARGET", "up"], SL: ["🛑", "SL", "down"], TIME_EXIT: ["⏱", "TIME EXIT", ""], STAGNANT_EXIT: ["💤", "STAGNANT", ""], EOD: ["🕐", "EOD", ""] };
+
+const CONCEPT_COLOR = { LiqGrab: "#7c3aed", FVG: "#0284c7", OrdBlock: "#b45309", Breaker: "#ea580c", SMTrap: "#e11d48" };
+const MONTHS = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+const fmtExp = e => { const [, m, d] = e.split("-").map(Number); return `${d} ${MONTHS[m - 1]}`; };
+const fmtFull = n => Math.abs(n).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtLot = n => { const a = Math.abs(n), sg = n >= 0 ? "+" : "−"; return a >= 100000 ? `${sg}₹${(a / 100000).toFixed(2)}L` : a >= 1000 ? `${sg}₹${(a / 1000).toFixed(1)}K` : `${sg}₹${a.toFixed(0)}`; };
+const tag = (txt, clr, bg = clr + "18", border = clr + "30") => `<span class="tag" style="background:${bg};color:${clr};border:1px solid ${border}">${txt}</span>`;
+
+function render() {
+  const lots = parseFloat($("lots").value) || 0, lotSize = parseFloat($("lotsize").value) || 0, qty = lots * lotSize;
+  const sorted = [...days].sort((a, b) => a.date.localeCompare(b.date));
+  const trades = sorted.flatMap(d => d.trades).sort((a, b) => (a.date + a.entry_time).localeCompare(b.date + b.entry_time));
+  const failed = sorted.filter(d => !d.trades.length && /^error/.test(d.note || ""));
+  const noTrade = sorted.filter(d => !d.trades.length && !/^error/.test(d.note || ""));
+  const isSmc = trades.length ? trades[0].candle === "" : $("preset").value === "smc_live";
+  const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+  // VWAP = the frontend's VWAP 9:30 table (as on the live site); SMC = its SMC table (SIGNALS + CMP).
+  const heads = ["#", "DATE", "TIME", isSmc ? "SIGNALS" : "CONCEPTS", "STRIKE", "ENTRY", ...(isSmc ? ["CMP"] : []), "SL", "T1", "T2", "STATUS",
+                 `P&L · LOT (${lots}×${lotSize}=${qty})`, "CHARGES", "MAX PTS", "MAX PROFITS"];
+  $("thead").innerHTML = heads.map(h => `<th>${h}</th>`).join("");
+  let tgt = 0, sl = 0, eod = 0, pts = 0, chg = 0;
+  $("rows").innerHTML = trades.map((t, idx) => {
+    const dir = t.type === "CE" ? "#0284c7" : "#e11d48";
+    const exitP = t.entry + t.pnl, c = charges(t.entry, exitP, qty), lotPnl = t.pnl * qty;
+    pts += t.pnl; chg += c;
+    if (t.status === "TARGET") tgt++; else if (t.status === "SL") sl++; else eod++;
+    const win = t.status === "TARGET" || (t.status === "TIME_EXIT" && t.pnl >= 0);
+    const loss = t.status === "SL" || (t.status === "TIME_EXIT" && t.pnl < 0);
+    const bg = win ? (dark ? "#052e16" : "#f0fdf4") : loss ? (dark ? "#2d0505" : "#fff5f5") : t.status === "EOD" ? (dark ? "#1c1500" : "#fefce8")
+             : idx % 2 === 0 ? (dark ? "#0a0f16" : "#fff") : (dark ? "#0d1420" : "#fafafa");
+    const stClr = win ? "#16a34a" : loss ? "#e11d48" : t.status === "EOD" ? "#b45309" : "#0284c7";
+    const stIco = { TARGET: "🎯", SL: "🛑", EOD: "🕐", TIME_EXIT: "⏱", STAGNANT_EXIT: "💤" }[t.status] || "⏳";
+    const stLbl = { TIME_EXIT: "TIME EXIT", STAGNANT_EXIT: "STAGNANT" }[t.status] || t.status;
+    const t1 = isSmc ? +(t.entry * 1.12).toFixed(2) : t.target;  // VWAP has one target: T1 = T2
+    const t1Hit = t.status === "TARGET" || !!t.t1_time, t2Hit = t.status === "TARGET";
+    const slShown = t.sl_to_breakeven ? t.entry : t.sl;
+    const pc = t.pnl >= 0 ? "c-up" : "c-down";
+    const hit = ok => tag(ok, ok.endsWith("✓") ? "#15803d" : (dark ? "#4a6080" : "#94a3b8"), ok.endsWith("✓") ? (dark ? "#052e16" : "#dcfce7") : (dark ? "#0f1923" : "#f1f5f9"), "transparent");
+    const signals = isSmc
+      ? tag(`${t.type} ${t.score}/5`, dir) + (t.concepts || []).map(x => tag(x, CONCEPT_COLOR[x] || "#64748b", (CONCEPT_COLOR[x] || "#64748b") + "14", "transparent")).join("") + (t.trend_ok ? `<span class="s7 c-up">+EMA✓</span>` : "")
+      : tag(t.type, dir) + tag(`VWAP ₹${fmt(t.vwap)}`, "#64748b", dark ? "#1e293b" : "#f1f5f9", "transparent");
+    const strike = isSmc
+      ? `<div class="v10" style="color:${dir}">NIFTY ${fmtExp(t.expiry)} ${fmtStrike(t.strike)} ${t.type}</div><div class="s8 muted">spot ${t.spot ? t.spot.toFixed(0) : "—"}</div>`
+      : `<div class="v12" style="color:${dir}">${fmtStrike(t.strike)} ${t.type}</div><div class="s8 muted">${fmtExp(t.expiry)} · spot ${t.spot ? t.spot.toFixed(0) : "—"}</div>`;
+    return `<tr>
+      <td style="background:${bg}" class="s8 muted">${idx + 1}</td>
+      <td style="background:${bg}"><div class="v10 ink">${t.date}</div></td>
+      <td style="background:${bg}"><div class="v10 ink">${ampm(t.entry_time)}</div><div class="s8 muted">→${ampm(t.exit_time)}</div></td>
+      <td style="background:${bg};white-space:normal;max-width:320px">${signals}</td>
+      <td style="background:${bg}">${strike}</td>
+      <td style="background:${bg}"><span class="v12" style="color:${dir}">₹${fmt(t.entry)}</span></td>
+      ${isSmc ? `<td style="background:${bg}"><span class="v11 c-slate">₹${fmt(exitP)}</span></td>` : ""}
+      <td style="background:${bg}"><span class="v11 c-down">₹${fmt(slShown)}</span></td>
+      <td style="background:${bg}"><span class="v11 c-amber">₹${fmt(t1)}</span></td>
+      <td style="background:${bg}"><span class="v11 c-up">₹${fmt(t.target)}</span></td>
+      <td style="background:${bg}"><div class="s8" style="font-weight:700;color:${stClr}">${stIco} ${stLbl}</div><div>${hit(t1Hit ? "T1✓" : "T1✗")}${hit(t2Hit ? "T2✓" : "T2✗")}</div><div class="s8" style="font-weight:700;color:${stClr}">${fmtLot(lotPnl)}</div></td>
+      <td style="background:${bg}"><div class="v12 ${pc}">${t.pnl >= 0 ? "+" : "−"}₹${fmtFull(lotPnl)}</div><div class="s8 ${pc}" style="font-weight:700">₹${Math.abs(t.pnl).toFixed(2)} × ${qty}</div><div class="s8 ${pc}">${t.pnl >= 0 ? "+" : ""}${fmt(t.pnl_pct)}%</div>${t.pnl !== 0 ? `<div class="s8 c-slate">exit ₹${fmt(exitP)}</div>` : ""}</td>
+      <td style="background:${bg}"><div class="v11 c-amber">−₹${fmtFull(c)}</div><div class="s7 muted">incl. STT+GST</div></td>
+      <td style="background:${bg}">${t.peak > 0 ? `<div class="v11 c-purple">+${t.peak.toFixed(2)}</div><div class="s8 c-purple" style="font-weight:700">+${(t.peak / t.entry * 100).toFixed(1)}%</div>` : `<span class="muted">—</span>`}</td>
+      <td style="background:${bg}">${t.peak > 0 ? `<div class="v12 c-purple">+₹${fmtFull(t.peak * qty)}</div><div class="s8 c-purple" style="font-weight:700">${t.peak.toFixed(2)} × ${qty}</div><div class="s8 c-purple" style="font-weight:700">+${(t.peak / t.entry * 100).toFixed(1)}%</div>` : `<span class="muted">—</span>`}</td>
+    </tr>`;
+  }).join("");
+  $("tblwrap").hidden = !trades.length;
+  const closed = tgt + sl, lotTotal = pts * qty;
+  const net = lotTotal - chg, nc = net >= 0 ? "c-up" : "c-down";
+  $("summary").innerHTML = trades.length ? `<div class="foot">
+    <div><span class="lbl">Total trades</span><b class="ink">${trades.length}</b></div>
+    <div><span class="lbl">Target hit</span><b class="c-up">${tgt}</b></div>
+    <div><span class="lbl">SL hit</span><b class="c-down">${sl}</b></div>
+    <div><span class="lbl">EOD / Open</span><b class="c-amber">${eod}</b></div>
+    <div><span class="lbl">Win rate</span><b class="${closed && tgt / closed >= 0.5 ? "c-up" : "c-down"}">${closed ? (tgt / closed * 100).toFixed(1) + "%" : "—"}</b></div>
+    <div><span class="lbl">Premium P&amp;L</span><b class="${pts >= 0 ? "c-up" : "c-down"}">${pts >= 0 ? "+" : "−"}${Math.abs(pts).toFixed(2)} ₹</b></div>
+    <div><span class="lbl">Total charges</span><b class="c-amber">−₹${fmtFull(chg)}</b><span class="sub">brokerage · STT · GST · NSE</span></div>
+    <div><span class="lbl">Lot P&amp;L (${qty}×)</span><b class="${lotTotal >= 0 ? "c-up" : "c-down"}">${lotTotal >= 0 ? "+" : "−"}₹${fmtFull(lotTotal)}</b><span class="sub">before charges</span></div>
+    <div class="netcell ${net >= 0 ? "up" : "down"}"><span class="lbl">Net P&amp;L · after charges</span><b class="${nc}">${net >= 0 ? "+" : "−"}₹${fmtFull(net)}</b><span class="sub">Lot P&amp;L − charges</span></div>
+  </div>` : "";
+  $("failed").hidden = !failed.length;
+  $("failed").innerHTML = failed.length ? `⚠ ${failed.length} day${failed.length === 1 ? "" : "s"} could not be loaded from Upstox — press Run again to retry (already-loaded days come from the cache, so it's quick):<br>${failed.map(d => `${d.date}: ${d.note.replace(/^error: /, "")}`).join("<br>")}` : "";
+  $("notradeBox").hidden = !noTrade.length;
+  $("notradeSum").textContent = `${noTrade.length} day${noTrade.length === 1 ? "" : "s"} with no trade (of ${sorted.length})`;
+  $("notrade").innerHTML = noTrade.map(d => `${d.date}: ${d.note}`).join("<br>");
+}
+const fmtStrike = k => Number(k).toFixed(0);
+
+async function poll() {
+  const r = await fetch(`/api/vwap/job/${job}?since=${days.length}`).then(r => r.json()).catch(() => null);
+  if (!r) return;
+  if (r.detail) { $("status").textContent = r.detail; clearInterval(timer); $("run").disabled = false; return; }
+  days = r.status === "running" ? days.concat(r.days) : r.days;
+  const pct = r.total ? r.done / r.total * 100 : 0;
+  $("bar").firstElementChild.style.width = `${pct}%`;
+  $("status").textContent = r.status === "running"
+    ? `Running… ${r.done}/${r.total ?? "?"} days${r.current ? " · " + r.current : ""}`
+    : r.status === "done" ? `Done — ${r.total} trading days` : `Error: ${r.error}`;
+  if (r.status === "done" && r.missing && r.missing.length)
+    $("status").textContent += ` · no Upstox data for ${r.missing.join(", ")} (holiday, or not published by Upstox yet — usually appears after the session)`;
+  render();
+  if (r.status !== "running") {
+    clearInterval(timer); timer = null;
+    $("run").disabled = false;
+    $("zip").disabled = $("sumcsv").disabled = $("pdf").disabled = r.status !== "done";
+  }
+}
+
+$("run").addEventListener("click", async () => {
+  $("run").disabled = true; $("zip").disabled = $("sumcsv").disabled = $("pdf").disabled = true;
+  days = []; render(); $("bar").hidden = false; $("bar").firstElementChild.style.width = "0";
+  $("status").textContent = "Starting…";
+  const r = await fetch("/api/vwap/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(settings()) })
+    .then(r => r.json()).catch(e => ({ detail: e.message }));
+  if (!r.id) { $("status").textContent = r.detail || "Failed to start"; $("run").disabled = false; return; }
+  job = r.id;
+  timer = setInterval(poll, 1500); poll();
+});
+const qtyNow = () => (parseInt($("lots").value) || 1) * (parseInt($("lotsize").value) || 65);
+$("zip").addEventListener("click", () => { window.location = `/api/vwap/job/${job}/zip?qty=${qtyNow()}`; });
+$("pdf").addEventListener("click", () => { window.location = `/api/vwap/job/${job}/report.pdf?lots=${parseInt($("lots").value) || 20}&lot_size=${parseInt($("lotsize").value) || 65}`; });
+$("sumcsv").addEventListener("click", () => { window.location = `/api/vwap/job/${job}/summary.csv?qty=${qtyNow()}`; });
+["lots", "lotsize"].forEach(id => $(id).addEventListener("input", render));
+</script>
+</body>
+</html>

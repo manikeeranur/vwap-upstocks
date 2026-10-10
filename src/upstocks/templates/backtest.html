@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>upstocks — backtest</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+{% include "_style.html" %}
+<style>
+  main { max-width: 1280px; }
+  .drop { border: 2px dashed var(--border); border-radius: 12px; padding: 28px; text-align: center; color: var(--muted); cursor: pointer; }
+  .drop.over { border-color: var(--accent); color: var(--accent); }
+  .settings { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end; margin-top: 16px; }
+  .settings label { min-width: 120px; }
+  td input { width: 100%; min-width: 92px; padding: 6px 8px !important; }
+  td select { padding: 6px 8px; }
+  td, th { vertical-align: middle; }
+  .res { font-weight: 700; } .res.SL { color: var(--pe); } .res.TARGET { color: var(--ok); } .res.OPEN { color: #b45309; }
+  .up { color: var(--ok); } .down { color: var(--pe); }
+  .small { font-size: 12px; color: var(--muted); }
+  .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin: 16px 0 0; }
+  .summary div { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+  .summary b { display: block; font-size: 18px; }
+  .x { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 16px; }
+</style>
+</head>
+<body>
+<main>
+  <nav><a href="/">Download</a><a href="/backtest" class="on">Backtest</a><a href="/vwap">VWAP / SMC</a></nav>
+  <h1>Backtest — SL / target check</h1>
+  <p class="sub">Upload the CSV files you downloaded (one option each). For every file, enter the entry time and entry price; each 1-minute candle from the entry minute on is checked against the stop-loss and target. Files are read in your browser — nothing is uploaded.</p>
+
+  <div class="card">
+    <label class="drop" id="drop">
+      <input type="file" id="files" accept=".csv,text/csv" multiple hidden>
+      <b>Click to choose CSV files</b> or drop them here — several at once
+    </label>
+    <div class="settings">
+      <label>Stop-loss % <input type="number" id="slPct" value="6" min="0.1" step="0.1"></label>
+      <label>Target % <input type="number" id="tgtPct" value="30" min="0.1" step="0.1"></label>
+      <label>Qty (₹ P&amp;L) <input type="number" id="qty" value="65" min="1" step="1"></label>
+      <label>Same entry time for all <input type="time" id="allTime" step="60"></label>
+      <button class="btn ghost" id="applyTime" type="button">Apply time</button>
+      <span style="flex:1"></span>
+      <button class="btn ghost" id="clear" type="button">Clear</button>
+      <button class="btn primary" id="export" type="button" disabled>⬇ Export results</button>
+    </div>
+    <div id="summary"></div>
+    <div class="scroll"><table id="tbl" hidden>
+      <thead><tr>
+        <th>File / option</th><th>Expiry</th><th>Entry date</th><th>Entry time</th><th>Entry price</th>
+        <th>SL</th><th>Target</th><th>Result</th><th>Exit time</th><th>Exit</th><th>P&amp;L pts</th><th>P&amp;L %</th><th>₹ P&amp;L</th><th>Peak</th><th></th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table></div>
+    <p class="small" id="note" hidden>The entry minute's own candle is included (the price can hit SL/target within that minute). If one candle touches both SL and target, SL is assumed first — a candle doesn't say which came first. "No hit" means neither level was reached before the file's last candle; it's marked at that last close.</p>
+  </div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const MON = { JAN: "01", FEB: "02", MAR: "03", APR: "04", MAY: "05", JUN: "06", JUL: "07", AUG: "08", SEP: "09", OCT: "10", NOV: "11", DEC: "12" };
+let files = []; // { id, name, meta, candles:[{t:"YYYY-MM-DD HH:MM", o,h,l,c}], dates:[], entryDate, entryTime, entryPrice, result }
+
+// ─── Parsing ──────────────────────────────────────────────────────────────────
+// File name from the Download page: NIFTY_06OCT26_22500_CE_1m_….csv
+function metaFromName(name) {
+  const m = /NIFTY[_ -]?(\d{2})([A-Z]{3})(\d{2})[_ -](\d+(?:\.\d+)?)[_ -](CE|PE)/i.exec(name);
+  if (!m) return { expiry: "", strike: "", type: "", label: name.replace(/\.csv$/i, "") };
+  const expiry = `20${m[3]}-${MON[m[2].toUpperCase()] || "??"}-${m[1]}`;
+  return { expiry, strike: m[4], type: m[5].toUpperCase(), label: `NIFTY ${m[4]} ${m[5].toUpperCase()}` };
+}
+
+// "2026-09-30" | "30-09-2026" | "30/09/2026" → "2026-09-30"
+function normDate(s) {
+  s = s.trim();
+  let m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s); if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  m = /^(\d{2})[-/](\d{2})[-/](\d{4})/.exec(s); if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+  return null;
+}
+
+// Accepts this app's CSV (date,time,open,high,low,close,…) and also files with
+// one combined date-time column ("30-09-2026 09:15" or ISO timestamps).
+function parseCsv(text) {
+  const lines = text.split(/\r?\n/).filter(l => l.trim());
+  if (lines.length < 2) throw new Error("empty file");
+  const head = lines[0].split(",").map(h => h.trim().toLowerCase());
+  const col = (...names) => head.findIndex(h => names.includes(h));
+  const iDate = col("date", "datetime", "timestamp", "time stamp"), iTime = col("time");
+  const iO = col("open"), iH = col("high"), iL = col("low"), iC = col("close");
+  if (iDate < 0 || [iO, iH, iL, iC].some(i => i < 0)) throw new Error("needs date, open, high, low, close columns");
+  const out = [];
+  for (const line of lines.slice(1)) {
+    const f = line.split(",");
+    const raw = f[iDate] || "";
+    const d = normDate(raw); if (!d) continue;
+    let t = iTime >= 0 && iTime !== iDate ? (f[iTime] || "").trim().slice(0, 5) : (/(\d{2}:\d{2})/.exec(raw.slice(10)) || [])[1];
+    if (!t) t = "00:00";
+    out.push({ t: `${d} ${t}`, o: +f[iO], h: +f[iH], l: +f[iL], c: +f[iC] });
+  }
+  if (!out.length) throw new Error("no candle rows found");
+  out.sort((a, b) => (a.t < b.t ? -1 : a.t > b.t ? 1 : 0));
+  return out;
+}
+
+async function addFiles(list) {
+  for (const file of list) {
+    const rec = { id: crypto.randomUUID(), name: file.name, meta: metaFromName(file.name), candles: [], dates: [], entryDate: "", entryTime: "", entryPrice: "", error: null };
+    try {
+      rec.candles = parseCsv(await file.text());
+      rec.dates = [...new Set(rec.candles.map(c => c.t.slice(0, 10)))];
+      rec.entryDate = rec.dates[0];
+    } catch (e) { rec.error = e.message; }
+    files.push(rec);
+  }
+  render();
+}
+
+// ─── Backtest ─────────────────────────────────────────────────────────────────
+const fmt = n => (Math.round(n * 100) / 100).toFixed(2);
+
+function evaluate(rec) {
+  const price = parseFloat(rec.entryPrice);
+  if (rec.error || !rec.entryTime || !(price > 0)) return null;
+  const slPct = parseFloat($("slPct").value) || 6, tgtPct = parseFloat($("tgtPct").value) || 30;
+  const sl = price * (1 - slPct / 100), tgt = price * (1 + tgtPct / 100);
+  const start = `${rec.entryDate} ${rec.entryTime}`;
+  const idx = rec.candles.findIndex(c => c.t >= start);
+  if (idx < 0) return { sl, tgt, error: "no candles at/after entry" };
+  let peak = price, trough = price;
+  for (let i = idx; i < rec.candles.length; i++) {
+    const c = rec.candles[i];
+    peak = Math.max(peak, c.h); trough = Math.min(trough, c.l);
+    if (c.l <= sl) return { sl, tgt, result: "SL", exitT: c.t, exit: sl, both: c.h >= tgt, peak, trough };
+    if (c.h >= tgt) return { sl, tgt, result: "TARGET", exitT: c.t, exit: tgt, peak, trough };
+  }
+  const last = rec.candles[rec.candles.length - 1];
+  return { sl, tgt, result: "OPEN", exitT: last.t, exit: last.c, peak, trough };
+}
+
+// ─── Rendering ────────────────────────────────────────────────────────────────
+function render() {
+  $("tbl").hidden = $("note").hidden = !files.length;
+  const qty = parseFloat($("qty").value) || 0;
+  let nSL = 0, nT = 0, nO = 0, pts = 0, rupees = 0, done = 0;
+  $("rows").innerHTML = files.map(f => {
+    const r = evaluate(f); f.result = r;
+    const label = `<b>${f.meta.label}</b><div class="small">${f.name}</div>${f.error ? `<div class="small down">${f.error}</div>` : ""}`;
+    const dates = f.dates.length > 1
+      ? `<select data-id="${f.id}" data-k="entryDate">${f.dates.map(d => `<option${d === f.entryDate ? " selected" : ""}>${d}</option>`).join("")}</select>`
+      : (f.entryDate || "—");
+    const hint = (() => { // the entry minute's open, as a hint for the price box
+      if (!f.entryTime) return "price";
+      const c = f.candles.find(c => c.t >= `${f.entryDate} ${f.entryTime}`);
+      return c ? `open ${c.o}` : "price";
+    })();
+    let cells = "<td></td>".repeat(8);
+    if (r && r.error) cells = `<td>${fmt(r.sl)}</td><td>${fmt(r.tgt)}</td><td colspan="6" class="small down">${r.error}</td>`;
+    else if (r) {
+      const p = r.exit - parseFloat(f.entryPrice), pct = p / parseFloat(f.entryPrice) * 100;
+      done++; pts += p; rupees += p * qty;
+      if (r.result === "SL") nSL++; else if (r.result === "TARGET") nT++; else nO++;
+      const cls = p >= 0 ? "up" : "down";
+      const peakPct = (r.peak - parseFloat(f.entryPrice)) / parseFloat(f.entryPrice) * 100;
+      cells = `<td>${fmt(r.sl)}</td><td>${fmt(r.tgt)}</td>
+        <td class="res ${r.result}">${r.result === "SL" ? "🛑 SL hit" : r.result === "TARGET" ? "🎯 Target hit" : "No hit"}${r.both ? '<div class="small">SL & target same candle</div>' : ""}</td>
+        <td>${r.exitT.slice(5)}</td><td>${fmt(r.exit)}</td>
+        <td class="${cls}">${p >= 0 ? "+" : ""}${fmt(p)}</td><td class="${cls}">${pct >= 0 ? "+" : ""}${fmt(pct)}%</td>
+        <td class="${cls}">${p >= 0 ? "+" : "−"}₹${Math.abs(p * qty).toLocaleString("en-IN", { maximumFractionDigits: 0 })}</td>
+        <td class="small">${fmt(r.peak)} (+${fmt(peakPct)}%)</td>`;
+    }
+    return `<tr>
+      <td>${label}</td><td>${f.meta.expiry ? `<span title="from file name">${f.meta.expiry}</span>` : "—"}</td>
+      <td>${dates}</td>
+      <td><input type="time" step="60" data-id="${f.id}" data-k="entryTime" value="${f.entryTime}"></td>
+      <td><input type="number" step="0.05" min="0" data-id="${f.id}" data-k="entryPrice" value="${f.entryPrice}" placeholder="${hint}"></td>
+      ${cells}
+      <td><button class="x" data-del="${f.id}" title="Remove">×</button></td></tr>`;
+  }).join("");
+  $("export").disabled = !done;
+  $("summary").innerHTML = done ? `<div class="summary">
+    <div><span class="small">Tested</span><b>${done} / ${files.length}</b></div>
+    <div><span class="small">🎯 Target hit</span><b class="up">${nT}</b></div>
+    <div><span class="small">🛑 SL hit</span><b class="down">${nSL}</b></div>
+    <div><span class="small">No hit</span><b>${nO}</b></div>
+    <div><span class="small">Win rate</span><b>${nT + nSL ? fmt(nT / (nT + nSL) * 100) + "%" : "—"}</b></div>
+    <div><span class="small">Total pts</span><b class="${pts >= 0 ? "up" : "down"}">${pts >= 0 ? "+" : ""}${fmt(pts)}</b></div>
+    <div><span class="small">Total ₹ (qty ${qty})</span><b class="${rupees >= 0 ? "up" : "down"}">${rupees >= 0 ? "+" : "−"}₹${Math.abs(rupees).toLocaleString("en-IN", { maximumFractionDigits: 0 })}</b></div>
+  </div>` : "";
+}
+
+// Inputs keep focus while typing: update the record, re-render on change/blur.
+$("rows").addEventListener("input", e => {
+  const el = e.target, f = files.find(x => x.id === el.dataset.id); if (!f) return;
+  f[el.dataset.k] = el.value;
+});
+$("rows").addEventListener("change", () => render());
+$("rows").addEventListener("click", e => {
+  const id = e.target.dataset.del; if (!id) return;
+  files = files.filter(f => f.id !== id); render();
+});
+["slPct", "tgtPct", "qty"].forEach(id => $(id).addEventListener("input", render));
+$("applyTime").addEventListener("click", () => { const t = $("allTime").value; if (!t) return; files.forEach(f => f.entryTime = t); render(); });
+$("clear").addEventListener("click", () => { files = []; $("files").value = ""; render(); });
+
+$("files").addEventListener("change", e => { addFiles([...e.target.files]); e.target.value = ""; });
+const drop = $("drop");
+drop.addEventListener("dragover", e => { e.preventDefault(); drop.classList.add("over"); });
+drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+drop.addEventListener("drop", e => { e.preventDefault(); drop.classList.remove("over"); addFiles([...e.dataTransfer.files].filter(f => /\.csv$/i.test(f.name))); });
+
+$("export").addEventListener("click", () => {
+  const qty = parseFloat($("qty").value) || 0;
+  const head = ["file", "option", "expiry", "entry_date", "entry_time", "entry_price", "sl", "target", "result", "exit_time", "exit_price", "pnl_pts", "pnl_pct", "pnl_rupees", "peak"];
+  const rows = files.filter(f => f.result && !f.result.error).map(f => {
+    const r = f.result, e = parseFloat(f.entryPrice), p = r.exit - e;
+    return [f.name, f.meta.label, f.meta.expiry, f.entryDate, f.entryTime, e, fmt(r.sl), fmt(r.tgt), r.result, r.exitT, fmt(r.exit), fmt(p), fmt(p / e * 100), fmt(p * qty), fmt(r.peak)];
+  });
+  const csv = [head, ...rows].map(r => r.map(v => /[",]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : v).join(",")).join("\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+  a.download = `backtest_results_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+});
+render();
+</script>
+</body>
+</html>
