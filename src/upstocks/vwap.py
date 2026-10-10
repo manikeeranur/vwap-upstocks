@@ -66,6 +66,9 @@ class Settings:
     live: bool = False
     chain_strikes: int = 15
     time_exit_first: bool = False
+    # Live SL check: True = on the candle LOW (VWAP's exchange SL-M order fires
+    # inside the minute), False = once a minute on the close (SMC's cron).
+    sl_on_low: bool = True
     # Which engine runs the day: "vwap" (this module) or "smc" (smc.py).
     strategy: str = "vwap"
     last_entry: str = "15:29"          # SMC: no new entries from 15:00 → 14:59
@@ -74,13 +77,20 @@ class Settings:
 
 PRESETS = {
     # frontend app LIVE behaviour (backend routes/vwap930.js doScan → runVWAP930Scan)
+    # Breakeven 15%: reproduces the October live trades (6 Oct went to TARGET
+    # with a +13.5% high; at 10% it would have been stopped at entry). The live
+    # Account-tab setting reads 10% now — saved 9 Oct 18:11, after those trades.
     "frontend_live": {"live": True, "atm_offsets_only": False, "include_entry_candle": True,
-                      "breakeven_pct": 10, "time_exit_first": True},
+                      "breakeven_pct": 15, "time_exit_first": True},
     # frontend app SMC live (backend services/smcService.js runSMCScan + routes/smc.js doScan)
+    # Premium band ₹300–400 (sweet spot ₹350): reproduces the live SMC strikes
+    # exactly up to 7 Oct; after that the live Account-tab band was set to
+    # ₹200–300 — type that in to match those days.
     "smc_live": {"strategy": "smc", "live": True, "entry_start": "09:21", "last_entry": "14:59",
-                 "sl_pct": 6, "target_pct": 24, "target1_pct": 12, "breakeven_pct": 10,
+                 "min_premium": 300, "max_premium": 400,
+                 "sl_pct": 6, "target_pct": 24, "target1_pct": 12, "breakeven_pct": 15,
                  "include_entry_candle": True, "time_exit_first": True, "strong_green": False,
-                 "atm_offsets_only": False, "stagnant_hours": 0},
+                 "atm_offsets_only": False, "stagnant_hours": 0, "sl_on_low": False},
 }
 KITE_OFFSETS = [0, -50, 50, -100, 100, -150, 150]
 
@@ -192,6 +202,43 @@ class DayResult:
     note: str = ""
 
 
+def resolve_live(bars: list[Bar], entry_i: int, entry: float, mark: str, s: Settings,
+                 sl0: float, tgt: float, t1: float | None = None):
+    """Exit the way the live app does with auto-trade on (verified on the
+    October live trades):
+    - SL is a real SL-M order resting at the exchange, so it fires on the first
+      touch INSIDE a minute — the candle's LOW (1 Oct 09:45, 8 Oct 10:13).
+    - Breakeven, target, 15:20 and stagnant are only checked by the cron once a
+      minute on the LTP = the previous candle's CLOSE (6 Oct: a high of 352.50
+      vs the 352.11 breakeven level never moved the SL, and the target was
+      taken at the 12:44 close, not on the 12:38 wick). Breakeven then moves
+      the SL-M order to entry for the following minutes.
+    Returns (status, exit_price, exit_minute, peak, moved, t1_time)."""
+    sl, moved, peak, t1_time = sl0, False, 0.0, None
+    cutoff = _mins(mark) + s.stagnant_hours * 60
+    for b in bars[entry_i:]:
+        t, o, h, l, c, _v = b
+        # exchange SL-M during this minute (a gap below SL fills at the open)
+        if s.sl_on_low and l <= sl:
+            return "SL", min(sl, o), t, peak, moved, t1_time
+        now = _add(t, 1)              # the cron minute that sees this candle's close
+        if now >= s.time_exit:
+            return "TIME_EXIT", c, now, peak, moved, t1_time
+        peak = max(peak, _round2(c - entry))
+        if s.breakeven_pct > 0 and not moved and peak > 0 and peak / entry * 100 >= s.breakeven_pct:
+            sl, moved = entry, True
+        if t1 is not None and t1_time is None and c >= t1:
+            t1_time = now
+        if not s.sl_on_low and c <= sl:   # SMC: cron sees the close at/below SL
+            return "SL", c, now, peak, moved, t1_time
+        if c >= tgt:
+            return "TARGET", c, now, peak, moved, t1_time
+        if s.stagnant_hours > 0 and _mins(now) >= cutoff and peak < s.stagnant_points:
+            return "STAGNANT_EXIT", c, now, peak, moved, t1_time
+    last = bars[-1] if bars else None
+    return "EOD", (last[4] if last else entry), (last[0] if last else mark), peak, moved, t1_time
+
+
 async def day_rows(instrument_key: str, day: date, expiry: str, expired: bool) -> list[list]:
     """One day's 1-min candles for an option, fetched as part of ONE span call
     per contract (expiry−9 days → expiry): the engines visit a weekly contract
@@ -257,7 +304,12 @@ async def run_day(day: date, s: Settings, spot_bars: list[Bar]) -> DayResult:
             ltp = prev[-1][4]
             if not (s.min_premium <= ltp <= s.max_premium):
                 continue
-            done = [i for i, b in enumerate(sr.nm) if _add(b[0], 1) <= mark]
+            # Live reads Kite's 1-min history at hh:mm:00 and drops the last
+            # candle as "forming" — but the newest one returned then is the
+            # (complete) m-1 candle, so only candles up to m-2 are used. That's
+            # why live entries land at 09:36, 09:41, 09:46 … (verified against
+            # the live alerts in Mongo).
+            done = [i for i, b in enumerate(sr.nm) if _add(b[0], 2) <= mark]
             if not done:
                 return None  # in-band leg has no completed candle yet → this side can't qualify
             idx = done[-1]
@@ -351,6 +403,9 @@ async def run_day(day: date, s: Settings, spot_bars: list[Bar]) -> DayResult:
         cutoff = _mins(mark) + s.stagnant_hours * 60
         start_i = pick["entry_idx"] if s.include_entry_candle else pick["entry_idx"] + 1
         later = sr.bars[start_i:]
+        if s.live:
+            status, exit_p, exit_t, peak, moved, _t1 = resolve_live(sr.bars, pick["entry_idx"], entry, mark, s, sl0, tgt)
+            later = []
         for b in later:
             t, _o, h, l, cl, _v = b
             if s.time_exit_first and t >= s.time_exit:  # live: 15:20 is checked before price
@@ -395,7 +450,9 @@ async def run_day(day: date, s: Settings, spot_bars: list[Bar]) -> DayResult:
             break
         tr = resolve(*picked)
         res.trades.append(tr)
-        if not tr.pnl < 0:
+        # Live re-enters only after a loss; an SL hit at breakeven fills a bit
+        # below entry live (e.g. −6.50, −1.35), so it counts as a loss too.
+        if not (tr.pnl < 0 or tr.status == "SL"):
             break
         after = _mins(tr.exit_time or tr.entry_time) + s.cooldown_min
     if not res.trades:

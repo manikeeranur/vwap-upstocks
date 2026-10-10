@@ -26,7 +26,7 @@ from datetime import date
 from functools import cmp_to_key
 
 from . import upstox
-from .vwap import STEP, Bar, DayResult, Settings, Trade, _add, _market, _mins, _nearest_expiry, _round2, day_rows
+from .vwap import STEP, Bar, DayResult, Settings, Trade, _add, _market, _mins, _nearest_expiry, _round2, day_rows, resolve_live
 
 # Bar = (hhmm, open, high, low, close, volume)
 O, H, L, C = 1, 2, 3, 4
@@ -196,7 +196,12 @@ async def run_day(day: date, s: Settings, spot_bars: list[Bar]) -> DayResult:
         t1 = _round2(entry * (1 + s.target1_pct / 100)) if s.target1_pct else None
         sl, moved, peak, t1_time = sl0, False, 0.0, None
         status, exit_p, exit_t = "EOD", entry, None
-        later = [b for b in bars_cache[c["instrument_key"]] if b[0] >= mark]
+        all_bars = bars_cache[c["instrument_key"]]
+        later = [b for b in all_bars if b[0] >= mark]
+        if s.live:  # live: once-a-minute LTP checks, like updateAlertPnL on the cron (see vwap.resolve_live)
+            ei = next((i for i, b in enumerate(all_bars) if b[0] >= mark), len(all_bars))
+            status, exit_p, exit_t, peak, moved, t1_time = resolve_live(all_bars, ei, entry, mark, s, sl0, tgt, t1)
+            later = []
         for t, _o, h, l, cl, _v in later:
             if s.time_exit_first and t >= s.time_exit:
                 status, exit_p, exit_t = "TIME_EXIT", cl, t
@@ -231,7 +236,7 @@ async def run_day(day: date, s: Settings, spot_bars: list[Bar]) -> DayResult:
         if after is not None and minute <= after:
             continue
         mark = f"{minute // 60:02d}:{minute % 60:02d}"
-        cs = [b for b in spot_bars if b[0] < mark]  # completed index candles
+        cs = [b for b in spot_bars if _add(b[0], 2) <= mark]  # what live sees: up to m-2 (see vwap.py)
         if len(cs) < 10:
             continue
         spot = cs[-1][C]
@@ -252,7 +257,7 @@ async def run_day(day: date, s: Settings, spot_bars: list[Bar]) -> DayResult:
         tr = resolve(c, direction, ltp, mark, why, spot, side)
         res.trades.append(tr)
         recent.append((direction, c["strike_price"], minute))
-        if not tr.pnl < 0:
+        if not (tr.pnl < 0 or tr.status == "SL"):  # SL at breakeven fills below entry live → a loss
             break
         after = _mins(tr.exit_time or mark) + s.cooldown_min
     if not res.trades:
