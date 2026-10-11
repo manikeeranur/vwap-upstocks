@@ -1,0 +1,21 @@
+{
+ "lot_size": 65,
+ "config": {
+  "frontend_live": {
+   "on": false,
+   "lots": 1
+  },
+  "smc_live": {
+   "on": true,
+   "lots": 1
+  },
+  "ema25_vwap": {
+   "on": true,
+   "lots": 1
+  },
+  "ema_pullback": {
+   "on": true,
+   "lots": 1
+  }
+ }
+}

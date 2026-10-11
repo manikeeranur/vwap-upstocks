@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>upstocks — paper &amp; live trade</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+{% include "_style.html" %}
+<style>
+  main { max-width: none; padding: 20px 24px 48px; }
+  .bar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 14px; }
+  .bar label { min-width: 120px; }
+  .pill { font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 999px; }
+  .pill.open { background: #16a34a22; color: var(--ok); } .pill.closed { background: #94a3b822; color: var(--muted); }
+  .strat { margin-top: 16px; }
+  .shead { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
+  .shead h2 { font-size: 15px; margin: 0; }
+  .shead .sum { color: var(--muted); font-size: 13px; }
+  .shead .sum b { color: var(--text); }
+  .lots { width: 70px; padding: 5px 8px !important; }
+  .up { color: var(--ok); } .down { color: var(--pe); } .muted { color: var(--muted); }
+  .st { font-weight: 700; } .st.OPEN { color: var(--accent); } .st.SL { color: var(--pe); } .st.TARGET { color: var(--ok); }
+  .st.OPEN::before { content: "● "; animation: blink 1.4s infinite; }
+  @keyframes blink { 50% { opacity: .2; } }
+  .empty { color: var(--muted); font-size: 13px; padding: 10px 0 0; }
+  .note { color: var(--muted); font-size: 13px; margin-top: 10px; }
+  .livechk { color: var(--pe) !important; font-weight: 700 !important; }
+  /* Toggle switches: the real checkbox is hidden, the .sw span next to it is drawn */
+  .tog { gap: 8px; cursor: pointer; user-select: none; position: relative; }
+  .tog input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; }
+  .tog .sw { width: 38px; height: 22px; border-radius: 999px; background: #94a3b8; position: relative; flex: none; transition: background .15s; }
+  .tog .sw::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%;
+                    background: #fff; box-shadow: 0 1px 2px #0003; transition: transform .15s; }
+  .tog input:checked + .sw { background: var(--ok); }
+  .tog input:checked + .sw::after { transform: translateX(16px); }
+  .tog.livechk input:checked + .sw { background: var(--pe); }
+  .tog input:focus-visible + .sw { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .strat.islive { border-color: var(--pe); box-shadow: 0 0 0 1px var(--pe); }
+  .ord { font-size: 11px; } .ord .err { font-size: 11px; }
+  .sq { border-color: var(--pe); color: var(--pe); padding: 5px 12px; }
+  #log { max-height: 220px; overflow: auto; font-size: 12px; white-space: pre-wrap; margin: 8px 0 0; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <nav><a href="/paper" class="on">Paper / Live</a><a href="/account">Account</a><a href="/vwap">VWAP / SMC</a><a href="/data">Download</a></nav>
+  <h1>Paper &amp; live trade — all four strategies</h1>
+  <p class="sub">Market days 09:16–15:30 IST, every minute a few seconds after the candle closes, each switched-on strategy runs the same engine as the backtest on today's data so far. <b>Paper</b> only tracks the trades. <b>Live</b> (off by default) sends real Upstox intraday MARKET orders: BUY lots × lot size on a new entry (only if the signal is ≤ 3 min old), SELL when the strategy exits; open positions are always exited even if Live is switched off. Upstox accepts orders only from the static IP registered for your token. The scan runs inside the app — this page just shows it.</p>
+
+  <div class="card">
+    <div class="bar">
+      <div><span class="pill" id="mkt"></span> <span class="muted" id="clock"></span></div>
+      <span style="flex:1"></span>
+      <label>Lot size <input type="number" id="lotsize" min="1" step="1" style="width:90px"></label>
+      <label>Replay a day <input type="date" id="replay"></label>
+      <button class="btn ghost" id="replayBtn" type="button">Replay</button>
+      <button class="btn primary" id="scanBtn" type="button">Scan now</button>
+    </div>
+    <p class="note" id="scanInfo"></p>
+  </div>
+
+  <div id="strats"></div>
+  <div class="card strat"><b>Live order log</b><pre id="log"></pre></div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const LABELS = {{ labels | tojson }}, PRESETS = {{ presets | tojson }};
+const fmt = n => (Math.round(n * 100) / 100).toFixed(2);
+const money = n => `${n < 0 ? "−" : ""}₹${Math.abs(Math.round(n)).toLocaleString("en-IN")}`;
+const ampm = s => { if (!s) return "—"; let [h, m] = s.split(":").map(Number); const ap = h >= 12 ? "PM" : "AM"; h = h % 12 || 12; return `${h}:${String(m).padStart(2, "0")} ${ap}`; };
+let S = null, busy = false;
+
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.detail || r.statusText);
+  return j;
+}
+
+function render() {
+  const { state, view } = S;
+  $("mkt").className = `pill ${S.market_open ? "open" : "closed"}`;
+  $("mkt").textContent = S.market_open ? "Market open — scanning every minute" : "Market closed";
+  $("clock").textContent = S.now + " IST";
+  if (document.activeElement !== $("lotsize")) $("lotsize").value = state.lot_size;
+  $("scanInfo").textContent = view.running ? "Scanning…"
+    : view.day ? `Last scan ${view.scanned_at} IST for ${view.day}${view.day !== new Date().toISOString().slice(0, 10) ? " (replay)" : ""}.`
+    : "No scan yet today — the first runs at 09:16 on a market day. Use Scan now or Replay a past day to see the page work.";
+  $("strats").innerHTML = PRESETS.map(p => {
+    const cfg = state.config[p], trades = (view.results || {})[p] || [], err = (view.errors || {})[p];
+    const qty = cfg.lots * state.lot_size;
+    const pts = trades.reduce((a, t) => a + t.pnl, 0), open = trades.filter(t => t.open).length;
+    const livePos = Object.entries(state.orders || {}).filter(([k, o]) => k.startsWith(p + "|") && o.buy && o.buy.order_id && !o.sell).length;
+    const ordCell = o => !o ? "" : o.error ? `<span class="err" title="${o.error.replace(/"/g, "&quot;")}">✕ ${o.at}</span>` : o.order_id ? `✓ ${o.at} <span class="muted">${o.order_id}</span>` : `… ${o.at}`;
+    const rows = trades.map((t, i) => {
+      const st = t.open ? "OPEN" : t.status, pc = t.pnl >= 0 ? "up" : "down";
+      return `<tr><td>${i + 1}</td><td>${ampm(t.entry_time)}</td><td><b style="color:${t.type === "CE" ? "var(--ce)" : "var(--pe)"}">${t.symbol}</b></td>
+        <td>₹${fmt(t.entry)}</td><td>₹${fmt(t.sl)}</td><td>₹${fmt(t.target)}</td>
+        <td class="st ${st}">${st === "TIME_EXIT" ? "15:20 EXIT" : st}</td><td>${t.open ? "—" : ampm(t.exit_time)}</td>
+        <td>₹${fmt(t.exit)}${t.open ? ' <span class="muted">LTP</span>' : ""}</td>
+        <td class="${pc}">${t.pnl >= 0 ? "+" : ""}${fmt(t.pnl)}</td><td class="${pc}">${money(t.pnl * qty)}</td>
+        <td class="ord">${ordCell((t.orders || {}).buy)}</td><td class="ord">${ordCell((t.orders || {}).sell)}</td></tr>`;
+    }).join("");
+    return `<div class="card strat ${cfg.live ? "islive" : ""}">
+      <div class="shead">
+        <h2>${LABELS[p]}</h2>
+        <label class="check tog"><input type="checkbox" role="switch" data-on="${p}" ${cfg.on ? "checked" : ""}><span class="sw"></span> Paper</label>
+        <label class="check tog livechk"><input type="checkbox" role="switch" data-live="${p}" ${cfg.live ? "checked" : ""}><span class="sw"></span> LIVE</label>
+        ${livePos ? `<button class="btn ghost sq" type="button" data-sq="${p}">Square off ${livePos} live</button>` : ""}
+        <label class="check">Lots <input type="number" class="lots" data-lots="${p}" min="1" step="1" value="${cfg.lots}"></label>
+        <span class="muted">qty ${qty}</span>
+        <span style="flex:1"></span>
+        <span class="sum">${trades.length} trade${trades.length === 1 ? "" : "s"}${open ? ` · <b>${open} open</b>` : ""} · P&amp;L <b class="${pts >= 0 ? "up" : "down"}">${pts >= 0 ? "+" : ""}${fmt(pts)} pts · ${money(pts * qty)}</b></span>
+      </div>
+      ${err ? `<p class="err">${err}</p>` : ""}
+      ${!cfg.on && !cfg.live ? `<p class="empty">Off — not scanned.</p>` : trades.length ? `<div class="scroll"><table>
+        <thead><tr><th>#</th><th>Entry</th><th>Option</th><th>Entry ₹</th><th>SL</th><th>Target</th><th>Status</th><th>Exit</th><th>Exit / LTP</th><th>P&amp;L pts</th><th>P&amp;L ₹</th><th>Live BUY</th><th>Live SELL</th></tr></thead>
+        <tbody>${rows}</tbody></table></div>` : `<p class="empty">No trade${view.day ? ` on ${view.day}` : ""} yet.</p>`}
+    </div>`;
+  }).join("");
+  $("log").textContent = (state.log || []).slice().reverse().join("\n") || "No live orders yet.";
+}
+
+async function refresh() {
+  try { S = await api("/api/paper"); render(); } catch (e) { $("scanInfo").textContent = e.message; }
+}
+
+async function scan(day) {
+  if (busy) return; busy = true;
+  $("scanBtn").disabled = $("replayBtn").disabled = true;
+  $("scanInfo").textContent = day ? `Replaying ${day}… (first time fetches that day's data — can take a minute)` : "Scanning…";
+  try { await api(`/api/paper/scan${day ? `?day=${day}` : ""}`, {}); }
+  catch (e) { alert(e.message); }
+  busy = false; $("scanBtn").disabled = $("replayBtn").disabled = false;
+  refresh();
+}
+
+$("scanBtn").addEventListener("click", () => scan());
+$("replayBtn").addEventListener("click", () => { if ($("replay").value) scan($("replay").value); });
+$("lotsize").addEventListener("change", async e => { await api("/api/paper/config", { lot_size: +e.target.value }); refresh(); });
+$("strats").addEventListener("click", async e => {
+  const sq = e.target.dataset.sq; if (!sq) return;
+  if (!confirm(`Send SELL market orders now for every open live ${LABELS[sq]} position?`)) return;
+  try { const r = await api("/api/paper/squareoff", { preset: sq }); alert(`${r.sold} sell order(s) sent — see the log.`); } catch (err) { alert(err.message); }
+  refresh();
+});
+$("strats").addEventListener("change", async e => {
+  const on = e.target.dataset.on, lots = e.target.dataset.lots, lv = e.target.dataset.live;
+  if (lv) {
+    try { await api("/api/paper/config", e.target.checked ? { preset: lv, live: true, confirm: "LIVE" } : { preset: lv, live: false }); }
+    catch (err) { alert(err.message); }
+    return refresh();
+  }
+  if (on) await api("/api/paper/config", { preset: on, on: e.target.checked });
+  if (lots) await api("/api/paper/config", { preset: lots, lots: +e.target.value });
+  refresh();
+});
+refresh();
+setInterval(() => { if (!busy) refresh(); }, 10000);
+</script>
+</body>
+</html>

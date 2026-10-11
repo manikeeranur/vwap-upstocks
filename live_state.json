@@ -1,0 +1,50 @@
+{
+ "lot_size": 65,
+ "config": {
+  "frontend_live": {
+   "on": true,
+   "live": false,
+   "lots": 1
+  },
+  "smc_live": {
+   "on": true,
+   "live": false,
+   "lots": 1
+  },
+  "ema25_vwap": {
+   "on": true,
+   "live": false,
+   "lots": 1
+  },
+  "ema_pullback": {
+   "on": true,
+   "live": false,
+   "lots": 1
+  }
+ },
+ "orders": {},
+ "log": [
+  "2026-10-11 20:39:53 VWAP 9:30: LIVE ON",
+  "2026-10-11 20:40:24 VWAP 9:30: LIVE OFF",
+  "2026-10-11 20:47:16 VWAP 9:30: LIVE ON",
+  "2026-10-11 20:47:21 VWAP 9:30: LIVE OFF",
+  "2026-10-11 20:50:21 VWAP 9:30: LIVE ON",
+  "2026-10-11 20:50:26 VWAP + EMA25 + SuperTrend: LIVE ON",
+  "2026-10-11 20:50:47 SMC: LIVE ON",
+  "2026-10-11 20:50:48 EMA9/EMA26 pullback (Mani): LIVE ON",
+  "2026-10-11 20:50:55 VWAP 9:30: LIVE OFF",
+  "2026-10-11 20:50:56 SMC: LIVE OFF",
+  "2026-10-11 20:50:57 VWAP + EMA25 + SuperTrend: LIVE OFF",
+  "2026-10-11 20:50:58 EMA9/EMA26 pullback (Mani): LIVE OFF",
+  "2026-10-11 20:52:21 VWAP 9:30: LIVE ON",
+  "2026-10-11 20:52:22 VWAP 9:30: LIVE OFF",
+  "2026-10-11 20:52:23 VWAP 9:30: LIVE ON",
+  "2026-10-11 20:52:24 VWAP 9:30: LIVE OFF",
+  "2026-10-11 20:52:24 VWAP 9:30: LIVE ON",
+  "2026-10-11 20:52:25 VWAP 9:30: LIVE OFF",
+  "2026-10-11 20:52:25 VWAP 9:30: LIVE ON",
+  "2026-10-11 20:52:25 VWAP 9:30: LIVE OFF",
+  "2026-10-11 20:52:26 VWAP 9:30: LIVE ON",
+  "2026-10-11 20:52:26 VWAP 9:30: LIVE OFF"
+ ]
+}

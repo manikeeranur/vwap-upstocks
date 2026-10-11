@@ -13,14 +13,14 @@ from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
 import asyncio
 import uuid
 import zipfile
 
-from . import ema_pullback, pdf_report, smc, upstox, vwap
+from . import ema_pullback, live, pdf_report, smc, upstox, vwap
 
 app = FastAPI(title="upstocks")
 
@@ -94,7 +94,12 @@ async def _upstox_error(_: Request, e: upstox.UpstoxError):
     return JSONResponse({"error": str(e)}, status_code=502)
 
 
-@app.get("/", response_class=HTMLResponse)
+@app.get("/")
+async def home():
+    return RedirectResponse("/paper")
+
+
+@app.get("/data", response_class=HTMLResponse)
 async def index(request: Request):
     error = None
     try:
@@ -105,6 +110,49 @@ async def index(request: Request):
         "expiries": expiries, "error": error, "intervals": list(upstox.INTERVALS),
         "today": upstox.today_ist().isoformat(),
     })
+
+
+@app.on_event("startup")
+async def _start_paper() -> None:
+    live.start()
+
+
+# ─── Paper auto-trade (live.py) ───────────────────────────────────────────────
+@app.get("/paper", response_class=HTMLResponse)
+async def paper_page(request: Request):
+    return templates.TemplateResponse(request, "paper.html", {"labels": live.LABELS, "presets": live.PRESETS})
+
+
+@app.get("/api/paper")
+async def paper_state():
+    return {"state": live.STATE, "view": live.VIEW, "market_open": live.market_open(),
+            "now": live.now_ist().strftime("%a %d %b %H:%M:%S")}
+
+
+@app.post("/api/paper/config")
+async def paper_config(request: Request):
+    b = await request.json()
+    p = b.get("preset")
+    if p is not None and p not in live.PRESETS:
+        raise HTTPException(400, f"unknown preset {p!r}")
+    if b.get("live") is True and b.get("confirm") != "LIVE":
+        raise HTTPException(400, "turning Live on needs confirm: LIVE")
+    live.set_config(p, on=b.get("on"), live=b.get("live"), lots=b.get("lots"), lot_size=b.get("lot_size"))
+    return {"state": live.STATE}
+
+
+@app.post("/api/paper/squareoff")
+async def paper_squareoff(request: Request):
+    p = (await request.json()).get("preset")
+    if p not in live.PRESETS:
+        raise HTTPException(400, f"unknown preset {p!r}")
+    return {"sold": await live.square_off(p)}
+
+
+@app.post("/api/paper/scan")
+async def paper_scan(day: str | None = None):
+    """Scan now — today, or replay a past `day` (YYYY-MM-DD) to see what paper would have done."""
+    return await live.scan(_parse_day(day, "day") if day else None)
 
 
 @app.get("/account", response_class=HTMLResponse)

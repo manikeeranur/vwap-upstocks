@@ -213,12 +213,21 @@ async def candles(instrument_key: str, interval: str, start: date, end: date, ex
     # Only cache ranges that end 2+ days ago: Upstox publishes a session's
     # historical candles some time after it closes (e.g. on Saturday night
     # Friday wasn't there yet), so a recent range can still grow.
+    today = today_ist()
+    if not expired and start < today <= end:
+        # A range running into today = the days before (cached for a while)
+        # + today's intraday (refreshed each minute): the live scan re-reads
+        # these every minute and mustn't re-download the past days each time.
+        hist = await candles(instrument_key, interval, start, today - timedelta(days=1), expired)
+        intra = await candles(instrument_key, interval, today, end, expired)
+        return hist + [r for r in intra if r[0][:10] >= today.isoformat()]
     if key_ in _inflight:  # same range already being fetched (parallel days) — share it
         return await _inflight[key_]
-    if end <= today_ist() - timedelta(days=2):
+    if end <= today - timedelta(days=2):
         fut = asyncio.ensure_future(_disk_cached(key_, lambda: _fetch_candles(instrument_key, interval, start, end, expired)))
-    else:  # recent: may still grow — keep only briefly
-        fut = asyncio.ensure_future(_cached(key_, 60, lambda: _fetch_candles(instrument_key, interval, start, end, expired)))
+    else:  # recent: may still grow — today's for a minute, yesterday's for 15 min
+        ttl = 50 if end >= today else 900
+        fut = asyncio.ensure_future(_cached(key_, ttl, lambda: _fetch_candles(instrument_key, interval, start, end, expired)))
     _inflight[key_] = fut
     try:
         return await fut
@@ -256,6 +265,32 @@ async def _fetch_candles(instrument_key: str, interval: str, start: date, end: d
         seen.add(r[0])
         out.append(r)
     return out
+
+
+# ─── Orders (live auto-trade) ─────────────────────────────────────────────────
+# Upstox serves order placement from its HFT host; like the account calls it
+# only works from the static IP registered for this token.
+HFT = "https://api-hft.upstox.com"
+
+
+async def place_market_order(instrument_key: str, qty: int, side: str, tag: str) -> str:
+    """Intraday MARKET order (side BUY/SELL); returns the Upstox order id."""
+    headers = {"Accept": "application/json", "Content-Type": "application/json",
+               "Authorization": f"Bearer {_token()}"}
+    await _throttle()
+    r = await client().post(f"{HFT}/v2/order/place", headers=headers, json={
+        "quantity": qty, "product": "I", "validity": "DAY", "price": 0, "tag": tag[:20],
+        "instrument_token": instrument_key, "order_type": "MARKET", "transaction_type": side,
+        "disclosed_quantity": 0, "trigger_price": 0, "is_amo": False,
+    })
+    try:
+        body = r.json()
+    except ValueError:
+        raise UpstoxError(f"Upstox {r.status_code}: {r.text[:200]}")
+    if r.status_code != 200 or body.get("status") != "success":
+        errs = body.get("errors") or [{}]
+        raise UpstoxError(f"Upstox {r.status_code}: {errs[0].get('message') or body}")
+    return (body.get("data") or {}).get("order_id", "")
 
 
 def price_at(rows: list[list], hhmm: str) -> tuple[float, str] | None:

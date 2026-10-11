@@ -7,10 +7,13 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 {% include "_style.html" %}
+<style>
+  main { max-width: none; padding: 20px 24px 48px; }
+</style>
 </head>
 <body>
 <main>
-  <nav><a href="/" class="on">Download</a><a href="/vwap">VWAP / SMC</a><a href="/account">Account</a></nav>
+  <nav><a href="/paper">Paper / Live</a><a href="/account">Account</a><a href="/vwap">VWAP / SMC</a><a href="/data" class="on">Download</a></nav>
   <h1>NIFTY 50 option premium — download</h1>
   <p class="sub">Pick a <b>Date</b> — the NIFTY expiry that was current that day is selected for you (Upstox data back to Oct 2024). Type the strike, or switch <b>Pick by</b> to <b>Premium</b>, type a premium, and the strike trading nearest it on that date (at the time you set) is picked for you. The download is that day's candles; tick <b>Till expiry</b> for Date → expiry.</p>
 
