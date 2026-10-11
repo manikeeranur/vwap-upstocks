@@ -244,12 +244,16 @@ async def day_rows(instrument_key: str, day: date, expiry: str, expired: bool) -
     per contract (expiry−9 days → expiry): the engines visit a weekly contract
     on each of the ~5 days it's the nearest expiry, and Upstox counts calls,
     not candles. The span is cached (on disk once it's 2+ days old)."""
+    d = day.isoformat()
+    return [r for r in await span_rows(instrument_key, day, expiry, expired) if r[0][:10] == d]
+
+
+async def span_rows(instrument_key: str, day: date, expiry: str, expired: bool) -> list[list]:
+    """The whole cached span `day_rows` slices from (all its days' 1-min rows)."""
     exp = date.fromisoformat(expiry)
     span_end = min(exp, upstox.today_ist())
     span_start = min(day, exp - timedelta(days=9))
-    rows = await upstox.candles(instrument_key, "1m", span_start, span_end, expired)
-    d = day.isoformat()
-    return [r for r in rows if r[0][:10] == d]
+    return await upstox.candles(instrument_key, "1m", span_start, span_end, expired)
 
 
 async def _nearest_expiry(day: date) -> str | None:

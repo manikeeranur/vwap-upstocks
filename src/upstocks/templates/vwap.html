@@ -419,6 +419,7 @@ async function openChart(t) {
   const t1 = smcRow ? +(t.entry * 1.12).toFixed(2) : null;
   $("clegend").innerHTML = [
     `<span><i style="border-color:#f59e0b"></i>VWAP (5-min, as the strategy)</span>`,
+    `<span><i style="border-color:#8b5cf6"></i>EMA 25 (on the shown candles)</span>`,
     `<span><i style="border-color:#2563eb;border-top-style:dashed"></i>Entry ₹${fmt(t.entry)}</span>`,
     `<span><i style="border-color:#e11d48"></i>SL ₹${fmt(t.sl)}${t.sl_to_breakeven ? " → moved to entry" : ""}</span>`,
     ...(t1 ? [`<span><i style="border-color:#b45309;border-top-style:dashed"></i>T1 ₹${fmt(t1)}</span>`] : []),
@@ -463,7 +464,29 @@ function drawChart() {
   candles.setData(src.map(b => ({ time: toTs(d.date, b[0]), open: b[1], high: b[2], low: b[3], close: b[4] })));
   // VWAP: known when each 5-min candle closes; on 5m bars stamp it at that bar, on 1m at its last minute.
   const vw = chart.addLineSeries({ color: "#f59e0b", lineWidth: 2, priceLineVisible: false, lastValueVisible: false });
-  vw.setData(d.vwap5.map(([hhmm, v]) => ({ time: toTs(d.date, five ? bucket5(hhmm) : hhmm), value: v })));
+  // On 1m the first 5-min VWAP lands at 9:19; lead in from 9:15 with the running
+  // VWAP of the 1-min bars so far (9:15–9:18 only — from 9:19 it's the strategy's).
+  const lead = [];
+  if (!five && d.vwap5.length) {
+    let pv = 0, vol = 0;
+    for (const b of src) {
+      if (b[0] >= d.vwap5[0][0]) break;
+      const typ = (b[2] + b[3] + b[4]) / 3; pv += typ * b[5]; vol += b[5];
+      lead.push({ time: toTs(d.date, b[0]), value: +(vol > 0 ? pv / vol : typ).toFixed(2) });
+    }
+  }
+  vw.setData([...lead, ...d.vwap5.map(([hhmm, v]) => ({ time: toTs(d.date, five ? bucket5(hhmm) : hhmm), value: v }))]);
+  // EMA 25 of the shown timeframe's closes, seeded with the SMA of the first 25
+  // (as TradingView) and warmed up on the previous session so it starts at 9:15.
+  const EMA_N = 25, k = 2 / (EMA_N + 1), emaPts = [];
+  const prevC = (five ? d.prev_close5 : d.prev_close1) || [], nPrev = prevC.length;
+  let ema = null, sum = 0;
+  [...prevC, ...src.map(b => b[4])].forEach((c, i) => {
+    if (i < EMA_N) { sum += c; if (i === EMA_N - 1) ema = sum / EMA_N; else return; }
+    else ema = c * k + ema * (1 - k);
+    if (i >= nPrev) emaPts.push({ time: toTs(d.date, src[i - nPrev][0]), value: +ema.toFixed(2) });
+  });
+  chart.addLineSeries({ color: "#8b5cf6", lineWidth: 2, priceLineVisible: false, lastValueVisible: false }).setData(emaPts);
   const line = (price, color, title, style) => candles.createPriceLine({ price, color, title, lineWidth: 2, lineStyle: style, axisLabelVisible: true });
   line(t.entry, "#2563eb", "Entry", 2);
   line(t.sl, "#e11d48", "SL", 0);

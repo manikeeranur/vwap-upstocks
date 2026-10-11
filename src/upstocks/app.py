@@ -278,16 +278,23 @@ async def vwap_run(request: Request):
 async def chart_data(key: str, day: str = Query(..., alias="date"), expiry: str = Query(...)):
     """One option's day for the trade chart: 1-min bars (market hours), the
     5-min bars the strategy uses, and its 5-min VWAP (same maths as the engine).
-    Times are IST "HH:MM"; a 5-min bar is stamped with its first minute."""
+    Times are IST "HH:MM"; a 5-min bar is stamped with its first minute.
+    `prev_close1` / `prev_close5`: the previous session's closes (same cached
+    span, no extra call) so the chart's EMA is warmed up from 9:15."""
     d = _parse_day(day, "date")
     expired = expiry in set(await upstox.expired_expiries())
-    bars = vwap._market(await vwap.day_rows(key, d, expiry, expired))
+    rows = await vwap.span_rows(key, d, expiry, expired)
+    bars = vwap._market([r for r in rows if r[0][:10] == day])
+    prev_day = max((r[0][:10] for r in rows if r[0][:10] < day), default=None)
+    prev = vwap._market([r for r in rows if r[0][:10] == prev_day]) if prev_day else []
     nm = vwap.aggregate(bars, 5)
     vw = vwap.vwap_series(nm)
     return {
         "date": day,
         "bars1": [list(b[:6]) for b in bars],
         "bars5": [[vwap._add(b[0], -4), *b[1:6]] for b in nm],
+        "prev_close1": [b[4] for b in prev],
+        "prev_close5": [b[4] for b in vwap.aggregate(prev, 5)],
         # VWAP of a 5-min candle is known when it closes → stamp at its last minute
         "vwap5": [[b[0], v] for b, v in zip(nm, vw)],
     }
