@@ -95,10 +95,20 @@ class Settings:
     # the previous session) on its last completed candle — green → CE only,
     # red → PE only.
     index_trend: bool = False
+    # …and only once that colour has held for this many completed candles in a
+    # row (a 1–2 minute flip is noise: 7 Oct 10:02–10:03 flipped red for 2 min
+    # inside a rally and a PE was taken).
+    index_trend_bars: int = 1
     # Trend entry (replaces the VWAP rules): the signal candle is where "EMA
     # rising (EMA > previous EMA) AND SuperTrend green" first becomes true —
     # the previous candle didn't have both. VWAP isn't checked.
     trend_entry: bool = False
+    # EMA9/26 pullback (ema_pullback.py): option confirmation over 5 min, the
+    # reversal exit's activation gain, and ₹ slippage on each fill.
+    ep_prem_rise: float = 2.0
+    ep_oi_rise: float = 0.5
+    ep_rev_activate: float = 20.0
+    slippage: float = 0.0
 
 
 PRESETS = {
@@ -128,6 +138,12 @@ PRESETS["ema25_vwap"] = {**PRESETS["frontend_live"], "ema_cross": True, "candle_
                          "strong_green": False, "max_entry_visits": 4, "any_strike_in_band": True,
                          "min_premium": 280,  # a cross at ₹294 (8 Oct 22750 PE 09:39) is still taken
                          "supertrend": True, "stagnant_hours": 0, "index_trend": True}
+# Mani's EMA9/EMA26 pullback (ema_pullback.py): ₹150–<300 closest to ₹225,
+# SL 25%, target 100%, one trade a day, ₹1 slippage each side.
+PRESETS["ema_pullback"] = {"strategy": "ema_pullback", "min_premium": 150, "max_premium": 300,
+                           "sl_pct": 25, "target_pct": 100, "entry_start": "09:36", "last_entry": "14:59",
+                           "max_trades": 1, "time_exit": "15:20", "breakeven_pct": 0, "stagnant_hours": 0,
+                           "strong_green": False, "candle_minutes": 1, "slippage": 1.0}
 KITE_OFFSETS = [0, -50, 50, -100, 100, -150, 150]
 
 
@@ -536,10 +552,11 @@ async def run_day(day: date, s: Settings, spot_bars: list[Bar], prev_spot: list[
         if s.index_trend:  # NIFTY's last completed 1-min candle (same lag as the option's)
             lag = 1 if s.ema_cross or s.trend_entry else 2
             done = [i for i, b in enumerate(spot_bars) if _add(b[0], lag) <= mark]
-            v = idx_st[done[-1]] if done else None
-            if not v:
-                return None
-            trend = "UP" if v[1] else "DOWN"
+            n = s.index_trend_bars
+            last = [idx_st[i] for i in done[-n:]] if len(done) >= n else []
+            if not last or not all(last) or len({v[1] for v in last}) > 1:
+                return None  # not warmed up, or the colour hasn't held n candles
+            trend = "UP" if last[-1][1] else "DOWN"
         ce, pe = await candidate("CE", atm, mark), await candidate("PE", atm, mark)
 
         ce_ok, pe_ok = ok(ce) and trend != "DOWN", ok(pe) and trend != "UP"

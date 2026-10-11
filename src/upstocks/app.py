@@ -20,7 +20,7 @@ import asyncio
 import uuid
 import zipfile
 
-from . import pdf_report, smc, upstox, vwap
+from . import ema_pullback, pdf_report, smc, upstox, vwap
 
 app = FastAPI(title="upstocks")
 
@@ -202,7 +202,7 @@ def _settings_from(body: dict) -> vwap.Settings:
     for f in ("min_premium", "max_premium", "sl_pct", "target_pct", "target1_pct", "breakeven_pct", "stagnant_hours", "stagnant_points"):
         if body.get(f) not in (None, ""):
             setattr(st, f, float(body[f]))
-    for f in ("candle_minutes", "max_trades", "cooldown_min", "chain_strikes", "max_entry_visits"):
+    for f in ("candle_minutes", "max_trades", "cooldown_min", "chain_strikes", "max_entry_visits", "index_trend_bars"):
         if body.get(f) not in (None, ""):
             setattr(st, f, int(body[f]))
     for f in ("entry_start", "time_exit", "last_entry"):
@@ -241,6 +241,8 @@ async def _run_job(job: dict) -> None:
                 try:
                     if st.strategy == "smc":
                         res = await smc.run_day(date.fromisoformat(d), st, bars)
+                    elif st.strategy == "ema_pullback":
+                        res = await ema_pullback.run_day(date.fromisoformat(d), st, bars)
                     else:
                         res = await vwap.run_day(date.fromisoformat(d), st, bars, prev_spot[d])
                     out = {"date": res.date, "expiry": res.expiry, "note": res.note,
@@ -281,10 +283,6 @@ async def vwap_run(request: Request):
     return {"id": jid}
 
 
-def _st(prev: list, bars: list) -> list:
-    return [[vwap._round2(v[0]), v[1]] if v else None for v in vwap.supertrend_series(prev + bars)[len(prev):]]
-
-
 @app.get("/api/chart")
 async def chart_data(key: str, day: str = Query(..., alias="date"), expiry: str = Query(...)):
     """One option's day for the trade chart: 1-min bars (market hours), the
@@ -306,9 +304,6 @@ async def chart_data(key: str, day: str = Query(..., alias="date"), expiry: str 
         "bars5": [[vwap._add(b[0], -4), *b[1:6]] for b in nm],
         "prev_close1": [b[4] for b in prev],
         "prev_close5": [b[4] for b in vwap.aggregate(prev, 5)],
-        # SuperTrend (10, 3) per shown bar: [line, uptrend] or None (warmed up on the previous session)
-        "st1": _st(prev, bars),
-        "st5": _st(vwap.aggregate(prev, 5), nm),
         # VWAP of a 5-min candle is known when it closes → stamp at its last minute
         "vwap5": [[b[0], v] for b, v in zip(nm, vw)],
     }
@@ -382,7 +377,7 @@ async def vwap_summary(jid: str, qty: int = 65):
 
 
 PRESET_LABELS = {"frontend_live": "VWAP 9:30 — frontend LIVE rules", "smc_live": "SMC — frontend LIVE rules",
-                 "ema25_vwap": "VWAP + EMA25 + SuperTrend"}
+                 "ema25_vwap": "VWAP + EMA25 + SuperTrend", "ema_pullback": "EMA9/EMA26 pullback (Mani)"}
 
 
 @app.get("/api/vwap/job/{jid}/report.pdf")

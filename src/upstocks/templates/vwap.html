@@ -52,6 +52,11 @@
   #chart td, #chart th { padding: 0 !important; border: 0 !important; text-align: left; white-space: normal; }
   /* TradingView-style "Long position" box over the chart pane */
   .pbox { position: absolute; pointer-events: none; z-index: 3; }
+  /* Hovered candle's OHLC / volume, top-left of the pane (TradingView-style) */
+  .ohlc { position: absolute; top: 6px; left: 8px; z-index: 4; pointer-events: none; font-size: 12px; font-variant-numeric: tabular-nums;
+          background: color-mix(in srgb, var(--card) 85%, transparent); padding: 2px 6px; border-radius: 4px; white-space: nowrap; }
+  .ohlc b { font-weight: 500; margin-left: 2px; }
+  .ohlc span { margin-right: 10px; }
   .pbox.tgt { background: #16a34a26; border: 1px solid #16a34a80; }
   .pbox.sl  { background: #e11d4826; border: 1px solid #e11d4880; }
   .plbl { position: absolute; pointer-events: none; z-index: 4; font: 700 12px 'Satoshi', 'Inter', sans-serif; color: #fff; padding: 2px 7px; border-radius: 3px; white-space: nowrap; }
@@ -73,7 +78,7 @@
   details { margin-top: 14px; } summary { cursor: pointer; color: var(--muted); font-weight: 600; }
   .bar { height: 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 999px; overflow: hidden; margin-top: 14px; }
   .bar div { height: 100%; width: 0; background: var(--accent); transition: width .3s; }
-  .res { font-weight: 700; } .res.SL { color: var(--pe); } .res.TARGET { color: var(--ok); } .res.EOD, .res.TIME_EXIT, .res.STAGNANT_EXIT { color: #b45309; }
+  .res { font-weight: 700; } .res.SL { color: var(--pe); } .res.TARGET { color: var(--ok); } .res.EOD, .res.TIME_EXIT, .res.STAGNANT_EXIT, .res.REVERSAL { color: #b45309; }
   .up { color: var(--ok); } .down { color: var(--pe); } .small { font-size: 12px; color: var(--muted); }
   .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-top: 16px; }
   .summary div { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
@@ -95,6 +100,7 @@
           <option value="frontend_live" selected>VWAP 9:30 — frontend LIVE rules</option>
           <option value="smc_live">SMC — frontend LIVE rules</option>
           <option value="ema25_vwap">VWAP + EMA25 + SuperTrend</option>
+          <option value="ema_pullback">EMA9/EMA26 pullback (Mani)</option>
         </select>
       </label>
       <label>From <input type="date" id="start" value="{{ start }}"></label>
@@ -120,6 +126,7 @@
         <label>Time exit <input type="time" id="time_exit" step="60"></label>
         <label>Chain strikes each side <input type="number" id="chain_strikes" step="1"></label>
         <label>Skip if entry price hit ≥ N times earlier (0 = off) <input type="number" id="max_entry_visits" min="0" step="1"></label>
+        <label>NIFTY trend must hold N candles <input type="number" id="index_trend_bars" min="1" step="1"></label>
       </div>
       <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px">
         <label class="check"><input type="checkbox" id="live"> Live scan: check every minute, pick the strike by its live price, enter at the live price</label>
@@ -173,10 +180,11 @@ const fmt = n => (Math.round(n * 100) / 100).toFixed(2);
 let job = null, days = [], timer = null;
 
 const PRESETS = {{ presets | tojson }};
-const NUMS = ["min_premium", "max_premium", "sl_pct", "target_pct", "entry_start", "candle_minutes", "breakeven_pct", "max_trades", "cooldown_min", "stagnant_hours", "stagnant_points", "time_exit", "chain_strikes", "max_entry_visits"];
+const NUMS = ["min_premium", "max_premium", "sl_pct", "target_pct", "entry_start", "candle_minutes", "breakeven_pct", "max_trades", "cooldown_min", "stagnant_hours", "stagnant_points", "time_exit", "chain_strikes", "max_entry_visits", "index_trend_bars"];
 const BOOLS = ["live", "strong_green", "atm_offsets_only", "align_checkpoints", "include_entry_candle", "time_exit_first", "ema_cross", "any_strike_in_band", "supertrend", "index_trend", "trend_entry"];
 const NOTES = {
   smc_live: "Your frontend app's SMC live scan (backend smcService runSMCScan + routes/smc.js): every minute 09:21–14:59, NIFTY 1-min candles scored for Liquidity Grab / FVG / Order Block / Breaker / SMT trap (≥2 needed, EMA-20 trend = bonus), strike nearest ATM in the premium band (₹300–400 — what live used; then ×0.75–×1.75, ×0.5–×2; within 50 pts → nearest the band's middle), entry at the live price, SL 6%, T1 +12% (marker), T2 +24% (exit), SL to entry at +15%, SL and target checked once a minute on the live price, 15:20 exit, max 2 trades (2nd only after a loss, 15 min after exit). Your Account tab's band is now ₹200–300 — enter that to match trades from 7 Oct onward.",
+  ema_pullback: "Mani's EMA9/EMA26 pullback on completed NIFTY 1-min candles (EMAs restart from the day's first close), signals 09:36–14:59, entry at the next minute's open, one trade a day. CE: EMA9 > EMA26, EMA26 rising vs 5 min ago, previous candle's low ≤ its EMA9, close > previous high and > EMA9 (PE mirrored). Option: nearest expiry, premium ≥ ₹150 and < ₹300 closest to ₹225 (premium fields below), volume ≥ 65, and over 5 min premium +2% and OI +0.5% — else wait for the next signal. SL 25% / target 100% of the fill, ₹1 slippage each side; reversal exit after +20% (price up / OI down at the 5-min candle's peak minute, volume ≥ 1.5× the 20-min median, upper wick ≥ 40%, fresh 30-min high) at the next open; 15:20 exit; no breakeven or trailing.",
   ema25_vwap: "1-min candles, every minute from 09:36: every strike whose live price is in the band (₹280–500), nearest ATM first — the first whose last completed 1-min candle closes above VWAP (1-min, from 09:15) AND is where EMA25 crosses above VWAP (previous candle EMA25 at or below VWAP, this one above) with SuperTrend (10, 3) green on that candle is taken. Only on NIFTY's trend side (NIFTY 1-min SuperTrend green → CE only, red → PE only). Entry at the live price the minute that candle closes (09:40 candle → 09:41). Sideways skip: no entry if the price had already come to the entry level 4+ separate times earlier that day. SL 6% / target 30%, SL to entry at +15%, no stagnant exit, 15:20 exit, max 2 trades (2nd only after a loss, 15 min after exit). EMA25 and SuperTrend warmed up on the previous session.",
   frontend_live: "Your frontend app's live scan (backend doScan): every minute from 09:36, strike nearest ATM whose live price is ₹300–500, its last completed 5-min candle must close above VWAP and be a strong green candle, entry at the live price, SL 6% (fires on the first touch, like the exchange SL-M order) / target 30% (checked once a minute on the live price), SL to entry at +15% (what October live used; your Account tab now says 10%), 15:20 exit, max 2 trades (2nd only after a loss, 15 min after exit).",
 };
@@ -196,7 +204,7 @@ function settings() {
   return s;
 }
 
-const label = { SL: "🛑 SL", TARGET: "🎯 Target", TIME_EXIT: "⏱ 15:20 exit", STAGNANT_EXIT: "💤 Stagnant", EOD: "EOD" };
+const label = { SL: "🛑 SL", TARGET: "🎯 Target", TIME_EXIT: "⏱ 15:20 exit", STAGNANT_EXIT: "💤 Stagnant", REVERSAL: "↩ Reversal", EOD: "EOD" };
 
 // Same formula as the frontend app's VWAP/SMC tables (calcCharges).
 function charges(entry, exit, qty) {
@@ -208,7 +216,7 @@ function charges(entry, exit, qty) {
 const inr = n => (n < 0 ? "−" : "+") + "₹" + Math.abs(n).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const lakh = n => (n < 0 ? "−" : "+") + "₹" + (Math.abs(n) >= 100000 ? (Math.abs(n) / 100000).toFixed(2) + "L" : Math.abs(n).toLocaleString("en-IN", { maximumFractionDigits: 0 }));
 const ampm = t => { if (!t) return "—"; let [h, m] = t.split(":").map(Number); const ap = h >= 12 ? "PM" : "AM"; h = h % 12 || 12; return `${h}:${String(m).padStart(2, "0")} ${ap}`; };
-const STATUS = { TARGET: ["🎯", "TARGET", "up"], SL: ["🛑", "SL", "down"], TIME_EXIT: ["⏱", "TIME EXIT", ""], STAGNANT_EXIT: ["💤", "STAGNANT", ""], EOD: ["🕐", "EOD", ""] };
+const STATUS = { TARGET: ["🎯", "TARGET", "up"], SL: ["🛑", "SL", "down"], TIME_EXIT: ["⏱", "TIME EXIT", ""], STAGNANT_EXIT: ["💤", "STAGNANT", ""], REVERSAL: ["↩", "REVERSAL", ""], EOD: ["🕐", "EOD", ""] };
 
 const CONCEPT_COLOR = { LiqGrab: "#7c3aed", FVG: "#0284c7", OrdBlock: "#b45309", Breaker: "#ea580c", SMTrap: "#e11d48" };
 const MONTHS = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
@@ -235,12 +243,12 @@ function render() {
     const exitP = t.entry + t.pnl, c = charges(t.entry, exitP, qty), lotPnl = t.pnl * qty;
     pts += t.pnl; chg += c;
     if (t.status === "TARGET") tgt++; else if (t.status === "SL") sl++; else eod++;
-    const win = t.status === "TARGET" || (t.status === "TIME_EXIT" && t.pnl >= 0);
-    const loss = t.status === "SL" || (t.status === "TIME_EXIT" && t.pnl < 0);
+    const win = t.status === "TARGET" || ((t.status === "TIME_EXIT" || t.status === "REVERSAL") && t.pnl >= 0);
+    const loss = t.status === "SL" || ((t.status === "TIME_EXIT" || t.status === "REVERSAL") && t.pnl < 0);
     const bg = win ? (dark ? "#052e16" : "#f0fdf4") : loss ? (dark ? "#2d0505" : "#fff5f5") : t.status === "EOD" ? (dark ? "#1c1500" : "#fefce8")
              : idx % 2 === 0 ? (dark ? "#0a0f16" : "#fff") : (dark ? "#0d1420" : "#fafafa");
     const stClr = win ? "#16a34a" : loss ? "#e11d48" : t.status === "EOD" ? "#b45309" : "#0284c7";
-    const stIco = { TARGET: "🎯", SL: "🛑", EOD: "🕐", TIME_EXIT: "⏱", STAGNANT_EXIT: "💤" }[t.status] || "⏳";
+    const stIco = { TARGET: "🎯", SL: "🛑", EOD: "🕐", TIME_EXIT: "⏱", STAGNANT_EXIT: "💤", REVERSAL: "↩" }[t.status] || "⏳";
     const stLbl = { TIME_EXIT: "TIME EXIT", STAGNANT_EXIT: "STAGNANT" }[t.status] || t.status;
     const t1 = isSmc ? +(t.entry * 1.12).toFixed(2) : t.target;  // VWAP has one target: T1 = T2
     const t1Hit = t.status === "TARGET" || !!t.t1_time, t2Hit = t.status === "TARGET";
@@ -249,6 +257,7 @@ function render() {
     const hit = ok => tag(ok, ok.endsWith("✓") ? "#15803d" : (dark ? "#4a6080" : "#94a3b8"), ok.endsWith("✓") ? (dark ? "#052e16" : "#dcfce7") : (dark ? "#0f1923" : "#f1f5f9"), "transparent");
     const signals = isSmc
       ? tag(`${t.type} ${t.score}/5`, dir) + (t.concepts || []).map(x => tag(x, CONCEPT_COLOR[x] || "#64748b", (CONCEPT_COLOR[x] || "#64748b") + "14", "transparent")).join("") + (t.trend_ok ? `<span class="s7 c-up">+EMA✓</span>` : "")
+      : t.why ? tag(t.type, dir) + tag(t.why, "#64748b", dark ? "#1e293b" : "#f1f5f9", "transparent")
       : tag(t.type, dir) + tag(`VWAP ₹${fmt(t.vwap)}`, "#64748b", dark ? "#1e293b" : "#f1f5f9", "transparent")
         + (t.ema ? tag(`EMA25 ₹${fmt(t.ema)} ↑`, "#8b5cf6", "#8b5cf614", "transparent") : "")
         + (t.st ? tag(`ST ₹${fmt(t.st)} ↑`, "#16a34a", "#16a34a14", "transparent") : "")
@@ -431,7 +440,6 @@ async function openChart(t) {
   $("clegend").innerHTML = [
     `<span><i style="border-color:#f59e0b"></i>${t.ema ? "VWAP (1-min on 1m, 5-min on 5m)" : "VWAP (5-min, as the strategy)"}</span>`,
     `<span><i style="border-color:#8b5cf6"></i>EMA 25 (on the shown candles)</span>`,
-    `<span><i style="border-color:#16a34a;width:9px;margin-right:2px"></i><i style="border-color:#e11d48;width:9px"></i>SuperTrend 10, 3 (green up · red down)</span>`,
     `<span><i style="border-color:#2563eb;border-top-style:dashed"></i>Entry ₹${fmt(t.entry)}</span>`,
     `<span><i style="border-color:#e11d48"></i>SL ₹${fmt(t.sl)}${t.sl_to_breakeven ? " → moved to entry" : ""}</span>`,
     ...(t1 ? [`<span><i style="border-color:#b45309;border-top-style:dashed"></i>T1 ₹${fmt(t1)}</span>`] : []),
@@ -463,7 +471,8 @@ function drawChart() {
     // Chart times are IST wall-clock stored as UTC — format them as 9:35 AM.
     timeScale: { timeVisible: true, secondsVisible: false, tickMarkFormatter: t => clock12(t) },
     localization: { timeFormatter: t => clock12(t) },
-    rightPriceScale: { borderColor: dark ? "#1e2a3a" : "#e2e8f0" },
+    // Candles above, the volume bars in the bottom band.
+    rightPriceScale: { borderColor: dark ? "#1e2a3a" : "#e2e8f0", scaleMargins: { top: 0.04, bottom: 0.16 } },
     crosshair: { mode: 0 },
   });
   // Pin the chart's own root to the box's top-left: as an in-flow block it sat
@@ -472,11 +481,20 @@ function drawChart() {
   if (root) Object.assign(root.style, { position: "absolute", top: "0", left: "0" });
   const five = chartTf === "5";
   const src = five ? d.bars5 : d.bars1;
-  const candles = chart.addCandlestickSeries({ upColor: "#16a34a", downColor: "#e11d48", borderVisible: false, wickUpColor: "#16a34a", wickDownColor: "#e11d48" });
+  const candles = chart.addCandlestickSeries({ upColor: "#16a34a", downColor: "#e11d48", borderVisible: false, wickUpColor: "#16a34a", wickDownColor: "#e11d48",
+    // keep the trade's target and SL in view, not just the candles
+    autoscaleInfoProvider: orig => {
+      const r = orig();
+      if (r && r.priceRange) {
+        r.priceRange.maxValue = Math.max(r.priceRange.maxValue, t.target);
+        r.priceRange.minValue = Math.min(r.priceRange.minValue, t.sl);
+      }
+      return r;
+    } });
   candles.setData(src.map(b => ({ time: toTs(d.date, b[0]), open: b[1], high: b[2], low: b[3], close: b[4] })));
   // Volume: bars along the bottom fifth, green/red with the candle.
   const vol = chart.addHistogramSeries({ priceScaleId: "vol", priceFormat: { type: "volume" }, priceLineVisible: false, lastValueVisible: false });
-  chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
+  chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.86, bottom: 0 } });
   vol.setData(src.map(b => ({ time: toTs(d.date, b[0]), value: b[5], color: b[4] >= b[1] ? "#16a34a66" : "#e11d4866" })));
   // VWAP: known when each 5-min candle closes; on 5m bars stamp it at that bar, on 1m at its last minute.
   const vw = chart.addLineSeries({ color: "#f59e0b", lineWidth: 2, priceLineVisible: false, lastValueVisible: false });
@@ -504,20 +522,8 @@ function drawChart() {
     else ema = c * k + ema * (1 - k);
     if (i >= nPrev) emaPts.push({ time: toTs(d.date, src[i - nPrev][0]), value: +ema.toFixed(2) });
   });
-  chart.addLineSeries({ color: "#8b5cf6", lineWidth: 2, priceLineVisible: false, lastValueVisible: false }).setData(emaPts);
-  // SuperTrend (10, 3) as TradingView draws it: green under price in an
-  // uptrend, red over it in a downtrend, a gap where it flips (not a join).
-  // One series per run of the same trend: the library joins across
-  // whitespace, which drew diagonals between separate red stretches.
-  const stRuns = [];
-  (five ? d.st5 : d.st1).forEach((v, i) => {
-    if (!v) return;
-    const last = stRuns[stRuns.length - 1];
-    if (!last || last.up !== v[1]) stRuns.push({ up: v[1], pts: [] });
-    stRuns[stRuns.length - 1].pts.push({ time: toTs(d.date, src[i][0]), value: v[0] });
-  });
-  stRuns.forEach(r => chart.addLineSeries({ color: r.up ? "#16a34a" : "#e11d48", lineWidth: 2, priceLineVisible: false,
-    lastValueVisible: false, crosshairMarkerVisible: false }).setData(r.pts));
+  const emaS = chart.addLineSeries({ color: "#8b5cf6", lineWidth: 2, priceLineVisible: false, lastValueVisible: false });
+  emaS.setData(emaPts);
   const line = (price, color, title, style) => candles.createPriceLine({ price, color, title, lineWidth: 2, lineStyle: style, axisLabelVisible: true });
   line(t.entry, "#2563eb", "Entry", 2);
   line(t.sl, "#e11d48", "SL", 0);
@@ -534,6 +540,25 @@ function drawChart() {
   markers.sort((a, b) => a.time - b.time);
   candles.setMarkers(markers);
   chart.timeScale().fitContent();
+  // Hover: the candle under the crosshair (the last one when off the chart).
+  const ohlcEl = document.createElement("div"); ohlcEl.className = "ohlc"; el.appendChild(ohlcEl);
+  const byT = new Map(src.map((b, i) => [toTs(d.date, b[0]), i]));
+  const fmtVol = v => v >= 1e5 ? `${(v / 1e5).toFixed(2)}L` : v >= 1e3 ? `${(v / 1e3).toFixed(1)}K` : String(v);
+  const showBar = time => {
+    const i = byT.get(time); if (i == null) return;
+    const b = src[i], up = b[4] >= b[1], col = up ? "#16a34a" : "#e11d48";
+    const prevC = i ? src[i - 1][4] : b[1], ch = b[4] - prevC;
+    const val = (s, t) => { const p = s.data().find(x => x.time === t); return p && p.value != null ? fmt(p.value) : "—"; };
+    ohlcEl.innerHTML = `<span class="muted">${clock12(time)}</span>`
+      + `<span>O<b style="color:${col}">${fmt(b[1])}</b></span><span>H<b style="color:${col}">${fmt(b[2])}</b></span>`
+      + `<span>L<b style="color:${col}">${fmt(b[3])}</b></span><span>C<b style="color:${col}">${fmt(b[4])}</b></span>`
+      + `<span style="color:${ch >= 0 ? "#16a34a" : "#e11d48"}">${ch >= 0 ? "+" : ""}${fmt(ch)} (${ch >= 0 ? "+" : ""}${(ch / prevC * 100).toFixed(2)}%)</span>`
+      + `<span>Vol<b>${fmtVol(b[5])}</b></span>`
+      + `<span style="color:#f59e0b">VWAP<b>${val(vw, time)}</b></span><span style="color:#8b5cf6">EMA25<b>${val(emaS, time)}</b></span>`;
+  };
+  const lastBarT = toTs(d.date, src[src.length - 1][0]);
+  showBar(lastBarT);
+  chart.subscribeCrosshairMove(p => showBar(p && p.time != null ? p.time : lastBarT));
   // Box from entry to exit (exit outside the data → last candle).
   const lastT = toTs(d.date, src[src.length - 1][0]);
   let tExit = t.exit_time ? at(t.exit_time) : lastT;

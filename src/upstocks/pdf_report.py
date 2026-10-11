@@ -115,8 +115,8 @@ def build(days: list[dict], *, title: str, subtitle: str, lots: int, lot_size: i
         tgt += st == "TARGET"
         sl += st == "SL"
         eod += st not in ("TARGET", "SL")
-        win = st == "TARGET" or (st == "TIME_EXIT" and pnl >= 0)
-        loss = st == "SL" or (st == "TIME_EXIT" and pnl < 0)
+        win = st == "TARGET" or (st in ("TIME_EXIT", "REVERSAL") and pnl >= 0)
+        loss = st == "SL" or (st in ("TIME_EXIT", "REVERSAL") and pnl < 0)
         tints.append("#f0fdf4" if win else "#fff5f5" if loss else "#fefce8" if st == "EOD" else ("#ffffff" if i % 2 == 0 else "#fafafa"))
         st_clr = UP if win else DOWN if loss else AMBER if st == "EOD" else CE_C
         dir_c = CE_C if t["type"] == "CE" else PE_C
@@ -134,6 +134,8 @@ def build(days: list[dict], *, title: str, subtitle: str, lots: int, lot_size: i
                 sig += "  " + c(f"EMA25 {money(t['ema'])}", PURPLE)
             strike = c(f"{t['strike']:.0f} {t['type']}", dir_c, 7.2) + "<br/>" + c(f"{exp_short(t['expiry'])} · spot {t.get('spot', 0):.0f}", MUTED, 5.4)
         label = {"TIME_EXIT": "TIME EXIT", "STAGNANT_EXIT": "STAGNANT"}.get(st, st)
+        if t.get("why") and not smc:
+            sig = c(t["type"], dir_c) + "  " + c(t["why"], SLATE)
         row = [
             p(str(i + 1), 5.9, MUTED),
             p(t["date"], 6.3),
