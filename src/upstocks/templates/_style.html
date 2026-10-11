@@ -1,8 +1,10 @@
 <style>
+  /* Satoshi everywhere (Fontshare); Inter as the fallback while it loads. */
+  @import url("https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700&display=swap");
   :root { --bg:#f0f4f8; --card:#fff; --text:#1e293b; --muted:#64748b; --border:#e2e8f0; --accent:#4f46e5; --ce:#0284c7; --pe:#e11d48; --ok:#16a34a; }
   @media (prefers-color-scheme: dark) { :root { --bg:#0a0f16; --card:#0f1724; --text:#e2e8f0; --muted:#94a3b8; --border:#1e2a3a; --accent:#818cf8; } }
   * { box-sizing: border-box; }
-  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 Inter, system-ui, sans-serif; font-variant-numeric: tabular-nums; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 'Satoshi', Inter, system-ui, sans-serif; font-variant-numeric: tabular-nums; }
   main { max-width: 980px; margin: 0 auto; padding: 24px 16px 48px; }
   h1 { font-size: 20px; margin: 0 0 4px; } .sub { color: var(--muted); margin: 0 0 20px; }
   .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }

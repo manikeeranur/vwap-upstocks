@@ -5,12 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>upstocks — VWAP 9:30</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 {% include "_style.html" %}
 <style>
   main { max-width: none; padding: 20px 24px 48px; }
   /* ── Results table: same look as the frontend app's SMC / VWAP 9:30 tables ── */
-  .mono, table.rt, .foot { font-family: 'Space Mono', monospace; }
+  .mono, table.rt, .foot { font-family: 'Satoshi', Inter, sans-serif; }
   .tblwrap { margin-top: 16px; border: 1px solid var(--border); border-radius: 10px; overflow: auto; }
   table.rt { width: 100%; min-width: 1300px; border-collapse: collapse; }
   table.rt thead th { position: sticky; top: 0; background: #f8fafc; border-bottom: 2px solid #cbd5e1; color: #64748b;
@@ -29,9 +29,36 @@
   .foot .lbl { font-size: 10px; letter-spacing: 1.5px; color: #64748b; text-transform: uppercase; }
   .foot b { display: block; font-size: 22px; margin-top: 4px; }
   .foot .sub { font-size: 9px; color: #94a3b8; }
+  .cbtn { cursor: pointer; border: 1px solid var(--border); background: var(--card); border-radius: 6px; padding: 4px 7px; font-size: 14px; line-height: 1; }
+  .cbtn:hover { border-color: var(--accent); }
+  .modal { position: fixed; inset: 0; z-index: 50; display: flex; background: var(--card); }
+  .modal[hidden] { display: none; }
+  .mbox { background: var(--card); width: 100vw; height: 100vh; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
+  .mhead, .legend { flex: 0 0 auto; }
+  /* Chart popup: Satoshi throughout (header, legend, box labels, and the canvas via layout.fontFamily) */
+  .mbox, .mbox button { font-family: 'Satoshi', 'Inter', system-ui, sans-serif; }
+  .mhead { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 14px; }
+  .mhead .ttl { font-weight: 700; font-size: 15px; }
+  .mhead .seg2 { display: flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  .mhead .seg2 button { border: 0; background: var(--bg); color: var(--muted); padding: 5px 10px; cursor: pointer; font: inherit; font-weight: 700; }
+  .mhead .seg2 button.on { background: var(--accent); color: #fff; }
+  .legend { display: flex; flex-wrap: wrap; gap: 12px; padding: 8px 16px; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--border); }
+  .legend i { display: inline-block; width: 18px; height: 0; border-top: 2px solid; vertical-align: middle; margin-right: 5px; }
+  #chart { flex: 1 1 0; min-height: 0; position: relative; overflow: hidden; }
+  /* The shared stylesheet gives every <table> a 10px top margin (and 100% width,
+     13px font); lightweight-charts lays itself out with a table, so that margin
+     pushed the whole chart 10px down and cut off the time axis at the bottom. */
+  #chart table { margin: 0 !important; width: auto !important; font-size: inherit; border-collapse: separate; }
+  #chart td, #chart th { padding: 0 !important; border: 0 !important; text-align: left; white-space: normal; }
+  /* TradingView-style "Long position" box over the chart pane */
+  .pbox { position: absolute; pointer-events: none; z-index: 3; }
+  .pbox.tgt { background: #16a34a26; border: 1px solid #16a34a80; }
+  .pbox.sl  { background: #e11d4826; border: 1px solid #e11d4880; }
+  .plbl { position: absolute; pointer-events: none; z-index: 4; font: 700 12px 'Satoshi', 'Inter', sans-serif; color: #fff; padding: 2px 7px; border-radius: 3px; white-space: nowrap; }
+  .plbl.tgt { background: #16a34a; } .plbl.sl { background: #e11d48; } .plbl.mid { background: #2563eb; }
   .foot .netcell { border-left: 2px solid; } .foot .netcell.up { background: #16a34a12; border-color: #16a34a; } .foot .netcell.down { background: #e11d4812; border-color: #e11d48; }
   .foot .netcell b { font-size: 26px; font-weight: 700; }
-  .net { margin-top: 16px; padding: 16px 20px; border-radius: 10px; border: 2px solid; display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; font-family: 'Space Mono', monospace; }
+  .net { margin-top: 16px; padding: 16px 20px; border-radius: 10px; border: 2px solid; display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; font-family: 'Satoshi', Inter, sans-serif; }
   .net.up { border-color: #16a34a; background: #16a34a0d; } .net.down { border-color: #e11d48; background: #e11d480d; }
   .net .lbl { font-size: 11px; letter-spacing: 1.5px; color: #64748b; text-transform: uppercase; font-weight: 700; }
   .net .val { font-size: 34px; font-weight: 700; line-height: 1.1; }
@@ -57,9 +84,9 @@
 </head>
 <body>
 <main>
-  <nav><a href="/">Download</a><a href="/vwap" class="on">VWAP / SMC</a></nav>
+  <nav><a href="/">Download</a><a href="/vwap" class="on">VWAP / SMC</a><a href="/account">Account</a></nav>
   <h1>Strategy backtest &amp; data — VWAP 9:30 / SMC</h1>
-  <p class="sub">Runs your frontend app's VWAP 9:30 rules on Upstox data for every trading day in the range: which option it would enter, when, why, and how the trade ended. <b>Download ZIP</b> gives a summary plus each traded option's 1-minute CSV for that day — upload those on the  tab to test them yourself.</p>
+  <p class="sub">Runs your frontend app's VWAP 9:30 rules on Upstox data for every trading day in the range: which option it would enter, when, why, and how the trade ended. <b>Download ZIP</b> gives a summary plus each traded option's 1-minute CSV for that day — upload those on the <a href="/backtest">Backtest page</a> to test them yourself.</p>
 
   <div class="card">
     <div class="grid">
@@ -76,7 +103,7 @@
       <label>Stop-loss % <input type="number" id="sl_pct" step="0.5"></label>
       <label>Target % <input type="number" id="target_pct" step="1"></label>
       <label>Entry from <input type="time" id="entry_start" step="60"></label>
-      <label>Lots <input type="number" id="lots" value="20" min="1" step="1"></label>
+      <label>Lots <input type="number" id="lots" value="1" min="1" step="1"></label>
       <label>Lot size <input type="number" id="lotsize" value="65" min="1" step="1"></label>
     </div>
     <p class="small" id="presetNote" style="margin:10px 0 0"></p>
@@ -119,6 +146,20 @@
     <details id="notradeBox" hidden style="margin-top:12px"><summary id="notradeSum"></summary><div class="small" id="notrade" style="margin-top:8px"></div></details>
   </div>
 </main>
+<div class="modal" id="cmodal" hidden>
+  <div class="mbox">
+    <div class="mhead">
+      <span class="ttl" id="cttl"></span>
+      <span id="cinfo" class="muted"></span>
+      <span style="flex:1"></span>
+      <div class="seg2" id="ctf"><button data-tf="1" class="on">1m</button><button data-tf="5">5m</button></div>
+      <button class="btn ghost" id="cclose" type="button" style="padding:5px 12px">✕ Close</button>
+    </div>
+    <div class="legend" id="clegend"></div>
+    <div id="chart"></div>
+  </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const fmt = n => (Math.round(n * 100) / 100).toFixed(2);
@@ -178,7 +219,7 @@ function render() {
   const dark = matchMedia("(prefers-color-scheme: dark)").matches;
   // VWAP = the frontend's VWAP 9:30 table (as on the live site); SMC = its SMC table (SIGNALS + CMP).
   const heads = ["#", "DATE", "TIME", isSmc ? "SIGNALS" : "CONCEPTS", "STRIKE", "ENTRY", ...(isSmc ? ["CMP"] : []), "SL", "T1", "T2", "STATUS",
-                 `P&L · LOT (${lots}×${lotSize}=${qty})`, "CHARGES", "MAX PTS", "MAX PROFITS"];
+                 `P&L · LOT (${lots}×${lotSize}=${qty})`, "CHARGES", "MAX PTS", "MAX PROFITS", "CHART"];
   $("thead").innerHTML = heads.map(h => `<th>${h}</th>`).join("");
   let tgt = 0, sl = 0, eod = 0, pts = 0, chg = 0;
   $("rows").innerHTML = trades.map((t, idx) => {
@@ -220,8 +261,10 @@ function render() {
       <td style="background:${bg}"><div class="v11 c-amber">−₹${fmtFull(c)}</div><div class="s7 muted">incl. STT+GST</div></td>
       <td style="background:${bg}">${t.peak > 0 ? `<div class="v11 c-purple">+${t.peak.toFixed(2)}</div><div class="s8 c-purple" style="font-weight:700">+${(t.peak / t.entry * 100).toFixed(1)}%</div>` : `<span class="muted">—</span>`}</td>
       <td style="background:${bg}">${t.peak > 0 ? `<div class="v12 c-purple">+₹${fmtFull(t.peak * qty)}</div><div class="s8 c-purple" style="font-weight:700">${t.peak.toFixed(2)} × ${qty}</div><div class="s8 c-purple" style="font-weight:700">+${(t.peak / t.entry * 100).toFixed(1)}%</div>` : `<span class="muted">—</span>`}</td>
+      <td style="background:${bg}"><button class="cbtn" data-ci="${idx}" title="Open chart">📈</button></td>
     </tr>`;
   }).join("");
+  shownTrades = trades;
   $("tblwrap").hidden = !trades.length;
   const closed = tgt + sl, lotTotal = pts * qty;
   const net = lotTotal - chg, nc = net >= 0 ? "c-up" : "c-down";
@@ -279,6 +322,170 @@ $("zip").addEventListener("click", () => { window.location = `/api/vwap/job/${jo
 $("pdf").addEventListener("click", () => { window.location = `/api/vwap/job/${job}/report.pdf?lots=${parseInt($("lots").value) || 20}&lot_size=${parseInt($("lotsize").value) || 65}`; });
 $("sumcsv").addEventListener("click", () => { window.location = `/api/vwap/job/${job}/summary.csv?qty=${qtyNow()}`; });
 ["lots", "lotsize"].forEach(id => $(id).addEventListener("input", render));
+
+// ─── Trade chart ──────────────────────────────────────────────────────────────
+// Candles of the traded option for that day, the strategy's 5-min VWAP, and
+// the trade's entry / SL / T1 / target lines with entry + exit markers.
+let shownTrades = [], chart = null, chartTrade = null, chartData = null, chartTf = "1";
+const STEP_MIN = 5;
+// IST wall-clock → chart time (treated as UTC so the axis shows IST).
+const toTs = (date, hhmm) => { const [y, mo, d] = date.split("-").map(Number); const [h, m] = hhmm.split(":").map(Number); return Date.UTC(y, mo - 1, d, h, m) / 1000; };
+const bucket5 = hhmm => { const [h, m] = hhmm.split(":").map(Number); const t = h * 60 + m, b = 555 + Math.floor((t - 555) / STEP_MIN) * STEP_MIN; return `${String(Math.floor(b / 60)).padStart(2, "0")}:${String(b % 60).padStart(2, "0")}`; };
+
+$("rows").addEventListener("click", e => {
+  const b = e.target.closest("[data-ci]"); if (!b) return;
+  openChart(shownTrades[+b.dataset.ci]);
+});
+$("cclose").addEventListener("click", closeChart);
+$("cmodal").addEventListener("click", e => { if (e.target.id === "cmodal") closeChart(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("cmodal").hidden) closeChart(); });
+$("ctf").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  chartTf = b.dataset.tf; [...$("ctf").children].forEach(x => x.classList.toggle("on", x === b));
+  drawChart();
+});
+
+// Keep the chart exactly the size of its box (window resize, fonts/legend
+// settling after open) so the time axis is never clipped or left short.
+const fitChart = () => {
+  if (chart && !$("cmodal").hidden) { const b = $("chart").getBoundingClientRect(); chart.resize(Math.floor(b.width), Math.floor(b.height)); }
+};
+window.addEventListener("resize", fitChart);
+if (window.ResizeObserver) new ResizeObserver(fitChart).observe($("chart"));
+
+function clock12(t) {
+  const d = new Date(t * 1000); let h = d.getUTCHours(); const m = d.getUTCMinutes(), ap = h >= 12 ? "PM" : "AM";
+  h = h % 12 || 12; return `${h}:${String(m).padStart(2, "0")} ${ap}`;
+}
+
+let boxRaf = 0;
+function closeChart() { $("cmodal").hidden = true; document.body.style.overflow = ""; cancelAnimationFrame(boxRaf); if (chart) { chart.remove(); chart = null; } }
+
+// Position box: re-placed every frame from chart coordinates, so it follows
+// zoom / scroll / autoscale / resize without wiring each event.
+function drawPositionBox(candles, t, tEntry, tExit) {
+  const el = $("chart");
+  const mk = (cls) => { const d = document.createElement("div"); d.className = cls; el.appendChild(d); return d; };
+  const gBox = mk("pbox tgt"), rBox = mk("pbox sl"), gLbl = mk("plbl tgt"), rLbl = mk("plbl sl"), mLbl = mk("plbl mid");
+  const pct = v => { const x = (v - t.entry) / t.entry * 100; return `${x >= 0 ? "+" : "−"}${Math.abs(x).toFixed(1)}%`; };
+  const rr = ((t.target - t.entry) / (t.entry - t.sl)).toFixed(1);
+  gLbl.textContent = `Target ₹${fmt(t.target)}  ${pct(t.target)}  (+${fmt(t.target - t.entry)})`;
+  rLbl.textContent = `SL ₹${fmt(t.sl)}  ${pct(t.sl)}  (−${fmt(t.entry - t.sl)})`;
+  mLbl.textContent = `Entry ₹${fmt(t.entry)} · R:R 1:${rr} · ${t.status} ${t.pnl >= 0 ? "+" : ""}${fmt(t.pnl)}`;
+  const place = (box, x1, x2, yA, yB) => {
+    const top = Math.min(yA, yB), h = Math.abs(yB - yA);
+    Object.assign(box.style, { left: `${x1}px`, width: `${Math.max(2, x2 - x1)}px`, top: `${top}px`, height: `${h}px`, display: "block" });
+  };
+  const frame = () => {
+    if (!chart) return;
+    const ts = chart.timeScale();
+    // Chart coordinates are relative to the plotting pane; measure where that
+    // pane actually sits inside #chart so the box lands exactly on the lines
+    // even if something shifts the chart's own layout.
+    const pane = el.querySelector("canvas"), er = el.getBoundingClientRect();
+    const pr = pane ? pane.getBoundingClientRect() : er;
+    const dx = pr.left - er.left, dy = pr.top - er.top;
+    const cx = v => (v == null ? null : v + dx), cy = v => (v == null ? null : v + dy);
+    let x1 = cx(ts.timeToCoordinate(tEntry)), x2 = cx(ts.timeToCoordinate(tExit));
+    const yE = cy(candles.priceToCoordinate(t.entry)), yT = cy(candles.priceToCoordinate(t.target)), yS = cy(candles.priceToCoordinate(t.sl));
+    const ok = x1 != null && yE != null && yT != null && yS != null;
+    [gBox, rBox, gLbl, rLbl, mLbl].forEach(d => d.style.display = ok ? "block" : "none");
+    if (ok) {
+      if (x2 == null || x2 < x1) x2 = x1 + 40;
+      place(gBox, x1, x2, yE, yT);
+      place(rBox, x1, x2, yE, yS);
+      // Labels sit just past the box's right edge, centred on their own level,
+      // so they never cover candles inside the trade; flipped to the left of
+      // the box if there's no room on the right.
+      const paneW = el.clientWidth - (chart.priceScale("right").width() || 0);
+      const side = (lbl, y) => {
+        const w = lbl.offsetWidth, h = lbl.offsetHeight || 18;
+        const left = x2 + 6 + w <= paneW ? x2 + 6 : Math.max(0, x1 - 6 - w);
+        Object.assign(lbl.style, { left: `${left}px`, top: `${y - h / 2}px` });
+      };
+      side(gLbl, yT); side(mLbl, yE); side(rLbl, yS);
+    }
+    boxRaf = requestAnimationFrame(frame);
+  };
+  cancelAnimationFrame(boxRaf);
+  boxRaf = requestAnimationFrame(frame);
+}
+
+async function openChart(t) {
+  chartTrade = t; chartData = null;
+  const smcRow = t.candle === "";
+  $("cttl").textContent = `${t.symbol}`;
+  $("cinfo").textContent = `${t.date} · entry ${ampm(t.entry_time)} @ ₹${fmt(t.entry)} → ${t.status} ${ampm(t.exit_time)} @ ₹${fmt(t.entry + t.pnl)} · ${t.pnl >= 0 ? "+" : ""}${fmt(t.pnl)} pts`;
+  const t1 = smcRow ? +(t.entry * 1.12).toFixed(2) : null;
+  $("clegend").innerHTML = [
+    `<span><i style="border-color:#f59e0b"></i>VWAP (5-min, as the strategy)</span>`,
+    `<span><i style="border-color:#2563eb;border-top-style:dashed"></i>Entry ₹${fmt(t.entry)}</span>`,
+    `<span><i style="border-color:#e11d48"></i>SL ₹${fmt(t.sl)}${t.sl_to_breakeven ? " → moved to entry" : ""}</span>`,
+    ...(t1 ? [`<span><i style="border-color:#b45309;border-top-style:dashed"></i>T1 ₹${fmt(t1)}</span>`] : []),
+    `<span><i style="border-color:#16a34a"></i>Target ₹${fmt(t.target)}</span>`,
+    `<span>▲ entry · ● exit (${t.status})</span>`,
+  ].join("");
+  $("cmodal").hidden = false;
+  document.body.style.overflow = "hidden";
+  const q = new URLSearchParams({ key: t.instrument_key, date: t.date, expiry: t.expiry });
+  const fontReady = document.fonts ? Promise.race([document.fonts.load("12px Satoshi"), new Promise(r => setTimeout(r, 1500))]) : Promise.resolve();
+  [chartData] = await Promise.all([fetch(`/api/chart?${q}`).then(r => r.json()).catch(e => ({ detail: e.message })), fontReady]);
+  if (chartData.detail || chartData.error) { $("chart").innerHTML = `<p class="err" style="padding:16px">${chartData.detail || chartData.error}</p>`; return; }
+  drawChart();
+}
+
+function drawChart() {
+  if (!chartData || !window.LightweightCharts) return;
+  const t = chartTrade, d = chartData, el = $("chart");
+  if (chart) { chart.remove(); chart = null; }
+  el.innerHTML = "";
+  const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+  // Sized to the exact space under the header/legend (autoSize let the canvas
+  // grow past it, clipping the time axis) and re-measured on window resize.
+  const box = el.getBoundingClientRect();
+  chart = LightweightCharts.createChart(el, {
+    width: Math.floor(box.width), height: Math.floor(box.height),
+    layout: { background: { color: dark ? "#0f1724" : "#ffffff" }, textColor: dark ? "#94a3b8" : "#475569", fontFamily: "'Satoshi', 'Inter', sans-serif", fontSize: 12 },
+    grid: { vertLines: { color: dark ? "#1e2a3a" : "#f1f5f9" }, horzLines: { color: dark ? "#1e2a3a" : "#f1f5f9" } },
+    // Chart times are IST wall-clock stored as UTC — format them as 9:35 AM.
+    timeScale: { timeVisible: true, secondsVisible: false, tickMarkFormatter: t => clock12(t) },
+    localization: { timeFormatter: t => clock12(t) },
+    rightPriceScale: { borderColor: dark ? "#1e2a3a" : "#e2e8f0" },
+    crosshair: { mode: 0 },
+  });
+  // Pin the chart's own root to the box's top-left: as an in-flow block it sat
+  // ~10px low (line box), clipping the time axis and offsetting the overlay.
+  const root = el.firstElementChild;
+  if (root) Object.assign(root.style, { position: "absolute", top: "0", left: "0" });
+  const five = chartTf === "5";
+  const src = five ? d.bars5 : d.bars1;
+  const candles = chart.addCandlestickSeries({ upColor: "#16a34a", downColor: "#e11d48", borderVisible: false, wickUpColor: "#16a34a", wickDownColor: "#e11d48" });
+  candles.setData(src.map(b => ({ time: toTs(d.date, b[0]), open: b[1], high: b[2], low: b[3], close: b[4] })));
+  // VWAP: known when each 5-min candle closes; on 5m bars stamp it at that bar, on 1m at its last minute.
+  const vw = chart.addLineSeries({ color: "#f59e0b", lineWidth: 2, priceLineVisible: false, lastValueVisible: false });
+  vw.setData(d.vwap5.map(([hhmm, v]) => ({ time: toTs(d.date, five ? bucket5(hhmm) : hhmm), value: v })));
+  const line = (price, color, title, style) => candles.createPriceLine({ price, color, title, lineWidth: 2, lineStyle: style, axisLabelVisible: true });
+  line(t.entry, "#2563eb", "Entry", 2);
+  line(t.sl, "#e11d48", "SL", 0);
+  if (t.sl_to_breakeven) line(t.entry, "#e11d48", "SL→entry", 1);
+  if (t.candle === "") line(+(t.entry * 1.12).toFixed(2), "#b45309", "T1", 2);
+  line(t.target, "#16a34a", "Target", 0);
+  const at = hhmm => toTs(d.date, five ? bucket5(hhmm) : hhmm);
+  // Shapes only — the prices are on the position box labels, off the candles.
+  const markers = [{ time: at(t.entry_time), position: "belowBar", color: "#2563eb", shape: "arrowUp" }];
+  if (t.exit_time) {
+    const win = t.pnl >= 0;
+    markers.push({ time: at(t.exit_time), position: win ? "aboveBar" : "belowBar", color: win ? "#16a34a" : "#e11d48", shape: "circle" });
+  }
+  markers.sort((a, b) => a.time - b.time);
+  candles.setMarkers(markers);
+  chart.timeScale().fitContent();
+  // Box from entry to exit (exit outside the data → last candle).
+  const lastT = toTs(d.date, src[src.length - 1][0]);
+  let tExit = t.exit_time ? at(t.exit_time) : lastT;
+  if (tExit > lastT) tExit = lastT;
+  drawPositionBox(candles, t, at(t.entry_time), tExit);
+}
 </script>
 </body>
 </html>

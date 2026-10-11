@@ -23,6 +23,15 @@ import zipfile
 from . import pdf_report, smc, upstox, vwap
 
 app = FastAPI(title="upstocks")
+
+
+@app.middleware("http")
+async def _no_cache_pages(request: Request, call_next):
+    # Pages change as the app is updated — never let the browser reuse an old copy.
+    resp = await call_next(request)
+    if resp.headers.get("content-type", "").startswith("text/html"):
+        resp.headers["Cache-Control"] = "no-store"
+    return resp
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 
@@ -96,6 +105,21 @@ async def index(request: Request):
         "expiries": expiries, "error": error, "intervals": list(upstox.INTERVALS),
         "today": upstox.today_ist().isoformat(),
     })
+
+
+@app.get("/account", response_class=HTMLResponse)
+async def account_page(request: Request):
+    """Profile, funds, holdings, positions, orders and trades — server-rendered.
+    Each section loads independently; a static-IP refusal is shown per section."""
+    acct = await upstox.account()
+    blocked = all(v["error"] and "static IP" in v["error"] for v in acct.values())
+    return templates.TemplateResponse(request, "account.html", {"a": acct, "blocked": blocked,
+                                                                "now": datetime.now(upstox.IST).strftime("%d %b %Y %H:%M")})
+
+
+@app.get("/api/account")
+async def api_account():
+    return await upstox.account()
 
 
 @app.get("/backtest", response_class=HTMLResponse)
@@ -228,8 +252,9 @@ async def _run_job(job: dict) -> None:
 
 @app.get("/vwap", response_class=HTMLResponse)
 async def vwap_page(request: Request):
-    end = upstox.today_ist() - timedelta(days=1)
-    start = end - timedelta(days=61)
+    # From = 1st of the current month, To = today (IST).
+    end = upstox.today_ist()
+    start = end.replace(day=1)
     from dataclasses import asdict, replace
     presets = {k: {f: v for f, v in asdict(replace(vwap.Settings(start=start, end=end), **ov)).items()
                    if f not in ("start", "end")} for k, ov in vwap.PRESETS.items()}
@@ -247,6 +272,25 @@ async def vwap_run(request: Request):
     JOBS[jid] = job
     job["task"] = asyncio.create_task(_run_job(job))
     return {"id": jid}
+
+
+@app.get("/api/chart")
+async def chart_data(key: str, day: str = Query(..., alias="date"), expiry: str = Query(...)):
+    """One option's day for the trade chart: 1-min bars (market hours), the
+    5-min bars the strategy uses, and its 5-min VWAP (same maths as the engine).
+    Times are IST "HH:MM"; a 5-min bar is stamped with its first minute."""
+    d = _parse_day(day, "date")
+    expired = expiry in set(await upstox.expired_expiries())
+    bars = vwap._market(await vwap.day_rows(key, d, expiry, expired))
+    nm = vwap.aggregate(bars, 5)
+    vw = vwap.vwap_series(nm)
+    return {
+        "date": day,
+        "bars1": [list(b[:6]) for b in bars],
+        "bars5": [[vwap._add(b[0], -4), *b[1:6]] for b in nm],
+        # VWAP of a 5-min candle is known when it closes → stamp at its last minute
+        "vwap5": [[b[0], v] for b, v in zip(nm, vw)],
+    }
 
 
 @app.get("/api/vwap/job/{jid}")

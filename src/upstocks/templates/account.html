@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>upstocks — account</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+{% include "_style.html" %}
+<style>
+  main { max-width: none; padding: 20px 24px 48px; }
+  .sec { margin-top: 16px; }
+  .sec h2 { font-size: 13px; letter-spacing: 1.4px; text-transform: uppercase; color: var(--muted); margin: 0 0 10px; }
+  .kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .kv div { background: var(--card); padding: 12px 14px; }
+  .kv span { display: block; font-size: 11px; letter-spacing: 1.2px; text-transform: uppercase; color: var(--muted); }
+  .kv b { display: block; margin-top: 4px; font-family: 'Satoshi', Inter, sans-serif; font-size: 15px; }
+  table { width: 100%; border-collapse: collapse; font-family: 'Satoshi', Inter, sans-serif; font-size: 12px; }
+  th { text-align: left; font-size: 10px; letter-spacing: 1.4px; text-transform: uppercase; color: var(--muted); padding: 8px 10px; border-bottom: 2px solid var(--border); white-space: nowrap; }
+  td { padding: 9px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  .tbl { border: 1px solid var(--border); border-radius: 10px; overflow: auto; background: var(--card); }
+  .up { color: var(--ok); } .down { color: var(--pe); } .muted { color: var(--muted); }
+  .warn { border: 1px solid #f59e0b; background: #f59e0b14; border-radius: 10px; padding: 14px 16px; margin-top: 16px; line-height: 1.6; }
+  .secerr { color: var(--pe); font-size: 13px; padding: 10px 0; }
+</style>
+</head>
+<body>
+<main>
+  <nav><a href="/">Download</a><a href="/vwap">VWAP / SMC</a><a href="/account" class="on">Account</a></nav>
+  <h1>Account</h1>
+  <p class="sub">Your Upstox profile, funds, holdings, positions, orders and today's trades — loaded {{ now }} IST. Refresh the page to update.</p>
+
+  {% if blocked %}
+  <div class="warn">
+    <b>Upstox is refusing account data from this computer.</b><br>
+    Your token only allows profile / funds / portfolio / order calls from the <b>static IP</b> registered on your Upstox account,
+    and this Mac's internet IP isn't it. Fix: Upstox Developer Console → your app → <b>Static IP</b> → add this computer's public IP
+    (search "what is my IP"), or run upstocks on the machine whose IP is registered. Market data (Download, VWAP / SMC) is not affected.
+  </div>
+  {% endif %}
+
+  {% macro err(sec) %}{% if a[sec].error %}<div class="secerr">⚠ {{ a[sec].error }}</div>{% endif %}{% endmacro %}
+  {% macro money(v) %}{% if v is number %}₹{{ "{:,.2f}".format(v) }}{% else %}—{% endif %}{% endmacro %}
+  {% macro pnl(v) %}{% if v is number %}<span class="{{ 'up' if v >= 0 else 'down' }}">{{ '+' if v >= 0 else '−' }}₹{{ "{:,.2f}".format(v|abs) }}</span>{% else %}—{% endif %}{% endmacro %}
+
+  <section class="sec">
+    <h2>Profile</h2>
+    {{ err("profile") }}
+    {% set p = a.profile.data %}
+    {% if p %}
+    <div class="kv">
+      <div><span>Name</span><b>{{ p.user_name or "—" }}</b></div>
+      <div><span>Client ID</span><b>{{ p.user_id or "—" }}</b></div>
+      <div><span>Email</span><b>{{ p.email or "—" }}</b></div>
+      <div><span>Broker</span><b>{{ p.broker or "—" }}</b></div>
+      <div><span>User type</span><b>{{ p.user_type or "—" }}</b></div>
+      <div><span>Active</span><b>{{ "Yes" if p.is_active else "No" }}</b></div>
+      <div><span>Exchanges</span><b>{{ (p.exchanges or [])|join(", ") or "—" }}</b></div>
+      <div><span>Products</span><b>{{ (p.products or [])|join(", ") or "—" }}</b></div>
+    </div>
+    {% endif %}
+  </section>
+
+  <section class="sec">
+    <h2>Funds &amp; margin</h2>
+    {{ err("funds") }}
+    {% set f = a.funds.data %}
+    {% if f %}
+    {% for seg, label in [("equity", "Equity / F&O"), ("commodity", "Commodity")] %}{% set x = f[seg] %}{% if x %}
+    <div class="kv" style="margin-bottom:10px">
+      <div><span>{{ label }} · available</span><b class="up">{{ money(x.available_margin) }}</b></div>
+      <div><span>Used margin</span><b>{{ money(x.used_margin) }}</b></div>
+      <div><span>Pay-in today</span><b>{{ money(x.payin_amount) }}</b></div>
+      <div><span>SPAN margin</span><b>{{ money(x.span_margin) }}</b></div>
+      <div><span>Exposure margin</span><b>{{ money(x.exposure_margin) }}</b></div>
+      <div><span>Notional cash</span><b>{{ money(x.notional_cash) }}</b></div>
+    </div>
+    {% endif %}{% endfor %}
+    {% endif %}
+  </section>
+
+  <section class="sec">
+    <h2>Positions (today)</h2>
+    {{ err("positions") }}
+    {% set rows = a.positions.data or [] %}
+    {% if a.positions.data is not none %}
+    {% if rows %}
+    <div class="tbl"><table>
+      <tr><th>Symbol</th><th>Product</th><th>Qty</th><th>Avg</th><th>LTP</th><th>Buy value</th><th>Sell value</th><th>Realised</th><th>Unrealised</th><th>P&amp;L</th></tr>
+      {% for r in rows %}
+      <tr><td><b>{{ r.trading_symbol or r.tradingsymbol }}</b> <span class="muted">{{ r.exchange }}</span></td><td>{{ r.product }}</td><td>{{ r.quantity }}</td>
+        <td>{{ money(r.average_price) }}</td><td>{{ money(r.last_price) }}</td><td>{{ money(r.buy_value) }}</td><td>{{ money(r.sell_value) }}</td>
+        <td>{{ pnl(r.realised) }}</td><td>{{ pnl(r.unrealised) }}</td><td><b>{{ pnl(r.pnl) }}</b></td></tr>
+      {% endfor %}
+      <tr><td colspan="9" class="muted">Total</td><td><b>{{ pnl(rows|sum(attribute="pnl")) }}</b></td></tr>
+    </table></div>
+    {% else %}<p class="muted">No positions today.</p>{% endif %}
+    {% endif %}
+  </section>
+
+  <section class="sec">
+    <h2>Holdings</h2>
+    {{ err("holdings") }}
+    {% set rows = a.holdings.data or [] %}
+    {% if a.holdings.data is not none %}
+    {% if rows %}
+    <div class="tbl"><table>
+      <tr><th>Symbol</th><th>Qty</th><th>Avg</th><th>LTP</th><th>Invested</th><th>Current</th><th>P&amp;L</th><th>Day change</th></tr>
+      {% for r in rows %}
+      <tr><td><b>{{ r.tradingsymbol or r.trading_symbol }}</b> <span class="muted">{{ r.company_name }}</span></td><td>{{ r.quantity }}</td>
+        <td>{{ money(r.average_price) }}</td><td>{{ money(r.last_price) }}</td>
+        <td>{{ money((r.average_price or 0) * (r.quantity or 0)) }}</td><td>{{ money((r.last_price or 0) * (r.quantity or 0)) }}</td>
+        <td><b>{{ pnl(r.pnl) }}</b></td><td>{{ pnl(r.day_change) }} <span class="muted">{{ "{:+.2f}%".format(r.day_change_percentage) if r.day_change_percentage is number else "" }}</span></td></tr>
+      {% endfor %}
+      <tr><td colspan="6" class="muted">Total</td><td><b>{{ pnl(rows|sum(attribute="pnl")) }}</b></td><td></td></tr>
+    </table></div>
+    {% else %}<p class="muted">No holdings.</p>{% endif %}
+    {% endif %}
+  </section>
+
+  <section class="sec">
+    <h2>Orders (today)</h2>
+    {{ err("orders") }}
+    {% set rows = a.orders.data or [] %}
+    {% if a.orders.data is not none %}
+    {% if rows %}
+    <div class="tbl"><table>
+      <tr><th>Time</th><th>Symbol</th><th>Side</th><th>Type</th><th>Product</th><th>Qty</th><th>Filled</th><th>Price</th><th>Trigger</th><th>Avg</th><th>Status</th><th>Message</th></tr>
+      {% for r in rows|sort(attribute="order_timestamp", reverse=True) %}
+      <tr><td>{{ (r.order_timestamp or "")[11:19] }}</td><td><b>{{ r.trading_symbol or r.tradingsymbol }}</b></td>
+        <td class="{{ 'up' if r.transaction_type == 'BUY' else 'down' }}">{{ r.transaction_type }}</td><td>{{ r.order_type }}</td><td>{{ r.product }}</td>
+        <td>{{ r.quantity }}</td><td>{{ r.filled_quantity }}</td><td>{{ money(r.price) }}</td><td>{{ money(r.trigger_price) }}</td><td>{{ money(r.average_price) }}</td>
+        <td><b>{{ r.status }}</b></td><td class="muted">{{ r.status_message or "" }}</td></tr>
+      {% endfor %}
+    </table></div>
+    {% else %}<p class="muted">No orders today.</p>{% endif %}
+    {% endif %}
+  </section>
+
+  <section class="sec">
+    <h2>Trades (today)</h2>
+    {{ err("trades") }}
+    {% set rows = a.trades.data or [] %}
+    {% if a.trades.data is not none %}
+    {% if rows %}
+    <div class="tbl"><table>
+      <tr><th>Time</th><th>Symbol</th><th>Side</th><th>Qty</th><th>Price</th><th>Product</th><th>Order ID</th><th>Trade ID</th></tr>
+      {% for r in rows %}
+      <tr><td>{{ (r.exchange_timestamp or r.order_timestamp or "")[11:19] }}</td><td><b>{{ r.trading_symbol or r.tradingsymbol }}</b></td>
+        <td class="{{ 'up' if r.transaction_type == 'BUY' else 'down' }}">{{ r.transaction_type }}</td><td>{{ r.quantity }}</td>
+        <td>{{ money(r.average_price) }}</td><td>{{ r.product }}</td><td class="muted">{{ r.order_id }}</td><td class="muted">{{ r.trade_id }}</td></tr>
+      {% endfor %}
+    </table></div>
+    {% else %}<p class="muted">No trades today.</p>{% endif %}
+    {% endif %}
+  </section>
+</main>
+</body>
+</html>

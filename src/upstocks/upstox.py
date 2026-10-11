@@ -335,3 +335,27 @@ async def find_strike_by_premium(expiry: str, opt_type: str, day: date, hhmm: st
             "strike": best["strike"], "premium": best["premium"], "at": best["at"],
             "symbol": by_strike[best["strike"]]["trading_symbol"],
             "nearby": sorted(cands, key=lambda c: c["strike"]), "lookups": len(checked)}
+
+
+# ─── Account (needs the request to come from the account's static IP) ─────────
+# Upstox refuses every user/portfolio/order endpoint for this token unless the
+# call comes from the static IP registered in the developer console, so each
+# section is fetched on its own and fails on its own (the page shows why).
+ACCOUNT_ENDPOINTS = {
+    "profile":   "/v2/user/profile",
+    "funds":     "/v2/user/get-funds-and-margin",
+    "holdings":  "/v2/portfolio/long-term-holdings",
+    "positions": "/v2/portfolio/short-term-positions",
+    "orders":    "/v2/order/retrieve-all",
+    "trades":    "/v2/order/trades/get-trades-for-day",
+}
+
+
+async def account() -> dict:
+    async def one(name: str, path: str):
+        try:
+            return name, {"data": (await _get(path)).get("data"), "error": None}
+        except UpstoxError as e:
+            return name, {"data": None, "error": str(e)}
+    pairs = await asyncio.gather(*(one(n, p) for n, p in ACCOUNT_ENDPOINTS.items()))
+    return dict(pairs)
