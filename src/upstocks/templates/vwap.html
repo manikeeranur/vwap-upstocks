@@ -31,7 +31,7 @@
   .foot .sub { font-size: 9px; color: #94a3b8; }
   .cbtn { cursor: pointer; border: 1px solid var(--border); background: var(--card); border-radius: 6px; padding: 4px 7px; font-size: 14px; line-height: 1; }
   .cbtn:hover { border-color: var(--accent); }
-  .modal { position: fixed; inset: 0; z-index: 50; display: flex; background: var(--card); }
+  .modal { position: fixed; inset: 0; z-index: 100; display: flex; background: var(--card); }
   .modal[hidden] { display: none; }
   .mbox { background: var(--card); width: 100vw; height: 100vh; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
   .mhead, .legend { flex: 0 0 auto; }
@@ -88,8 +88,8 @@
 </style>
 </head>
 <body>
+{% set active = "vwap" %}{% include "_nav.html" %}
 <main>
-  <nav><a href="/paper">Paper / Live</a><a href="/account">Account</a><a href="/vwap" class="on">VWAP / SMC</a><a href="/data">Download</a></nav>
   <h1>Strategy backtest &amp; data — VWAP 9:30 / SMC</h1>
   <p class="sub">Runs your frontend app's VWAP 9:30 rules on Upstox data for every trading day in the range: which option it would enter, when, why, and how the trade ended. <b>Download ZIP</b> gives a summary plus each traded option's 1-minute CSV for that day — upload those on the <a href="/backtest">Backtest page</a> to test them yourself.</p>
 

@@ -13,3 +13,6 @@ __pycache__/
 .venv/
 .cache/
 upstocks.log
+
+# runtime data
+journal.json

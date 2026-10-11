@@ -25,8 +25,8 @@
 </style>
 </head>
 <body>
+{% set active = "account" %}{% include "_nav.html" %}
 <main>
-  <nav><a href="/paper">Paper / Live</a><a href="/account" class="on">Account</a><a href="/vwap">VWAP / SMC</a><a href="/data">Download</a></nav>
   <h1>Account</h1>
   <p class="sub">Your Upstox profile, funds, holdings, positions, orders and today's trades — loaded {{ now }} IST. Refresh the page to update.</p>
 

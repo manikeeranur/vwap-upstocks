@@ -141,6 +141,34 @@ async def paper_config(request: Request):
     return {"state": live.STATE}
 
 
+@app.get("/journal", response_class=HTMLResponse)
+async def journal_page(request: Request):
+    return templates.TemplateResponse(request, "journal.html", {"labels": live.LABELS, "presets": live.PRESETS,
+                                                                "today": upstox.today_ist().isoformat()})
+
+
+@app.get("/calendar", response_class=HTMLResponse)
+async def calendar_page(request: Request):
+    return templates.TemplateResponse(request, "calendar.html", {"labels": live.LABELS, "presets": live.PRESETS,
+                                                                 "today": upstox.today_ist().isoformat()})
+
+
+@app.get("/api/journal")
+async def journal_data(start: str = Query(...), end: str = Query(...)):
+    _parse_day(start, "start"), _parse_day(end, "end")
+    return live.journal(start, end)
+
+
+@app.post("/api/journal/note")
+async def journal_note(request: Request):
+    b = await request.json()
+    if not b.get("id"):
+        raise HTTPException(400, "id is required")
+    live.set_note(b["id"], str(b.get("text") or ""))
+    return {"ok": True}
+
+
+
 @app.post("/api/paper/squareoff")
 async def paper_squareoff(request: Request):
     p = (await request.json()).get("preset")

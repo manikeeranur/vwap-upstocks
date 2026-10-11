@@ -43,8 +43,8 @@
 </style>
 </head>
 <body>
+{% set active = "paper" %}{% include "_nav.html" %}
 <main>
-  <nav><a href="/paper" class="on">Paper / Live</a><a href="/account">Account</a><a href="/vwap">VWAP / SMC</a><a href="/data">Download</a></nav>
   <h1>Paper &amp; live trade — all four strategies</h1>
   <p class="sub">Market days 09:16–15:30 IST, every minute a few seconds after the candle closes, each switched-on strategy runs the same engine as the backtest on today's data so far. <b>Paper</b> only tracks the trades. <b>Live</b> (off by default) sends real Upstox intraday MARKET orders: BUY lots × lot size on a new entry (only if the signal is ≤ 3 min old), SELL when the strategy exits; open positions are always exited even if Live is switched off. Upstox accepts orders only from the static IP registered for your token. The scan runs inside the app — this page just shows it.</p>
 

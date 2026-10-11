@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>upstocks — calendar P&amp;L</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+{% include "_style.html" %}
+<style>
+  main { max-width: none; padding: 24px 28px 48px; }
+  .head { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 14px; margin-bottom: 18px; }
+  .head h1 { margin: 0; } .head .sub { margin: 2px 0 0; }
+  .mnav { display: flex; align-items: center; gap: 8px; }
+  .mnav h2 { font-size: 18px; margin: 0 6px; min-width: 150px; text-align: center; }
+  .mnav button { font: inherit; font-weight: 700; width: 36px; height: 36px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); color: var(--text); cursor: pointer; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .tile { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+  .tile span { display: block; font-size: 11px; letter-spacing: 1.1px; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  .tile b { display: block; font-size: 20px; margin-top: 6px; } .tile small { color: var(--muted); font-size: 12px; }
+  .cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; }
+  .dow { font-size: 11px; letter-spacing: 1.1px; text-transform: uppercase; color: var(--muted); font-weight: 600; padding: 0 4px 2px; }
+  .day { min-width: 0; overflow: hidden; background: var(--card); border: 1px solid var(--border); border-radius: 10px; min-height: 92px; padding: 8px 10px; cursor: default;
+         display: flex; flex-direction: column; gap: 4px; position: relative; }
+  .day.has { cursor: pointer; } .day.has:hover { outline: 2px solid var(--accent); }
+  .day.sel { outline: 2px solid var(--accent); }
+  .day.out { opacity: .35; } .day.wk { background: transparent; }
+  .day .n { font-size: 12px; color: var(--muted); font-weight: 600; }
+  .day .pl { font-size: 16px; font-weight: 700; margin-top: auto; }
+  .day .tc { font-size: 11px; color: var(--muted); }
+  .day.today .n { color: var(--accent); }
+  .up { color: var(--ok); } .down { color: var(--pe); } .muted { color: var(--muted); }
+  .st { font-weight: 700; } .st.SL { color: var(--pe); } .st.TARGET { color: var(--ok); }
+  #detail { margin-top: 16px; }
+  .card h3 { margin: 0 0 8px; font-size: 15px; }
+  @media (max-width: 700px) {
+    main { padding: 16px 12px 40px; }
+    .card { padding: 10px; }
+    .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .tile b { font-size: 17px; }
+    .day { min-height: 60px; padding: 5px 4px; border-radius: 7px; }
+    .day .pl { font-size: 10.5px; white-space: nowrap; letter-spacing: -.2px; }
+    .day .tc { font-size: 9.5px; white-space: nowrap; }
+    .cal { gap: 4px; } .dow { font-size: 9.5px; padding: 0 2px; letter-spacing: .4px; }
+  }
+</style>
+</head>
+<body>
+{% set active = "calendar" %}{% include "_nav.html" %}
+<main>
+  <div class="head">
+    <div><h1>Calendar P&amp;L</h1><p class="sub">Each market day's paper / live P&amp;L from Paper / Live — no backtests or replays. Click a day for its trades.</p></div>
+    <span style="flex:1"></span>
+    <label>Strategy <select id="strat"><option value="">All strategies</option>
+      {% for p in presets %}<option value="{{ p }}">{{ labels[p] }}</option>{% endfor %}</select></label>
+    <div class="mnav"><button id="prev" type="button" aria-label="Previous month">‹</button><h2 id="mon"></h2><button id="next" type="button" aria-label="Next month">›</button></div>
+  </div>
+  <div class="tiles" id="tiles"></div>
+  <div class="card">
+    <div class="cal" id="cal"></div>
+  </div>
+  <div class="card" id="detail" hidden></div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const LABELS = {{ labels | tojson }}, TODAY = "{{ today }}";
+const fmt = n => (Math.round(n * 100) / 100).toFixed(2);
+const money = n => `${n < 0 ? "−" : n > 0 ? "+" : ""}₹${Math.abs(Math.round(n)).toLocaleString("en-IN")}`;
+const ampm = s => { if (!s) return "—"; let [h, m] = s.split(":").map(Number); const ap = h >= 12 ? "PM" : "AM"; h = h % 12 || 12; return `${h}:${String(m).padStart(2, "0")} ${ap}`; };
+const iso = d => d.toLocaleDateString("en-CA");
+let cur = new Date(TODAY); cur.setDate(1);
+let J = null, sel = null;
+
+async function load() {
+  const a = new Date(cur.getFullYear(), cur.getMonth(), 1), b = new Date(cur.getFullYear(), cur.getMonth() + 1, 0);
+  J = await (await fetch(`/api/journal?start=${iso(a)}&end=${iso(b)}`)).json();
+  render();
+}
+
+function dayTrades(d) {
+  const out = [];
+  for (const [p, v] of Object.entries(J.days[d] || {})) {
+    if ($("strat").value && p !== $("strat").value) continue;
+    v.trades.forEach(t => out.push({ ...t, preset: p, rs: t.pnl * v.lots * v.lot_size }));
+  }
+  return out.sort((a, b) => a.entry_time.localeCompare(b.entry_time));
+}
+
+function render() {
+  $("mon").textContent = cur.toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+  const y = cur.getFullYear(), m = cur.getMonth(), first = new Date(y, m, 1), last = new Date(y, m + 1, 0);
+  const lead = (first.getDay() + 6) % 7;  // Monday first
+  const pl = {}; let maxAbs = 1;
+  for (let d = 1; d <= last.getDate(); d++) {
+    const k = iso(new Date(y, m, d)), ts = dayTrades(k);
+    if (ts.length || J.days[k]) { pl[k] = { rs: ts.reduce((a, t) => a + t.rs, 0), n: ts.length }; maxAbs = Math.max(maxAbs, Math.abs(pl[k].rs)); }
+  }
+  const vals = Object.entries(pl).filter(([, v]) => v.n);
+  const net = vals.reduce((a, [, v]) => a + v.rs, 0), green = vals.filter(([, v]) => v.rs > 0).length, red = vals.filter(([, v]) => v.rs < 0).length;
+  const best = vals.reduce((a, d) => !a || d[1].rs > a[1].rs ? d : a, null), worst = vals.reduce((a, d) => !a || d[1].rs < a[1].rs ? d : a, null);
+  const tile = (k, v, s = "", cls = "") => `<div class="tile"><span>${k}</span><b class="${cls}">${v}</b><small>${s}</small></div>`;
+  $("tiles").innerHTML = [
+    tile("Month P&L", money(net), `${vals.reduce((a, [, v]) => a + v.n, 0)} trades · gross`, net >= 0 ? "up" : "down"),
+    tile("Green days", green, `of ${vals.length} traded days`, "up"),
+    tile("Red days", red, "", "down"),
+    tile("Best day", best ? money(best[1].rs) : "—", best ? best[0] : "", "up"),
+    tile("Worst day", worst ? money(worst[1].rs) : "—", worst ? worst[0] : "", "down"),
+  ].join("");
+  const cells = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map(d => `<div class="dow">${d}</div>`);
+  for (let i = 0; i < lead; i++) cells.push(`<div class="day out wk"></div>`);
+  for (let d = 1; d <= last.getDate(); d++) {
+    const dt = new Date(y, m, d), k = iso(dt), v = pl[k], wk = dt.getDay() === 0 || dt.getDay() === 6;
+    const a = v && v.n ? Math.min(0.85, 0.12 + Math.abs(v.rs) / maxAbs * 0.5) : 0;
+    const bg = v && v.n ? `background: color-mix(in srgb, ${v.rs >= 0 ? "var(--ok)" : "var(--pe)"} ${Math.round(a * 100)}%, var(--card));` : "";
+    cells.push(`<div class="day ${v && v.n ? "has" : ""} ${wk ? "wk" : ""} ${k === TODAY ? "today" : ""} ${k === sel ? "sel" : ""}" data-d="${k}" style="${bg}">
+      <span class="n">${d}</span>
+      ${v && v.n ? `<span class="pl ${v.rs >= 0 ? "up" : "down"}" style="${a > .45 ? "color:#fff" : ""}">${money(v.rs)}</span><span class="tc" style="${a > .45 ? "color:#fffc" : ""}">${v.n} trade${v.n > 1 ? "s" : ""}</span>`
+        : v ? `<span class="tc" style="margin-top:auto">no trade</span>` : ""}
+    </div>`);
+  }
+  $("cal").innerHTML = cells.join("");
+  renderDetail();
+}
+
+function renderDetail() {
+  if (!sel) { $("detail").hidden = true; return; }
+  const ts = dayTrades(sel), net = ts.reduce((a, t) => a + t.rs, 0);
+  $("detail").hidden = false;
+  $("detail").innerHTML = `<h3>${new Date(sel).toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" })} · <span class="${net >= 0 ? "up" : "down"}">${money(net)}</span></h3>
+    <div class="scroll"><table><thead><tr><th>Strategy</th><th>In → out</th><th>Option</th><th>Entry</th><th>Exit</th><th>Status</th><th>P&amp;L pts</th><th>P&amp;L ₹</th><th>Note</th></tr></thead><tbody>${
+    ts.map(t => `<tr><td>${LABELS[t.preset]}</td><td>${ampm(t.entry_time)} → ${t.open ? "…" : ampm(t.exit_time)}</td>
+      <td><b style="color:${t.type === "CE" ? "var(--ce)" : "var(--pe)"}">${t.symbol}</b></td><td>₹${fmt(t.entry)}</td><td>₹${fmt(t.exit)}</td>
+      <td class="st ${t.status}">${t.open ? "OPEN" : t.status === "TIME_EXIT" ? "15:20 EXIT" : t.status}</td>
+      <td class="${t.rs >= 0 ? "up" : "down"}">${t.pnl >= 0 ? "+" : ""}${fmt(t.pnl)}</td><td class="${t.rs >= 0 ? "up" : "down"}">${money(t.rs)}</td>
+      <td class="muted" style="text-align:left;white-space:normal">${(J.notes[t.id] || "").replace(/</g, "&lt;")}</td></tr>`).join("")
+    || `<tr><td class="muted" colspan="9">No trades that day.</td></tr>`}</tbody></table></div>`;
+}
+
+$("cal").addEventListener("click", e => { const d = e.target.closest(".day.has"); if (!d) return; sel = d.dataset.d; render(); });
+$("prev").addEventListener("click", () => { cur.setMonth(cur.getMonth() - 1); sel = null; load(); });
+$("next").addEventListener("click", () => { cur.setMonth(cur.getMonth() + 1); sel = null; load(); });
+$("strat").addEventListener("change", render);
+load();
+</script>
+</body>
+</html>

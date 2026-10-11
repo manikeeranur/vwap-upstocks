@@ -32,12 +32,19 @@ PRESETS = ["frontend_live", "smc_live", "ema25_vwap", "ema_pullback"]
 LABELS = {"frontend_live": "VWAP 9:30", "smc_live": "SMC", "ema25_vwap": "VWAP + EMA25 + SuperTrend",
           "ema_pullback": "EMA9/EMA26 pullback (Mani)"}
 STATE_FILE = Path(__file__).resolve().parents[2] / "live_state.json"
+JOURNAL_FILE = Path(__file__).resolve().parents[2] / "journal.json"
 FRESH_MIN = 3
 
 _lock = asyncio.Lock()
 _task: asyncio.Task | None = None
 STATE: dict = {}
 VIEW: dict = {"day": None, "scanned_at": None, "results": {}, "errors": {}, "running": False}
+# Journal: each market day's paper / live trades per preset (today's scans only —
+# replays of past days are never kept), plus a note per trade.
+# {"days": {date: {preset: {...}}}, "notes": {trade id: text}}
+JOURNAL: dict = {"days": {}, "notes": {}}
+KEEP = ("date", "expiry", "symbol", "strike", "type", "instrument_key", "entry_time", "entry", "sl", "target",
+        "status", "exit_time", "exit", "pnl", "pnl_pct", "peak", "spot", "why")
 
 
 def now_ist() -> datetime:
@@ -59,12 +66,50 @@ def _load() -> None:
         cfg.setdefault("lots", 1)
     STATE.setdefault("orders", {})      # trade id → {"buy": {...}, "sell": {...}}
     STATE.setdefault("log", [])
+    global JOURNAL
+    try:
+        JOURNAL = json.loads(JOURNAL_FILE.read_text())
+    except (OSError, ValueError):
+        JOURNAL = {}
+    JOURNAL.setdefault("days", {})
+    JOURNAL.setdefault("notes", {})
 
 
 def _save() -> None:
     tmp = STATE_FILE.with_suffix(".tmp")
     tmp.write_text(json.dumps(STATE, indent=1))
     tmp.replace(STATE_FILE)
+
+
+def _save_journal() -> None:
+    tmp = JOURNAL_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(JOURNAL))
+    tmp.replace(JOURNAL_FILE)
+
+
+def _record(day: date, results: dict) -> None:
+    """Keep today's paper / live trades in the journal."""
+    d = day.isoformat()
+    jd = JOURNAL["days"].setdefault(d, {})
+    for p, trades in results.items():
+        jd[p] = {"lots": STATE["config"][p]["lots"], "lot_size": STATE["lot_size"],
+                 "updated": f"{now_ist():%Y-%m-%d %H:%M}",
+                 "trades": [{**{k: t.get(k) for k in KEEP}, "id": trade_id(p, t), "open": t.get("open", False),
+                             "live": bool(t.get("orders", {}).get("buy", {}).get("order_id"))} for t in trades]}
+    _save_journal()
+
+
+def journal(start: str, end: str) -> dict:
+    return {"days": {d: v for d, v in JOURNAL["days"].items() if start <= d <= end}, "notes": JOURNAL["notes"]}
+
+
+def set_note(tid: str, text: str) -> None:
+    if text.strip():
+        JOURNAL["notes"][tid] = text.strip()[:2000]
+    else:
+        JOURNAL["notes"].pop(tid, None)
+    _save_journal()
+
 
 
 def _log(msg: str) -> None:
@@ -86,12 +131,13 @@ def _open_positions(p: str) -> list[str]:
             if k.startswith(p + "|") and "order_id" in o.get("buy", {}) and "sell" not in o]
 
 
-async def run_engine(preset: str, day: date) -> list[dict]:
+async def run_engine(preset: str, day: date) -> list[dict] | None:
+    """The preset's trades on `day`, or None if NIFTY has no candles that day (holiday)."""
     st = replace(vwap.Settings(start=day, end=day), **vwap.PRESETS[preset])
     spot = await vwap.trading_days_and_spot(day - timedelta(days=7), day)
     d = day.isoformat()
     if d not in spot:
-        return []
+        return None
     keys = sorted(spot)
     prev = spot[keys[keys.index(d) - 1]] if keys.index(d) else []
     if st.strategy == "smc":
@@ -121,6 +167,8 @@ async def scan(day: date | None = None) -> dict:
                 except Exception as e:  # one strategy failing must not stop the others
                     errors[p] = str(e)
                     continue
+                if trades is None:  # market holiday / no data yet
+                    continue
                 for t in trades:
                     t["open"] = live_now and t["status"] == "EOD"
                     t["id"] = trade_id(p, t)
@@ -131,6 +179,8 @@ async def scan(day: date | None = None) -> dict:
                 results[p] = trades
             VIEW.update(day=day.isoformat(), scanned_at=f"{now_ist():%H:%M:%S}", results=results, errors=errors)
             _save()
+            if live_now:  # only real market-time scans go in the journal, never replays
+                _record(day, results)
             return VIEW
         finally:
             VIEW["running"] = False

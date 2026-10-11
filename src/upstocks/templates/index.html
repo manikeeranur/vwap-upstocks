@@ -12,8 +12,8 @@
 </style>
 </head>
 <body>
+{% set active = "data" %}{% include "_nav.html" %}
 <main>
-  <nav><a href="/paper">Paper / Live</a><a href="/account">Account</a><a href="/vwap">VWAP / SMC</a><a href="/data" class="on">Download</a></nav>
   <h1>NIFTY 50 option premium — download</h1>
   <p class="sub">Pick a <b>Date</b> — the NIFTY expiry that was current that day is selected for you (Upstox data back to Oct 2024). Type the strike, or switch <b>Pick by</b> to <b>Premium</b>, type a premium, and the strike trading nearest it on that date (at the time you set) is picked for you. The download is that day's candles; tick <b>Till expiry</b> for Date → expiry.</p>
 

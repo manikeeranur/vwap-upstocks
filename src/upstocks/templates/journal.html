@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>upstocks — journal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+{% include "_style.html" %}
+<style>
+  main { max-width: none; padding: 24px 28px 48px; }
+  .head { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 14px; margin-bottom: 18px; }
+  .head h1 { margin: 0; } .head .sub { margin: 2px 0 0; }
+  .filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
+  .filters label { min-width: 140px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .tile { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+  .tile span { display: block; font-size: 11px; letter-spacing: 1.1px; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  .tile b { display: block; font-size: 20px; margin-top: 6px; }
+  .tile small { color: var(--muted); font-size: 12px; }
+  .two { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; margin-bottom: 16px; }
+  @media (max-width: 1000px) { .two { grid-template-columns: 1fr; } }
+  .card h2 { font-size: 13px; letter-spacing: 1.2px; text-transform: uppercase; color: var(--muted); margin: 0 0 12px; }
+  #equity { width: 100%; height: 220px; display: block; }
+  .up { color: var(--ok); } .down { color: var(--pe); } .muted { color: var(--muted); }
+  .badge { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
+  .badge.live { background: #e11d4818; color: var(--pe); } .badge.paper { background: #4f46e518; color: var(--accent); }
+  .st { font-weight: 700; } .st.SL { color: var(--pe); } .st.TARGET { color: var(--ok); } .st.OPEN { color: var(--accent); }
+  td.note { min-width: 220px; }
+  td.note input { width: 100%; padding: 6px 8px; font-size: 13px; }
+  .tbl { overflow-x: auto; }
+  .bf { font-size: 13px; color: var(--muted); }
+  .strat-card { margin-top: 16px; }
+  .strat-card .sh { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; margin-bottom: 4px; }
+  .strat-card .sh h2 { margin: 0; color: var(--text); letter-spacing: .4px; text-transform: none; font-size: 15px; }
+  .strat-card .sum { color: var(--muted); font-size: 13px; margin-left: auto; }
+  @media (max-width: 700px) {
+    main { padding: 16px 12px 40px; }
+    .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .tile b { font-size: 16px; }
+    .filters label { min-width: 0; flex: 1 1 140px; }
+  }
+</style>
+</head>
+<body>
+{% set active = "journal" %}{% include "_nav.html" %}
+<main>
+  <div class="head">
+    <div><h1>Journal</h1><p class="sub">Your paper and live trades, day by day, as Paper / Live took them in market hours — no backtests or replays. Notes save as you type.</p></div>
+    <span style="flex:1"></span>
+    <div class="filters">
+      <label>From <input type="date" id="from"></label>
+      <label>To <input type="date" id="to" value="{{ today }}"></label>
+      <label>Strategy <select id="strat"><option value="">All strategies</option>
+        {% for p in presets %}<option value="{{ p }}">{{ labels[p] }}</option>{% endfor %}</select></label>
+      <label>Trades <select id="src"><option value="orders" selected>Live orders only</option><option value="">Paper + live</option><option value="paper">Paper only</option></select></label>
+    </div>
+  </div>
+
+  <div class="tiles" id="tiles"></div>
+
+  <div class="two">
+    <div class="card"><h2>Equity curve (₹, cumulative)</h2><svg id="equity" preserveAspectRatio="none"></svg></div>
+    <div class="card"><h2>By strategy</h2><div class="tbl"><table id="byStrat"></table></div></div>
+  </div>
+
+  <div id="trades"></div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const LABELS = {{ labels | tojson }}, PRESETS = {{ presets | tojson }};
+const fmt = n => (Math.round(n * 100) / 100).toFixed(2);
+const money = n => `${n < 0 ? "−" : n > 0 ? "+" : ""}₹${Math.abs(Math.round(n)).toLocaleString("en-IN")}`;
+const ampm = s => { if (!s) return "—"; let [h, m] = s.split(":").map(Number); const ap = h >= 12 ? "PM" : "AM"; h = h % 12 || 12; return `${h}:${String(m).padStart(2, "0")} ${ap}`; };
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const t0 = new Date("{{ today }}"); $("from").value = new Date(t0.getFullYear(), t0.getMonth(), 1).toLocaleDateString("en-CA");
+let J = null;
+
+async function load() {
+  const r = await fetch(`/api/journal?start=${$("from").value}&end=${$("to").value}`);
+  J = await r.json(); render();
+}
+
+function rows() {
+  const out = [];
+  for (const [d, byP] of Object.entries(J.days).sort()) for (const [p, v] of Object.entries(byP)) {
+    if ($("strat").value && p !== $("strat").value) continue;
+    for (const t of v.trades) {
+      if ($("src").value === "orders" && !t.live) continue;
+      if ($("src").value === "paper" && t.live) continue;
+      out.push({ ...t, preset: p, qty: v.lots * v.lot_size, rs: t.pnl * v.lots * v.lot_size });
+    }
+  }
+  return out.sort((a, b) => (a.date + a.entry_time).localeCompare(b.date + b.entry_time));
+}
+
+function render() {
+  const R = rows();
+  const wins = R.filter(t => t.rs > 0), losses = R.filter(t => t.rs <= 0);
+  const net = R.reduce((a, t) => a + t.rs, 0), gw = wins.reduce((a, t) => a + t.rs, 0), gl = -losses.reduce((a, t) => a + t.rs, 0);
+  const byDay = {}; R.forEach(t => byDay[t.date] = (byDay[t.date] || 0) + t.rs);
+  const days = Object.entries(byDay), best = days.reduce((a, d) => !a || d[1] > a[1] ? d : a, null), worst = days.reduce((a, d) => !a || d[1] < a[1] ? d : a, null);
+  let cum = 0, peak = 0, dd = 0; const curve = [0];
+  R.forEach(t => { cum += t.rs; curve.push(cum); peak = Math.max(peak, cum); dd = Math.max(dd, peak - cum); });
+  const tile = (k, v, s = "", cls = "") => `<div class="tile"><span>${k}</span><b class="${cls}">${v}</b><small>${s}</small></div>`;
+  $("tiles").innerHTML = [
+    tile("Net P&L", money(net), `${R.length} trades · gross, before charges`, net >= 0 ? "up" : "down"),
+    tile("Win rate", R.length ? `${Math.round(wins.length / R.length * 100)}%` : "—", `${wins.length} won · ${losses.length} lost`),
+    tile("Avg win / loss", wins.length || losses.length ? `${money(wins.length ? gw / wins.length : 0)} / ${money(losses.length ? -gl / losses.length : 0)}` : "—"),
+    tile("Profit factor", gl > 0 ? (gw / gl).toFixed(2) : wins.length ? "∞" : "—", "gross win ÷ gross loss"),
+    tile("Best day", best ? money(best[1]) : "—", best ? best[0] : "", "up"),
+    tile("Worst day", worst ? money(worst[1]) : "—", worst ? worst[0] : "", "down"),
+    tile("Max drawdown", money(-dd), "peak to trough", dd ? "down" : ""),
+  ].join("");
+  drawEquity(curve);
+  const per = {}; R.forEach(t => { const s = per[t.preset] ||= { n: 0, w: 0, rs: 0 }; s.n++; s.w += t.rs > 0; s.rs += t.rs; });
+  $("byStrat").innerHTML = `<thead><tr><th>Strategy</th><th>Trades</th><th>Win %</th><th>Net ₹</th></tr></thead><tbody>${
+    Object.entries(per).map(([p, s]) => `<tr><td>${LABELS[p]}</td><td>${s.n}</td><td>${Math.round(s.w / s.n * 100)}%</td><td class="${s.rs >= 0 ? "up" : "down"}">${money(s.rs)}</td></tr>`).join("")
+    || `<tr><td class="muted" colspan="4">No trades in this range.</td></tr>`}</tbody>`;
+  // One table per strategy (in the menu's order), newest trade first.
+  const shown = $("strat").value ? [$("strat").value] : PRESETS;
+  $("trades").innerHTML = shown.map(p => {
+    const T = R.filter(t => t.preset === p).reverse(), s = per[p] || { n: 0, w: 0, rs: 0 };
+    return `<div class="card strat-card"><div class="sh"><h2>${LABELS[p]}</h2>
+      <span class="sum">${s.n} trade${s.n === 1 ? "" : "s"}${s.n ? ` · win ${Math.round(s.w / s.n * 100)}%` : ""} · <b class="${s.rs >= 0 ? "up" : "down"}">${money(s.rs)}</b></span></div>
+      <div class="tbl"><table><thead><tr><th>Date</th><th>In → out</th><th>Option</th><th>Entry</th><th>Exit</th><th>Status</th><th>P&amp;L pts</th><th>P&amp;L ₹</th><th>Mode</th><th>Note</th></tr></thead><tbody>${
+      T.map(t => {
+        const st = t.open ? "OPEN" : t.status, pc = t.rs >= 0 ? "up" : "down";
+        const mode = t.live ? "live" : "paper";
+        return `<tr><td>${t.date}</td><td>${ampm(t.entry_time)} → ${t.open ? "…" : ampm(t.exit_time)}</td>
+          <td><b style="color:${t.type === "CE" ? "var(--ce)" : "var(--pe)"}">${t.symbol}</b></td><td>₹${fmt(t.entry)}</td><td>₹${fmt(t.exit)}</td>
+          <td class="st ${st}">${st === "TIME_EXIT" ? "15:20 EXIT" : st}</td><td class="${pc}">${t.pnl >= 0 ? "+" : ""}${fmt(t.pnl)}</td>
+          <td class="${pc}">${money(t.rs)}</td><td><span class="badge ${mode}">${mode}</span></td>
+          <td class="note"><input type="text" data-id="${esc(t.id)}" value="${esc(J.notes[t.id] || "")}" placeholder="Why taken, what happened…"></td></tr>`;
+      }).join("") || `<tr><td class="muted" colspan="10">No trades in this range — Paper / Live fills this in as it trades in market hours.</td></tr>`}</tbody></table></div></div>`;
+  }).join("");
+}
+
+function drawEquity(c) {
+  const svg = $("equity"), W = svg.clientWidth || 600, H = 220, pad = 8;
+  if (c.length < 2) { svg.innerHTML = `<text x="${W / 2}" y="${H / 2}" text-anchor="middle" fill="currentColor" opacity=".5" font-size="13">No trades yet</text>`; return; }
+  const lo = Math.min(0, ...c), hi = Math.max(0, ...c), span = hi - lo || 1;
+  const x = i => pad + i / (c.length - 1) * (W - 2 * pad), y = v => pad + (hi - v) / span * (H - 2 * pad);
+  const pts = c.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+  const col = c[c.length - 1] >= 0 ? "var(--ok)" : "var(--pe)";
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.innerHTML = `<line x1="0" x2="${W}" y1="${y(0)}" y2="${y(0)}" stroke="var(--border)" stroke-dasharray="4 4"/>
+    <polygon points="${x(0)},${y(0)} ${pts} ${x(c.length - 1)},${y(0)}" fill="${col}" opacity=".12"/>
+    <polyline points="${pts}" fill="none" stroke="${col}" stroke-width="2" stroke-linejoin="round"/>
+    <text x="${W - pad}" y="${pad + 12}" text-anchor="end" font-size="12" fill="${col}" font-weight="700">${money(c[c.length - 1])}</text>`;
+}
+
+
+["from", "to"].forEach(id => $(id).addEventListener("change", load));
+["strat", "src"].forEach(id => $(id).addEventListener("change", render));
+let noteT = {};
+$("trades").addEventListener("input", e => {
+  const id = e.target.dataset.id; if (!id) return;
+  J.notes[id] = e.target.value;
+  clearTimeout(noteT[id]);
+  noteT[id] = setTimeout(() => fetch("/api/journal/note", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, text: e.target.value }) }), 600);
+});
+window.addEventListener("resize", () => J && render());
+load();
+</script>
+</body>
+</html>
