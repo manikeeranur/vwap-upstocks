@@ -94,7 +94,7 @@
         <select id="preset">
           <option value="frontend_live" selected>VWAP 9:30 — frontend LIVE rules</option>
           <option value="smc_live">SMC — frontend LIVE rules</option>
-          <option value="ema25_vwap">EMA25 + VWAP</option>
+          <option value="ema25_vwap">VWAP + EMA25 + SuperTrend</option>
         </select>
       </label>
       <label>From <input type="date" id="start" value="{{ start }}"></label>
@@ -128,7 +128,10 @@
         <label class="check"><input type="checkbox" id="align_checkpoints"> Round checkpoints to 5-min boundaries</label>
         <label class="check"><input type="checkbox" id="include_entry_candle"> Check SL/target from the entry minute itself</label>
         <label class="check"><input type="checkbox" id="time_exit_first"> 15:20 exit checked before SL/target</label>
+        <label class="check"><input type="checkbox" id="trend_entry"> Enter when EMA25 rising + SuperTrend green start (no VWAP check)</label>
         <label class="check"><input type="checkbox" id="ema_cross"> Require EMA25 to cross above VWAP on the signal candle</label>
+        <label class="check"><input type="checkbox" id="supertrend"> Require SuperTrend (10, 3) green on the signal candle</label>
+        <label class="check"><input type="checkbox" id="index_trend"> Trade with NIFTY's 1-min SuperTrend (10, 3): green → CE only, red → PE only</label>
         <label class="check"><input type="checkbox" id="any_strike_in_band"> Live: check every strike in the band (nearest ATM first), not just the nearest one</label>
       </div>
     </details>
@@ -171,10 +174,10 @@ let job = null, days = [], timer = null;
 
 const PRESETS = {{ presets | tojson }};
 const NUMS = ["min_premium", "max_premium", "sl_pct", "target_pct", "entry_start", "candle_minutes", "breakeven_pct", "max_trades", "cooldown_min", "stagnant_hours", "stagnant_points", "time_exit", "chain_strikes", "max_entry_visits"];
-const BOOLS = ["live", "strong_green", "atm_offsets_only", "align_checkpoints", "include_entry_candle", "time_exit_first", "ema_cross", "any_strike_in_band"];
+const BOOLS = ["live", "strong_green", "atm_offsets_only", "align_checkpoints", "include_entry_candle", "time_exit_first", "ema_cross", "any_strike_in_band", "supertrend", "index_trend", "trend_entry"];
 const NOTES = {
   smc_live: "Your frontend app's SMC live scan (backend smcService runSMCScan + routes/smc.js): every minute 09:21–14:59, NIFTY 1-min candles scored for Liquidity Grab / FVG / Order Block / Breaker / SMT trap (≥2 needed, EMA-20 trend = bonus), strike nearest ATM in the premium band (₹300–400 — what live used; then ×0.75–×1.75, ×0.5–×2; within 50 pts → nearest the band's middle), entry at the live price, SL 6%, T1 +12% (marker), T2 +24% (exit), SL to entry at +15%, SL and target checked once a minute on the live price, 15:20 exit, max 2 trades (2nd only after a loss, 15 min after exit). Your Account tab's band is now ₹200–300 — enter that to match trades from 7 Oct onward.",
-  ema25_vwap: "The VWAP 9:30 frontend LIVE rules on 1-min candles: every minute from 09:36, every strike whose live price is in the band (₹280–500), nearest ATM first — the first one whose last completed 1-min candle closes above VWAP (1-min, from 09:15) AND is where EMA25 (of 1-min closes, warmed up on the previous session) crosses above VWAP — previous candle EMA25 at or below VWAP, this one above — is taken. Sideways skip: no entry if the price had already come to the entry level 4+ separate times earlier that day. Entry at the live price the minute that candle closes (09:40 candle → 09:41). SL 6% / target 30%, SL to entry at +15%, 15:20 exit, max 2 trades (2nd only after a loss, 15 min after exit). On the chart's 1m view, the yellow and purple lines are exactly these.",
+  ema25_vwap: "1-min candles, every minute from 09:36: every strike whose live price is in the band (₹280–500), nearest ATM first — the first whose last completed 1-min candle closes above VWAP (1-min, from 09:15) AND is where EMA25 crosses above VWAP (previous candle EMA25 at or below VWAP, this one above) with SuperTrend (10, 3) green on that candle is taken. Only on NIFTY's trend side (NIFTY 1-min SuperTrend green → CE only, red → PE only). Entry at the live price the minute that candle closes (09:40 candle → 09:41). Sideways skip: no entry if the price had already come to the entry level 4+ separate times earlier that day. SL 6% / target 30%, SL to entry at +15%, no stagnant exit, 15:20 exit, max 2 trades (2nd only after a loss, 15 min after exit). EMA25 and SuperTrend warmed up on the previous session.",
   frontend_live: "Your frontend app's live scan (backend doScan): every minute from 09:36, strike nearest ATM whose live price is ₹300–500, its last completed 5-min candle must close above VWAP and be a strong green candle, entry at the live price, SL 6% (fires on the first touch, like the exchange SL-M order) / target 30% (checked once a minute on the live price), SL to entry at +15% (what October live used; your Account tab now says 10%), 15:20 exit, max 2 trades (2nd only after a loss, 15 min after exit).",
 };
 function applyPreset() {
@@ -247,7 +250,9 @@ function render() {
     const signals = isSmc
       ? tag(`${t.type} ${t.score}/5`, dir) + (t.concepts || []).map(x => tag(x, CONCEPT_COLOR[x] || "#64748b", (CONCEPT_COLOR[x] || "#64748b") + "14", "transparent")).join("") + (t.trend_ok ? `<span class="s7 c-up">+EMA✓</span>` : "")
       : tag(t.type, dir) + tag(`VWAP ₹${fmt(t.vwap)}`, "#64748b", dark ? "#1e293b" : "#f1f5f9", "transparent")
-        + (t.ema ? tag(`EMA25 ₹${fmt(t.ema)} ↑`, "#8b5cf6", "#8b5cf614", "transparent") : "");
+        + (t.ema ? tag(`EMA25 ₹${fmt(t.ema)} ↑`, "#8b5cf6", "#8b5cf614", "transparent") : "")
+        + (t.st ? tag(`ST ₹${fmt(t.st)} ↑`, "#16a34a", "#16a34a14", "transparent") : "")
+        + (t.nifty_trend ? tag(`NIFTY ${t.nifty_trend === "UP" ? "↑" : "↓"}`, t.nifty_trend === "UP" ? "#16a34a" : "#e11d48", "transparent", "transparent") : "");
     const strike = isSmc
       ? `<div class="v10" style="color:${dir}">NIFTY ${fmtExp(t.expiry)} ${fmtStrike(t.strike)} ${t.type}</div><div class="s8 muted">spot ${t.spot ? t.spot.toFixed(0) : "—"}</div>`
       : `<div class="v12" style="color:${dir}">${fmtStrike(t.strike)} ${t.type}</div><div class="s8 muted">${fmtExp(t.expiry)} · spot ${t.spot ? t.spot.toFixed(0) : "—"}</div>`;
@@ -426,6 +431,7 @@ async function openChart(t) {
   $("clegend").innerHTML = [
     `<span><i style="border-color:#f59e0b"></i>${t.ema ? "VWAP (1-min on 1m, 5-min on 5m)" : "VWAP (5-min, as the strategy)"}</span>`,
     `<span><i style="border-color:#8b5cf6"></i>EMA 25 (on the shown candles)</span>`,
+    `<span><i style="border-color:#16a34a;width:9px;margin-right:2px"></i><i style="border-color:#e11d48;width:9px"></i>SuperTrend 10, 3 (green up · red down)</span>`,
     `<span><i style="border-color:#2563eb;border-top-style:dashed"></i>Entry ₹${fmt(t.entry)}</span>`,
     `<span><i style="border-color:#e11d48"></i>SL ₹${fmt(t.sl)}${t.sl_to_breakeven ? " → moved to entry" : ""}</span>`,
     ...(t1 ? [`<span><i style="border-color:#b45309;border-top-style:dashed"></i>T1 ₹${fmt(t1)}</span>`] : []),
@@ -468,6 +474,10 @@ function drawChart() {
   const src = five ? d.bars5 : d.bars1;
   const candles = chart.addCandlestickSeries({ upColor: "#16a34a", downColor: "#e11d48", borderVisible: false, wickUpColor: "#16a34a", wickDownColor: "#e11d48" });
   candles.setData(src.map(b => ({ time: toTs(d.date, b[0]), open: b[1], high: b[2], low: b[3], close: b[4] })));
+  // Volume: bars along the bottom fifth, green/red with the candle.
+  const vol = chart.addHistogramSeries({ priceScaleId: "vol", priceFormat: { type: "volume" }, priceLineVisible: false, lastValueVisible: false });
+  chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
+  vol.setData(src.map(b => ({ time: toTs(d.date, b[0]), value: b[5], color: b[4] >= b[1] ? "#16a34a66" : "#e11d4866" })));
   // VWAP: known when each 5-min candle closes; on 5m bars stamp it at that bar, on 1m at its last minute.
   const vw = chart.addLineSeries({ color: "#f59e0b", lineWidth: 2, priceLineVisible: false, lastValueVisible: false });
   // On 1m the first 5-min VWAP lands at 9:19; lead in from 9:15 with the running
@@ -495,6 +505,19 @@ function drawChart() {
     if (i >= nPrev) emaPts.push({ time: toTs(d.date, src[i - nPrev][0]), value: +ema.toFixed(2) });
   });
   chart.addLineSeries({ color: "#8b5cf6", lineWidth: 2, priceLineVisible: false, lastValueVisible: false }).setData(emaPts);
+  // SuperTrend (10, 3) as TradingView draws it: green under price in an
+  // uptrend, red over it in a downtrend, a gap where it flips (not a join).
+  // One series per run of the same trend: the library joins across
+  // whitespace, which drew diagonals between separate red stretches.
+  const stRuns = [];
+  (five ? d.st5 : d.st1).forEach((v, i) => {
+    if (!v) return;
+    const last = stRuns[stRuns.length - 1];
+    if (!last || last.up !== v[1]) stRuns.push({ up: v[1], pts: [] });
+    stRuns[stRuns.length - 1].pts.push({ time: toTs(d.date, src[i][0]), value: v[0] });
+  });
+  stRuns.forEach(r => chart.addLineSeries({ color: r.up ? "#16a34a" : "#e11d48", lineWidth: 2, priceLineVisible: false,
+    lastValueVisible: false, crosshairMarkerVisible: false }).setData(r.pts));
   const line = (price, color, title, style) => candles.createPriceLine({ price, color, title, lineWidth: 2, lineStyle: style, axisLabelVisible: true });
   line(t.entry, "#2563eb", "Entry", 2);
   line(t.sl, "#e11d48", "SL", 0);

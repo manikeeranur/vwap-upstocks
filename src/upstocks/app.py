@@ -208,7 +208,7 @@ def _settings_from(body: dict) -> vwap.Settings:
     for f in ("entry_start", "time_exit", "last_entry"):
         if body.get(f):
             setattr(st, f, str(body[f])[:5])
-    for f in ("strong_green", "live", "atm_offsets_only", "align_checkpoints", "include_entry_candle", "time_exit_first", "ema_cross", "any_strike_in_band"):
+    for f in ("strong_green", "live", "atm_offsets_only", "align_checkpoints", "include_entry_candle", "time_exit_first", "ema_cross", "any_strike_in_band", "supertrend", "index_trend", "trend_entry"):
         if f in body:
             setattr(st, f, bool(body[f]))
     if st.start > st.end:
@@ -222,7 +222,12 @@ async def _run_job(job: dict) -> None:
     st: vwap.Settings = job["settings"]
     try:
         last = min(st.end, upstox.today_ist())
-        spot = await vwap.trading_days_and_spot(st.start, last)
+        # NIFTY trend rule: fetch a week earlier so each day's SuperTrend is
+        # warmed up on the previous session (the extra days aren't run).
+        allspot = await vwap.trading_days_and_spot(st.start - timedelta(days=7) if st.index_trend else st.start, last)
+        keys = sorted(allspot)
+        prev_spot = {d: allspot[keys[i - 1]] if i else [] for i, d in enumerate(keys)}
+        spot = {d: b for d, b in allspot.items() if d >= st.start.isoformat()}
         job["total"] = len(spot)
         # Weekdays with no NIFTY candles: exchange holidays, or a recent session
         # Upstox hasn't published yet — say so instead of skipping silently.
@@ -234,8 +239,10 @@ async def _run_job(job: dict) -> None:
             async with sem:
                 job["current"] = d
                 try:
-                    engine = smc.run_day if st.strategy == "smc" else vwap.run_day
-                    res = await engine(date.fromisoformat(d), st, bars)
+                    if st.strategy == "smc":
+                        res = await smc.run_day(date.fromisoformat(d), st, bars)
+                    else:
+                        res = await vwap.run_day(date.fromisoformat(d), st, bars, prev_spot[d])
                     out = {"date": res.date, "expiry": res.expiry, "note": res.note,
                            "trades": [vwap.trade_dict(t) for t in res.trades]}
                 except Exception as e:  # one bad day must not kill the run
@@ -274,6 +281,10 @@ async def vwap_run(request: Request):
     return {"id": jid}
 
 
+def _st(prev: list, bars: list) -> list:
+    return [[vwap._round2(v[0]), v[1]] if v else None for v in vwap.supertrend_series(prev + bars)[len(prev):]]
+
+
 @app.get("/api/chart")
 async def chart_data(key: str, day: str = Query(..., alias="date"), expiry: str = Query(...)):
     """One option's day for the trade chart: 1-min bars (market hours), the
@@ -295,6 +306,9 @@ async def chart_data(key: str, day: str = Query(..., alias="date"), expiry: str 
         "bars5": [[vwap._add(b[0], -4), *b[1:6]] for b in nm],
         "prev_close1": [b[4] for b in prev],
         "prev_close5": [b[4] for b in vwap.aggregate(prev, 5)],
+        # SuperTrend (10, 3) per shown bar: [line, uptrend] or None (warmed up on the previous session)
+        "st1": _st(prev, bars),
+        "st5": _st(vwap.aggregate(prev, 5), nm),
         # VWAP of a 5-min candle is known when it closes → stamp at its last minute
         "vwap5": [[b[0], v] for b, v in zip(nm, vw)],
     }
@@ -368,7 +382,7 @@ async def vwap_summary(jid: str, qty: int = 65):
 
 
 PRESET_LABELS = {"frontend_live": "VWAP 9:30 — frontend LIVE rules", "smc_live": "SMC — frontend LIVE rules",
-                 "ema25_vwap": "EMA25 + VWAP"}
+                 "ema25_vwap": "VWAP + EMA25 + SuperTrend"}
 
 
 @app.get("/api/vwap/job/{jid}/report.pdf")

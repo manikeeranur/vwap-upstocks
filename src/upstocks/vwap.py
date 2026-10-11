@@ -86,6 +86,19 @@ class Settings:
     # (the frontend app); True = every in-band strike, nearest-ATM first, and
     # the first that meets the entry rules is taken.
     any_strike_in_band: bool = False
+    # SuperTrend (TradingView ta.supertrend on N-min candles, warmed up on the
+    # previous session): the signal candle must close in an uptrend (green).
+    supertrend: bool = False
+    st_period: int = 10
+    st_mult: float = 3.0
+    # NIFTY trend: the index's 1-min SuperTrend (st_period, st_mult; warmed up on
+    # the previous session) on its last completed candle — green → CE only,
+    # red → PE only.
+    index_trend: bool = False
+    # Trend entry (replaces the VWAP rules): the signal candle is where "EMA
+    # rising (EMA > previous EMA) AND SuperTrend green" first becomes true —
+    # the previous candle didn't have both. VWAP isn't checked.
+    trend_entry: bool = False
 
 
 PRESETS = {
@@ -109,9 +122,12 @@ PRESETS = {
 # VWAP on the signal candle (the 1-min lines on the trade chart), entry the
 # minute that candle closes (e.g. the 09:40 candle → 09:41). No strong-green
 # rule: the cross itself is the signal (it blocked 9 Oct's 22150 CE cross).
+# (trend_entry was tried instead of the cross on 1–10 Oct: 3 wins / 7 losses,
+# +107.91 pts vs 4 / 3, +399.21 — kept as an option, not the preset.)
 PRESETS["ema25_vwap"] = {**PRESETS["frontend_live"], "ema_cross": True, "candle_minutes": 1,
                          "strong_green": False, "max_entry_visits": 4, "any_strike_in_band": True,
-                         "min_premium": 280}  # a cross at ₹294 (8 Oct 22750 PE 09:39) is still taken
+                         "min_premium": 280,  # a cross at ₹294 (8 Oct 22750 PE 09:39) is still taken
+                         "supertrend": True, "stagnant_hours": 0, "index_trend": True}
 KITE_OFFSETS = [0, -50, 50, -100, 100, -150, 150]
 
 
@@ -186,6 +202,50 @@ def ema_crossed(sr: "Series", idx: int) -> bool:
     return _round2(sr.ema[idx - 1]) <= sr.vwap[idx - 1] and _round2(sr.ema[idx]) > sr.vwap[idx]
 
 
+def supertrend_series(bars: list[Bar], n: int = 10, mult: float = 3.0) -> list[tuple[float, bool] | None]:
+    """TradingView ta.supertrend(mult, n) on hl2 with Wilder's ATR: (line, uptrend)
+    per bar; None until the ATR has n bars."""
+    out, atr, trs = [], None, []
+    up_b = dn_b = st = None
+    prev_c = None
+    for _t, _o, h, l, c, _v in bars:
+        tr = h - l if prev_c is None else max(h - l, abs(h - prev_c), abs(l - prev_c))
+        if atr is None:
+            trs.append(tr)
+            if len(trs) == n:
+                atr = sum(trs) / n
+        else:
+            atr = (atr * (n - 1) + tr) / n
+        if atr is None:
+            out.append(None)
+            prev_c = c
+            continue
+        hl2 = (h + l) / 2
+        lo, hi = hl2 - mult * atr, hl2 + mult * atr
+        if up_b is not None:
+            lo = lo if lo > up_b or prev_c < up_b else up_b
+            hi = hi if hi < dn_b or prev_c > dn_b else dn_b
+        if st is None:
+            uptrend = False                       # Pine: first bar with an ATR is a downtrend
+        elif st == dn_b:
+            uptrend = c > hi
+        else:
+            uptrend = c >= lo
+        up_b, dn_b = lo, hi
+        st = lo if uptrend else hi
+        out.append((st, uptrend))
+        prev_c = c
+    return out
+
+
+def trend_started(sr: "Series", idx: int) -> bool:
+    """EMA rising + SuperTrend green on N-min candle idx, but not both on idx-1."""
+    def up(i):
+        return (i >= 1 and sr.ema[i] is not None and sr.ema[i - 1] is not None
+                and sr.ema[i] > sr.ema[i - 1] and bool(sr.st[i] and sr.st[i][1]))
+    return up(idx) and not up(idx - 1)
+
+
 def entry_visits(bars: list[Bar], price: float, before: str) -> int:
     """Separate runs of 1-min candles (before `before`) whose low–high holds `price`."""
     n, prev = 0, False
@@ -214,6 +274,7 @@ class Series:
     nm: list[Bar]
     vwap: list[float]
     ema: list[float | None] = field(default_factory=list)  # aligned with nm, previous session warm-up
+    st: list = field(default_factory=list)                   # SuperTrend (line, uptrend) aligned with nm
 
 
 @dataclass
@@ -246,6 +307,8 @@ class Trade:
     concepts: list = field(default_factory=list)  # SMC concepts
     trend_ok: bool = False             # SMC: EMA-20 trend aligned
     ema: float = 0.0                   # EMA25 + VWAP: EMA at the signal candle
+    st: float = 0.0                    # SuperTrend line at the signal candle
+    nifty_trend: str = ""              # index_trend: "UP" / "DOWN" (NIFTY SuperTrend at entry)
 
 
 @dataclass
@@ -317,7 +380,7 @@ async def _nearest_expiry(day: date) -> str | None:
     return None
 
 
-async def run_day(day: date, s: Settings, spot_bars: list[Bar]) -> DayResult:
+async def run_day(day: date, s: Settings, spot_bars: list[Bar], prev_spot: list[Bar] | None = None) -> DayResult:
     expiry = await _nearest_expiry(day)
     res = DayResult(day.isoformat(), expiry)
     if not expiry:
@@ -331,6 +394,8 @@ async def run_day(day: date, s: Settings, spot_bars: list[Bar]) -> DayResult:
             by_side[c["instrument_type"]].append(c)
     cm = s.candle_minutes
     cache: dict[str, Series | None] = {}
+    prev_spot = prev_spot or []
+    idx_st = supertrend_series(prev_spot + spot_bars, s.st_period, s.st_mult)[len(prev_spot):] if s.index_trend else []
 
     async def series(c: dict) -> Series | None:
         k = c["instrument_key"]
@@ -340,12 +405,15 @@ async def run_day(day: date, s: Settings, spot_bars: list[Bar]) -> DayResult:
             bars = _market([r for r in span if r[0][:10] == d])
             if len(bars) >= cm * 2:
                 nm = aggregate(bars, cm)
-                ema = []
-                if s.ema_cross:
+                ema, st = [], []
+                if s.ema_cross or s.supertrend or s.trend_entry:
                     prev_day = max((r[0][:10] for r in span if r[0][:10] < d), default=None)
                     prev = aggregate(_market([r for r in span if r[0][:10] == prev_day]), cm) if prev_day else []
-                    ema = ema_series([b[4] for b in prev + nm], s.ema_period)[len(prev):]
-                cache[k] = Series(k, bars, nm, vwap_series(nm), ema)
+                    if s.ema_cross or s.trend_entry:
+                        ema = ema_series([b[4] for b in prev + nm], s.ema_period)[len(prev):]
+                    if s.supertrend or s.trend_entry:
+                        st = supertrend_series(prev + nm, s.st_period, s.st_mult)[len(prev):]
+                cache[k] = Series(k, bars, nm, vwap_series(nm), ema, st)
             else:
                 cache[k] = None
         return cache[k]
@@ -357,9 +425,16 @@ async def run_day(day: date, s: Settings, spot_bars: list[Bar]) -> DayResult:
         return s.max_entry_visits > 0 and entry_visits(
             x["sr"].bars, x["premium"], _add(x["candle"][0], 1 - cm)) >= s.max_entry_visits
 
+    def st_up(x):
+        v = x["sr"].st[x["idx"]]
+        return bool(v and v[1])
+
     def ok(x):
+        if x and s.trend_entry:
+            return trend_started(x["sr"], x["idx"]) and not sideways(x)
         return bool(x and x["close"] > x["vwap"] and (not s.strong_green or strong_green(x["candle"]))
-                    and (not s.ema_cross or ema_crossed(x["sr"], x["idx"])) and not sideways(x))
+                    and (not s.ema_cross or ema_crossed(x["sr"], x["idx"])) and not sideways(x)
+                    and (not s.supertrend or st_up(x)))
 
     async def live_candidate(side: str, atm: float, mark: str):
         """Live: nearest-ATM strike whose LIVE price (last 1-min close before
@@ -384,7 +459,7 @@ async def run_day(day: date, s: Settings, spot_bars: list[Bar]) -> DayResult:
             # the live alerts in Mongo).
             # EMA25 + VWAP isn't bound by that quirk: it acts on the candle
             # the minute it closes.
-            lag = 1 if s.ema_cross else 2
+            lag = 1 if s.ema_cross or s.trend_entry else 2
             done = [i for i, b in enumerate(sr.nm) if _add(b[0], lag) <= mark]
             if not done:
                 if s.any_strike_in_band:
@@ -457,9 +532,17 @@ async def run_day(day: date, s: Settings, spot_bars: list[Bar]) -> DayResult:
                 return None
             spot = spot_bar[1]
         atm = round(spot / STEP) * STEP
+        trend = ""
+        if s.index_trend:  # NIFTY's last completed 1-min candle (same lag as the option's)
+            lag = 1 if s.ema_cross or s.trend_entry else 2
+            done = [i for i, b in enumerate(spot_bars) if _add(b[0], lag) <= mark]
+            v = idx_st[done[-1]] if done else None
+            if not v:
+                return None
+            trend = "UP" if v[1] else "DOWN"
         ce, pe = await candidate("CE", atm, mark), await candidate("PE", atm, mark)
 
-        ce_ok, pe_ok = ok(ce), ok(pe)
+        ce_ok, pe_ok = ok(ce) and trend != "DOWN", ok(pe) and trend != "UP"
         if not ce_ok and not pe_ok:
             return None
         if ce_ok and pe_ok:  # both → larger distance above VWAP; a tie goes to CE
@@ -471,14 +554,20 @@ async def run_day(day: date, s: Settings, spot_bars: list[Bar]) -> DayResult:
             green = "" if not s.strong_green or strong_green(other["candle"]) else " (not a strong green candle)"
             if s.ema_cross and not ema_crossed(other["sr"], other["idx"]):
                 green += f" (EMA{s.ema_period} not crossing VWAP)"
+            if s.trend_entry and not trend_started(other["sr"], other["idx"]):
+                green += f" (EMA{s.ema_period} rising + SuperTrend green didn't just start)"
+            if s.supertrend and not st_up(other):
+                green += " (SuperTrend not green)"
             if sideways(other):
                 green += f" (entry price hit {s.max_entry_visits}+ times earlier)"
             o = f"{other_side} {other['c']['strike_price']:g} close {other['close']:.2f} vs VWAP {other['vwap']:.2f}{green}"
         else:
             o = f"no {other_side} in band"
-        return side, pick, mark, o, spot
+        if trend:
+            o += f" · NIFTY SuperTrend {trend}"
+        return side, pick, mark, o, spot, trend
 
-    def resolve(side: str, pick: dict, mark: str, other: str, spot: float = 0.0) -> Trade:
+    def resolve(side: str, pick: dict, mark: str, other: str, spot: float = 0.0, trend: str = "") -> Trade:
         c, sr = pick["c"], pick["sr"]
         entry = pick["premium"]
         risk = _round2(entry * s.sl_pct / 100)
@@ -521,7 +610,8 @@ async def run_day(day: date, s: Settings, spot_bars: list[Bar]) -> DayResult:
             candle=f"{_add(pick['candle'][0], 1 - cm)}–{_add(pick['candle'][0], 1)}", close=pick["close"],
             vwap=pick["vwap"], other=other, status=status, exit_time=exit_t, exit=exit_p, pnl=pnl,
             pnl_pct=_round2(pnl / entry * 100), peak=peak, sl_to_breakeven=moved, spot=spot,
-            ema=_round2(sr.ema[pick["idx"]]) if s.ema_cross and sr.ema[pick["idx"]] is not None else 0.0,
+            ema=_round2(sr.ema[pick["idx"]]) if sr.ema and sr.ema[pick["idx"]] is not None else 0.0,
+            st=_round2(sr.st[pick["idx"]][0]) if sr.st and sr.st[pick["idx"]] else 0.0, nifty_trend=trend,
         )
 
     after = None
@@ -542,11 +632,17 @@ async def run_day(day: date, s: Settings, spot_bars: list[Bar]) -> DayResult:
         if not (tr.pnl < 0 or tr.status == "SL"):
             break
         after = _mins(tr.exit_time or tr.entry_time) + s.cooldown_min
-    if not res.trades:
+    if not res.trades and s.trend_entry:
+        res.note = (f"no CE/PE in ₹{s.min_premium:g}–{s.max_premium:g} where EMA{s.ema_period} rising + "
+                    f"SuperTrend green started after {s.entry_start}"
+                    f"{' on the NIFTY SuperTrend side' if s.index_trend else ''}")
+    elif not res.trades:
         res.note = (f"no CE/PE in ₹{s.min_premium:g}–{s.max_premium:g} with a "
                     f"{'strong green ' if s.strong_green else ''}{cm}-min candle closed above VWAP"
                     f"{f' with EMA{s.ema_period} crossing above VWAP' if s.ema_cross else ''}"
                     f"{f' (entry price hit under {s.max_entry_visits} times earlier)' if s.max_entry_visits else ''}"
+                    f"{' and SuperTrend green' if s.supertrend else ''}"
+                    f"{' on the NIFTY SuperTrend side' if s.index_trend else ''}"
                     f" after {s.entry_start}")
     return res
 
