@@ -130,6 +130,8 @@ def build(days: list[dict], *, title: str, subtitle: str, lots: int, lot_size: i
             strike = c(f"NIFTY {exp_short(t['expiry'])} {t['strike']:.0f} {t['type']}", dir_c, 6.8) + "<br/>" + c(f"spot {t.get('spot', 0):.0f}", MUTED, 5.4)
         else:
             sig = c(t["type"], dir_c) + "  " + c(f"VWAP {money(t['vwap'])}", SLATE)
+            if t.get("ema"):
+                sig += "  " + c(f"EMA25 {money(t['ema'])}", PURPLE)
             strike = c(f"{t['strike']:.0f} {t['type']}", dir_c, 7.2) + "<br/>" + c(f"{exp_short(t['expiry'])} · spot {t.get('spot', 0):.0f}", MUTED, 5.4)
         label = {"TIME_EXIT": "TIME EXIT", "STAGNANT_EXIT": "STAGNANT"}.get(st, st)
         row = [

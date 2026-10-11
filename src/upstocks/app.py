@@ -202,13 +202,13 @@ def _settings_from(body: dict) -> vwap.Settings:
     for f in ("min_premium", "max_premium", "sl_pct", "target_pct", "target1_pct", "breakeven_pct", "stagnant_hours", "stagnant_points"):
         if body.get(f) not in (None, ""):
             setattr(st, f, float(body[f]))
-    for f in ("candle_minutes", "max_trades", "cooldown_min", "chain_strikes"):
+    for f in ("candle_minutes", "max_trades", "cooldown_min", "chain_strikes", "max_entry_visits"):
         if body.get(f) not in (None, ""):
             setattr(st, f, int(body[f]))
     for f in ("entry_start", "time_exit", "last_entry"):
         if body.get(f):
             setattr(st, f, str(body[f])[:5])
-    for f in ("strong_green", "live", "atm_offsets_only", "align_checkpoints", "include_entry_candle", "time_exit_first"):
+    for f in ("strong_green", "live", "atm_offsets_only", "align_checkpoints", "include_entry_candle", "time_exit_first", "ema_cross", "any_strike_in_band"):
         if f in body:
             setattr(st, f, bool(body[f]))
     if st.start > st.end:
@@ -367,7 +367,8 @@ async def vwap_summary(jid: str, qty: int = 65):
                              headers={"Content-Disposition": f'attachment; filename="vwap930_summary_{st.start}_to_{st.end}.csv"'})
 
 
-PRESET_LABELS = {"frontend_live": "VWAP 9:30 — frontend LIVE rules", "smc_live": "SMC — frontend LIVE rules"}
+PRESET_LABELS = {"frontend_live": "VWAP 9:30 — frontend LIVE rules", "smc_live": "SMC — frontend LIVE rules",
+                 "ema25_vwap": "EMA25 + VWAP"}
 
 
 @app.get("/api/vwap/job/{jid}/report.pdf")

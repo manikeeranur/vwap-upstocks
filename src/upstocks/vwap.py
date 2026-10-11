@@ -73,6 +73,19 @@ class Settings:
     strategy: str = "vwap"
     last_entry: str = "15:29"          # SMC: no new entries from 15:00 → 14:59
     target1_pct: float = 0             # SMC: +12% milestone (recorded, not an exit)
+    # EMA25 + VWAP: on top of the VWAP rules, the signal N-min candle must be
+    # where the EMA of N-min closes crosses above VWAP (previous candle EMA ≤
+    # VWAP, this one EMA > VWAP). EMA warmed up on the previous session.
+    ema_cross: bool = False
+    ema_period: int = 25
+    # Sideways filter: skip the signal if the entry price was already visited
+    # this many times earlier in the day (separate runs of 1-min candles whose
+    # low–high range holds it, before the signal candle). 0 = off.
+    max_entry_visits: int = 0
+    # Live strike pick: False = only the nearest-ATM in-band strike is checked
+    # (the frontend app); True = every in-band strike, nearest-ATM first, and
+    # the first that meets the entry rules is taken.
+    any_strike_in_band: bool = False
 
 
 PRESETS = {
@@ -92,6 +105,13 @@ PRESETS = {
                  "include_entry_candle": True, "time_exit_first": True, "strong_green": False,
                  "atm_offsets_only": False, "stagnant_hours": 0, "sl_on_low": False},
 }
+# EMA25 + VWAP: the VWAP live rules on 1-min candles, plus EMA25 crossing above
+# VWAP on the signal candle (the 1-min lines on the trade chart), entry the
+# minute that candle closes (e.g. the 09:40 candle → 09:41). No strong-green
+# rule: the cross itself is the signal (it blocked 9 Oct's 22150 CE cross).
+PRESETS["ema25_vwap"] = {**PRESETS["frontend_live"], "ema_cross": True, "candle_minutes": 1,
+                         "strong_green": False, "max_entry_visits": 4, "any_strike_in_band": True,
+                         "min_premium": 280}  # a cross at ₹294 (8 Oct 22750 PE 09:39) is still taken
 KITE_OFFSETS = [0, -50, 50, -100, 100, -150, 150]
 
 
@@ -146,6 +166,38 @@ def vwap_series(bars: list[Bar]) -> list[float]:
     return out
 
 
+def ema_series(closes: list[float], n: int) -> list[float | None]:
+    """EMA seeded with the SMA of the first n closes (as TradingView); None before that."""
+    k, out, ema, total = 2 / (n + 1), [], None, 0.0
+    for i, c in enumerate(closes):
+        if i < n:
+            total += c
+            ema = total / n if i == n - 1 else None
+        else:
+            ema = c * k + ema * (1 - k)
+        out.append(ema)
+    return out
+
+
+def ema_crossed(sr: "Series", idx: int) -> bool:
+    """EMA crosses above VWAP on N-min candle idx (VWAP restarts daily, so not on the first)."""
+    if idx < 1 or sr.ema[idx] is None or sr.ema[idx - 1] is None:
+        return False
+    return _round2(sr.ema[idx - 1]) <= sr.vwap[idx - 1] and _round2(sr.ema[idx]) > sr.vwap[idx]
+
+
+def entry_visits(bars: list[Bar], price: float, before: str) -> int:
+    """Separate runs of 1-min candles (before `before`) whose low–high holds `price`."""
+    n, prev = 0, False
+    for b in bars:
+        if b[0] >= before:
+            break
+        hit = b[3] <= price <= b[2]
+        n += hit and not prev
+        prev = hit
+    return n
+
+
 def strong_green(c: Bar) -> bool:
     body = c[4] - c[1]
     if body <= 0:
@@ -161,6 +213,7 @@ class Series:
     bars: list[Bar]
     nm: list[Bar]
     vwap: list[float]
+    ema: list[float | None] = field(default_factory=list)  # aligned with nm, previous session warm-up
 
 
 @dataclass
@@ -192,6 +245,7 @@ class Trade:
     score: int = 0                     # SMC: raw concept count (of 5)
     concepts: list = field(default_factory=list)  # SMC concepts
     trend_ok: bool = False             # SMC: EMA-20 trend aligned
+    ema: float = 0.0                   # EMA25 + VWAP: EMA at the signal candle
 
 
 @dataclass
@@ -281,11 +335,17 @@ async def run_day(day: date, s: Settings, spot_bars: list[Bar]) -> DayResult:
     async def series(c: dict) -> Series | None:
         k = c["instrument_key"]
         if k not in cache:
-            rows = await day_rows(k, day, expiry, expired)
-            bars = _market(rows)
+            span = await span_rows(k, day, expiry, expired)
+            d = day.isoformat()
+            bars = _market([r for r in span if r[0][:10] == d])
             if len(bars) >= cm * 2:
                 nm = aggregate(bars, cm)
-                cache[k] = Series(k, bars, nm, vwap_series(nm))
+                ema = []
+                if s.ema_cross:
+                    prev_day = max((r[0][:10] for r in span if r[0][:10] < d), default=None)
+                    prev = aggregate(_market([r for r in span if r[0][:10] == prev_day]), cm) if prev_day else []
+                    ema = ema_series([b[4] for b in prev + nm], s.ema_period)[len(prev):]
+                cache[k] = Series(k, bars, nm, vwap_series(nm), ema)
             else:
                 cache[k] = None
         return cache[k]
@@ -293,11 +353,20 @@ async def run_day(day: date, s: Settings, spot_bars: list[Bar]) -> DayResult:
     def bar_at_or_after(sr: Series, mark: str) -> int:
         return next((i for i, b in enumerate(sr.bars) if b[0] >= mark), -1)
 
+    def sideways(x):
+        return s.max_entry_visits > 0 and entry_visits(
+            x["sr"].bars, x["premium"], _add(x["candle"][0], 1 - cm)) >= s.max_entry_visits
+
+    def ok(x):
+        return bool(x and x["close"] > x["vwap"] and (not s.strong_green or strong_green(x["candle"]))
+                    and (not s.ema_cross or ema_crossed(x["sr"], x["idx"])) and not sideways(x))
+
     async def live_candidate(side: str, atm: float, mark: str):
         """Live: nearest-ATM strike whose LIVE price (last 1-min close before
         `mark`) is in band — chosen before looking at VWAP, exactly like
         findCandidateLegs — then its latest completed N-min candle."""
         window = [c for c in by_side[side] if abs(c["strike_price"] - atm) <= s.chain_strikes * STEP]
+        first = None  # any_strike_in_band: the nearest in-band leg, shown when none qualifies
         for c in sorted(window, key=lambda c: abs(c["strike_price"] - atm)):
             sr = await series(c)
             if not sr:
@@ -313,16 +382,26 @@ async def run_day(day: date, s: Settings, spot_bars: list[Bar]) -> DayResult:
             # (complete) m-1 candle, so only candles up to m-2 are used. That's
             # why live entries land at 09:36, 09:41, 09:46 … (verified against
             # the live alerts in Mongo).
-            done = [i for i, b in enumerate(sr.nm) if _add(b[0], 2) <= mark]
+            # EMA25 + VWAP isn't bound by that quirk: it acts on the candle
+            # the minute it closes.
+            lag = 1 if s.ema_cross else 2
+            done = [i for i, b in enumerate(sr.nm) if _add(b[0], lag) <= mark]
             if not done:
+                if s.any_strike_in_band:
+                    continue
                 return None  # in-band leg has no completed candle yet → this side can't qualify
             idx = done[-1]
             entry_idx = bar_at_or_after(sr, mark)
             if entry_idx < 0:
+                if s.any_strike_in_band:
+                    continue
                 return None
-            return {"c": c, "sr": sr, "premium": ltp, "close": sr.nm[idx][4], "vwap": sr.vwap[idx],
-                    "candle": sr.nm[idx], "entry_idx": entry_idx}
-        return None
+            x = {"c": c, "sr": sr, "premium": ltp, "close": sr.nm[idx][4], "vwap": sr.vwap[idx],
+                 "candle": sr.nm[idx], "entry_idx": entry_idx, "idx": idx}
+            if not s.any_strike_in_band or ok(x):
+                return x
+            first = first or x
+        return first
 
     async def candidate(side: str, atm: float, mark: str):
         if s.live:
@@ -354,7 +433,8 @@ async def run_day(day: date, s: Settings, spot_bars: list[Bar]) -> DayResult:
             entry_idx = next((i for i, b in enumerate(sr.bars) if b[0] > last[0]), -1)
             if entry_idx < 0:
                 continue
-            return {"c": c, "sr": sr, "premium": premium, "close": premium, "vwap": sr.vwap[idx], "candle": last, "entry_idx": entry_idx}
+            return {"c": c, "sr": sr, "premium": premium, "close": premium, "vwap": sr.vwap[idx], "candle": last,
+                    "entry_idx": entry_idx, "idx": idx}
         return None
 
     # Checkpoints: candle closes from the entry start (rounded up) to 15:30.
@@ -379,8 +459,6 @@ async def run_day(day: date, s: Settings, spot_bars: list[Bar]) -> DayResult:
         atm = round(spot / STEP) * STEP
         ce, pe = await candidate("CE", atm, mark), await candidate("PE", atm, mark)
 
-        def ok(x):
-            return x and x["close"] > x["vwap"] and (not s.strong_green or strong_green(x["candle"]))
         ce_ok, pe_ok = ok(ce), ok(pe)
         if not ce_ok and not pe_ok:
             return None
@@ -391,6 +469,10 @@ async def run_day(day: date, s: Settings, spot_bars: list[Bar]) -> DayResult:
         other_side, other = ("PE", pe) if side == "CE" else ("CE", ce)
         if other:
             green = "" if not s.strong_green or strong_green(other["candle"]) else " (not a strong green candle)"
+            if s.ema_cross and not ema_crossed(other["sr"], other["idx"]):
+                green += f" (EMA{s.ema_period} not crossing VWAP)"
+            if sideways(other):
+                green += f" (entry price hit {s.max_entry_visits}+ times earlier)"
             o = f"{other_side} {other['c']['strike_price']:g} close {other['close']:.2f} vs VWAP {other['vwap']:.2f}{green}"
         else:
             o = f"no {other_side} in band"
@@ -439,6 +521,7 @@ async def run_day(day: date, s: Settings, spot_bars: list[Bar]) -> DayResult:
             candle=f"{_add(pick['candle'][0], 1 - cm)}–{_add(pick['candle'][0], 1)}", close=pick["close"],
             vwap=pick["vwap"], other=other, status=status, exit_time=exit_t, exit=exit_p, pnl=pnl,
             pnl_pct=_round2(pnl / entry * 100), peak=peak, sl_to_breakeven=moved, spot=spot,
+            ema=_round2(sr.ema[pick["idx"]]) if s.ema_cross and sr.ema[pick["idx"]] is not None else 0.0,
         )
 
     after = None
@@ -461,7 +544,10 @@ async def run_day(day: date, s: Settings, spot_bars: list[Bar]) -> DayResult:
         after = _mins(tr.exit_time or tr.entry_time) + s.cooldown_min
     if not res.trades:
         res.note = (f"no CE/PE in ₹{s.min_premium:g}–{s.max_premium:g} with a "
-                    f"{'strong green ' if s.strong_green else ''}{cm}-min candle closed above VWAP after {s.entry_start}")
+                    f"{'strong green ' if s.strong_green else ''}{cm}-min candle closed above VWAP"
+                    f"{f' with EMA{s.ema_period} crossing above VWAP' if s.ema_cross else ''}"
+                    f"{f' (entry price hit under {s.max_entry_visits} times earlier)' if s.max_entry_visits else ''}"
+                    f" after {s.entry_start}")
     return res
 
 
