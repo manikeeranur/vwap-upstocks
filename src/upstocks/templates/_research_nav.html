@@ -1,0 +1,5 @@
+<nav class="research-nav" aria-label="Research tools">
+  {% for key, href, label in [('vwap','/vwap','Strategies'),('backtest','/backtest','CSV backtest'),('data','/data','Market data')] %}
+  <a href="{{ href }}" class="{{ 'on' if active == key else '' }}" {% if active == key %}aria-current="page"{% endif %}>{{ label }}</a>
+  {% endfor %}
+</nav>

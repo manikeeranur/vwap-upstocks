@@ -1,7 +1,7 @@
 [project]
 name = "upstocks"
-version = "0.1.0"
-description = "Add your description here"
+version = "0.2.0"
+description = "NIFTY trading workspace with durable SQLite storage and structured operational logs"
 authors = [
     { name = "Manikandan Arumugam", email = "manikandan.arumugam@impacteers.com" }
 ]
@@ -10,6 +10,7 @@ dependencies = [
     "fastapi>=0.143.0",
     "httpx>=0.28.1",
     "jinja2>=3.1.6",
+    "pydantic>=2,<3",
     "python-dotenv>=1.2.4",
     "reportlab>=5.0.1",
     "uvicorn[standard]>=0.54.0",
@@ -17,6 +18,7 @@ dependencies = [
 
 [project.scripts]
 upstocks = "upstocks.app:main"
+upstocks-db = "upstocks.maintenance:main"
 
 [build-system]
 requires = ["uv_build>=0.12.19,<0.13.0"]

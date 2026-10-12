@@ -2,10 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>upstocks — calendar P&amp;L</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+{% from "_icons.html" import ui_icon %}
 {% include "_style.html" %}
 <style>
   main { max-width: none; padding: 24px 28px 48px; }
@@ -22,6 +21,9 @@
   .dow { font-size: 11px; letter-spacing: 1.1px; text-transform: uppercase; color: var(--muted); font-weight: 600; padding: 0 4px 2px; }
   .day { min-width: 0; overflow: hidden; background: var(--card); border: 1px solid var(--border); border-radius: 10px; min-height: 92px; padding: 8px 10px; cursor: default;
          display: flex; flex-direction: column; gap: 4px; position: relative; }
+  .day { font:inherit; color:var(--text); text-align:left; cursor:pointer; }
+  .cal-compact { display:none; }
+  @media(max-width:540px) { .cal-full { display:none; } .cal-compact { display:inline; } .tiles > :first-child { grid-column:1/-1; } }
   .day.has { cursor: pointer; } .day.has:hover { outline: 2px solid var(--accent); }
   .day.sel { outline: 2px solid var(--accent); }
   .day.out { opacity: .35; } .day.wk { background: transparent; }
@@ -47,14 +49,15 @@
 </head>
 <body>
 {% set active = "calendar" %}{% include "_nav.html" %}
-<main>
+<main id="main" tabindex="-1">
   <div class="head">
-    <div><h1>Calendar P&amp;L</h1><p class="sub">Each market day's paper / live P&amp;L from Paper / Live — no backtests or replays. Click a day for its trades.</p></div>
+    <div><h1>P&amp;L calendar</h1><p class="sub">Daily performance, one month at a time.</p></div>
     <span style="flex:1"></span>
     <label>Strategy <select id="strat"><option value="">All strategies</option>
-      {% for p in presets %}<option value="{{ p }}">{{ labels[p] }}</option>{% endfor %}</select></label>
+      {% for p in presets %}<option value="{{ p }}">{{ {"ema25_vwap":"VWAP + EMA25","ema_pullback":"EMA pullback"}.get(p, labels[p]) }}</option>{% endfor %}</select></label>
     <div class="mnav"><button id="prev" type="button" aria-label="Previous month">‹</button><h2 id="mon"></h2><button id="next" type="button" aria-label="Next month">›</button></div>
   </div>
+  <p class="page-status" id="pageStatus" role="status">Loading your calendar…</p>
   <div class="tiles" id="tiles"></div>
   <div class="card">
     <div class="cal" id="cal"></div>
@@ -63,18 +66,29 @@
 </main>
 <script>
 const $ = id => document.getElementById(id);
-const LABELS = {{ labels | tojson }}, TODAY = "{{ today }}";
+const LABELS = { ...{{ labels | tojson }}, ema25_vwap: "VWAP + EMA25", ema_pullback: "EMA pullback" }, TODAY = "{{ today }}";
 const fmt = n => (Math.round(n * 100) / 100).toFixed(2);
 const money = n => `${n < 0 ? "−" : n > 0 ? "+" : ""}₹${Math.abs(Math.round(n)).toLocaleString("en-IN")}`;
 const ampm = s => { if (!s) return "—"; let [h, m] = s.split(":").map(Number); const ap = h >= 12 ? "PM" : "AM"; h = h % 12 || 12; return `${h}:${String(m).padStart(2, "0")} ${ap}`; };
 const iso = d => d.toLocaleDateString("en-CA");
 let cur = new Date(TODAY); cur.setDate(1);
-let J = null, sel = null;
+let J = null, sel = null, loadVersion = 0;
 
 async function load() {
+  const version = ++loadVersion;
   const a = new Date(cur.getFullYear(), cur.getMonth(), 1), b = new Date(cur.getFullYear(), cur.getMonth() + 1, 0);
-  J = await (await fetch(`/api/journal?start=${iso(a)}&end=${iso(b)}`)).json();
-  render();
+  const status = $("pageStatus"); status.hidden = false; status.className = "page-status"; status.textContent = "Loading your calendar…";
+  $("cal").setAttribute("aria-busy", "true");
+  try {
+    const response = await appFetch(`/api/journal?start=${iso(a)}&end=${iso(b)}`);
+    if (!response.ok) throw new Error("Couldn't load the calendar. Change the month to try again.");
+    const result = await response.json(); if (version !== loadVersion) return;
+    J = result; status.hidden = true; render();
+  } catch (error) {
+    if (version !== loadVersion) return;
+    J = null; $("cal").innerHTML = ""; $("tiles").innerHTML = ""; $("detail").hidden = true;
+    status.className = "page-status error"; status.textContent = error.message;
+  } finally { if (version === loadVersion) $("cal").setAttribute("aria-busy", "false"); }
 }
 
 function dayTrades(d) {
@@ -87,6 +101,7 @@ function dayTrades(d) {
 }
 
 function render() {
+  if (!J) return;
   $("mon").textContent = cur.toLocaleDateString("en-IN", { month: "long", year: "numeric" });
   const y = cur.getFullYear(), m = cur.getMonth(), first = new Date(y, m, 1), last = new Date(y, m + 1, 0);
   const lead = (first.getDay() + 6) % 7;  // Monday first
@@ -112,11 +127,11 @@ function render() {
     const dt = new Date(y, m, d), k = iso(dt), v = pl[k], wk = dt.getDay() === 0 || dt.getDay() === 6;
     const a = v && v.n ? Math.min(0.85, 0.12 + Math.abs(v.rs) / maxAbs * 0.5) : 0;
     const bg = v && v.n ? `background: color-mix(in srgb, ${v.rs >= 0 ? "var(--ok)" : "var(--pe)"} ${Math.round(a * 100)}%, var(--card));` : "";
-    cells.push(`<div class="day ${v && v.n ? "has" : ""} ${wk ? "wk" : ""} ${k === TODAY ? "today" : ""} ${k === sel ? "sel" : ""}" data-d="${k}" style="${bg}">
+    cells.push(`<button type="button" aria-label="${k}${v && v.n ? `, ${money(v.rs)}, ${v.n} trades` : ", no trades"}" aria-pressed="${k === sel}" class="day ${v && v.n ? "has" : ""} ${wk ? "wk" : ""} ${k === TODAY ? "today" : ""} ${k === sel ? "sel" : ""}" data-d="${k}" style="${bg}">
       <span class="n">${d}</span>
-      ${v && v.n ? `<span class="pl ${v.rs >= 0 ? "up" : "down"}" style="${a > .45 ? "color:#fff" : ""}">${money(v.rs)}</span><span class="tc" style="${a > .45 ? "color:#fffc" : ""}">${v.n} trade${v.n > 1 ? "s" : ""}</span>`
+      ${v && v.n ? `<span class="pl ${v.rs >= 0 ? "up" : "down"}" style="${a > .45 ? "color:#fff" : ""}">${`<span class="cal-full">${money(v.rs)}</span><span class="cal-compact">${v.rs < 0 ? "−" : v.rs > 0 ? "+" : ""}₹${new Intl.NumberFormat("en-IN", {notation:"compact",maximumFractionDigits:1}).format(Math.abs(v.rs))}</span>`}</span><span class="tc" style="${a > .45 ? "color:#fffc" : ""}">${v.n} trade${v.n > 1 ? "s" : ""}</span>`
         : v ? `<span class="tc" style="margin-top:auto">no trade</span>` : ""}
-    </div>`);
+    </button>`);
   }
   $("cal").innerHTML = cells.join("");
   renderDetail();
@@ -136,7 +151,7 @@ function renderDetail() {
     || `<tr><td class="muted" colspan="9">No trades that day.</td></tr>`}</tbody></table></div>`;
 }
 
-$("cal").addEventListener("click", e => { const d = e.target.closest(".day.has"); if (!d) return; sel = d.dataset.d; render(); });
+$("cal").addEventListener("click", e => { const d = e.target.closest(".day[data-d]"); if (!d) return; sel = d.dataset.d; render(); $("cal").querySelector(`[data-d="${sel}"]`)?.focus({preventScroll:true}); });
 $("prev").addEventListener("click", () => { cur.setMonth(cur.getMonth() - 1); sel = null; load(); });
 $("next").addEventListener("click", () => { cur.setMonth(cur.getMonth() + 1); sel = null; load(); });
 $("strat").addEventListener("change", render);

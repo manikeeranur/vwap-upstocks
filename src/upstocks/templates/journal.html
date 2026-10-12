@@ -2,10 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>upstocks — journal</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+{% from "_icons.html" import ui_icon %}
 {% include "_style.html" %}
 <style>
   main { max-width: none; padding: 24px 28px 48px; }
@@ -13,7 +12,7 @@
   .head h1 { margin: 0; } .head .sub { margin: 2px 0 0; }
   .filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
   .filters label { min-width: 140px; }
-  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
   .tile { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
   .tile span { display: block; font-size: 11px; letter-spacing: 1.1px; text-transform: uppercase; color: var(--muted); font-weight: 600; }
   .tile b { display: block; font-size: 20px; margin-top: 6px; }
@@ -21,6 +20,11 @@
   .two { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; margin-bottom: 16px; }
   @media (max-width: 1000px) { .two { grid-template-columns: 1fr; } }
   .card h2 { font-size: 13px; letter-spacing: 1.2px; text-transform: uppercase; color: var(--muted); margin: 0 0 12px; }
+  .performance-detail { border:1px solid var(--border); border-radius:10px; background:var(--card); padding:6px 20px; margin-bottom:24px; }
+  .performance-detail .tiles { grid-template-columns:repeat(3,minmax(0,1fr)); margin-top:12px; }
+  .journal-empty { display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:180px; text-align:center; }
+  .journal-empty h2 { margin:4px 0; }
+  .journal-empty p { color:var(--muted); margin:4px 0; font-size:12px; }
   #equity { width: 100%; height: 220px; display: block; }
   .up { color: var(--ok); } .down { color: var(--pe); } .muted { color: var(--muted); }
   .badge { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
@@ -44,41 +48,55 @@
 </head>
 <body>
 {% set active = "journal" %}{% include "_nav.html" %}
-<main>
+<main id="main" tabindex="-1">
   <div class="head">
-    <div><h1>Journal</h1><p class="sub">Your paper and live trades, day by day, as Paper / Live took them in market hours — no backtests or replays. Notes save as you type.</p></div>
+    <div><h1>Trade journal</h1><p class="sub">Performance, positions, and trade notes.</p></div>
     <span style="flex:1"></span>
     <div class="filters">
       <label>From <input type="date" id="from"></label>
       <label>To <input type="date" id="to" value="{{ today }}"></label>
       <label>Strategy <select id="strat"><option value="">All strategies</option>
-        {% for p in presets %}<option value="{{ p }}">{{ labels[p] }}</option>{% endfor %}</select></label>
+        {% for p in presets %}<option value="{{ p }}">{{ {"ema25_vwap":"VWAP + EMA25","ema_pullback":"EMA pullback"}.get(p, labels[p]) }}</option>{% endfor %}</select></label>
       <label>Trades <select id="src"><option value="orders" selected>Live orders only</option><option value="">Paper + live</option><option value="paper">Paper only</option></select></label>
     </div>
   </div>
 
+  <p class="page-status" id="pageStatus" role="status">Loading your journal…</p>
   <div class="tiles" id="tiles"></div>
 
   <div class="two">
-    <div class="card"><h2>Equity curve (₹, cumulative)</h2><svg id="equity" preserveAspectRatio="none"></svg></div>
+    <div class="card"><h2>Equity curve <span class="muted" style="font-size:11px;font-weight:400">· Gross P&amp;L, ₹</span></h2><svg id="equity" preserveAspectRatio="none" role="img" aria-label="Cumulative gross profit and loss"></svg></div>
     <div class="card"><h2>By strategy</h2><div class="tbl"><table id="byStrat"></table></div></div>
   </div>
 
+  <details class="performance-detail"><summary>More performance metrics</summary><div class="tiles" id="extraTiles"></div></details>
+  <p class="small" id="noteStatus" role="status">Notes autosave.</p>
   <div id="trades"></div>
 </main>
 <script>
 const $ = id => document.getElementById(id);
-const LABELS = {{ labels | tojson }}, PRESETS = {{ presets | tojson }};
+const LABELS = { ...{{ labels | tojson }}, ema25_vwap: "VWAP + EMA25", ema_pullback: "EMA pullback" }, PRESETS = {{ presets | tojson }};
 const fmt = n => (Math.round(n * 100) / 100).toFixed(2);
 const money = n => `${n < 0 ? "−" : n > 0 ? "+" : ""}₹${Math.abs(Math.round(n)).toLocaleString("en-IN")}`;
 const ampm = s => { if (!s) return "—"; let [h, m] = s.split(":").map(Number); const ap = h >= 12 ? "PM" : "AM"; h = h % 12 || 12; return `${h}:${String(m).padStart(2, "0")} ${ap}`; };
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const t0 = new Date("{{ today }}"); $("from").value = new Date(t0.getFullYear(), t0.getMonth(), 1).toLocaleDateString("en-CA");
-let J = null;
+let J = null, loadVersion = 0, lastCurve = [];
 
 async function load() {
-  const r = await fetch(`/api/journal?start=${$("from").value}&end=${$("to").value}`);
-  J = await r.json(); render();
+  const version = ++loadVersion, status = $("pageStatus");
+  const start = $("from").value, end = $("to").value;
+  if (!start || !end || start > end) { status.hidden = false; status.className = "page-status error"; status.textContent = "Choose a valid date range. From must be on or before To."; return; }
+  status.hidden = false; status.className = "page-status"; status.textContent = "Loading your journal…";
+  try {
+    const response = await appFetch(`/api/journal?start=${start}&end=${end}`);
+    if (!response.ok) throw new Error("Couldn't load the journal. Change the date range to try again.");
+    const result = await response.json(); if (version !== loadVersion) return;
+    J = result; status.hidden = true; render();
+  } catch (error) {
+    if (version !== loadVersion) return;
+    status.className = "page-status error"; status.textContent = error.message + " Previous results have been kept.";
+  }
 }
 
 function rows() {
@@ -95,6 +113,7 @@ function rows() {
 }
 
 function render() {
+  if (!J) return;
   const R = rows();
   const wins = R.filter(t => t.rs > 0), losses = R.filter(t => t.rs <= 0);
   const net = R.reduce((a, t) => a + t.rs, 0), gw = wins.reduce((a, t) => a + t.rs, 0), gl = -losses.reduce((a, t) => a + t.rs, 0);
@@ -106,17 +125,24 @@ function render() {
   $("tiles").innerHTML = [
     tile("Net P&L", money(net), `${R.length} trades · gross, before charges`, net >= 0 ? "up" : "down"),
     tile("Win rate", R.length ? `${Math.round(wins.length / R.length * 100)}%` : "—", `${wins.length} won · ${losses.length} lost`),
-    tile("Avg win / loss", wins.length || losses.length ? `${money(wins.length ? gw / wins.length : 0)} / ${money(losses.length ? -gl / losses.length : 0)}` : "—"),
-    tile("Profit factor", gl > 0 ? (gw / gl).toFixed(2) : wins.length ? "∞" : "—", "gross win ÷ gross loss"),
-    tile("Best day", best ? money(best[1]) : "—", best ? best[0] : "", "up"),
-    tile("Worst day", worst ? money(worst[1]) : "—", worst ? worst[0] : "", "down"),
+    tile("Profit factor", gl > 0 ? (gw / gl).toFixed(2) : wins.length ? "∞" : "—", ""),
     tile("Max drawdown", money(-dd), "peak to trough", dd ? "down" : ""),
   ].join("");
-  drawEquity(curve);
+  $("extraTiles").innerHTML = [
+    tile("Avg win / loss", wins.length || losses.length ? `${money(wins.length ? gw / wins.length : 0)} / ${money(losses.length ? -gl / losses.length : 0)}` : "—"),
+    tile("Best day", best ? money(best[1]) : "—", best ? best[0] : "", "up"),
+    tile("Worst day", worst ? money(worst[1]) : "—", worst ? worst[0] : "", "down"),
+  ].join("");
+  lastCurve = curve; drawEquity(curve);
   const per = {}; R.forEach(t => { const s = per[t.preset] ||= { n: 0, w: 0, rs: 0 }; s.n++; s.w += t.rs > 0; s.rs += t.rs; });
   $("byStrat").innerHTML = `<thead><tr><th>Strategy</th><th>Trades</th><th>Win %</th><th>Net ₹</th></tr></thead><tbody>${
     Object.entries(per).map(([p, s]) => `<tr><td>${LABELS[p]}</td><td>${s.n}</td><td>${Math.round(s.w / s.n * 100)}%</td><td class="${s.rs >= 0 ? "up" : "down"}">${money(s.rs)}</td></tr>`).join("")
     || `<tr><td class="muted" colspan="4">No trades in this range.</td></tr>`}</tbody>`;
+  $("noteStatus").hidden = !R.length;
+  if (!R.length) {
+    $("trades").innerHTML = `<div class="card journal-empty"><span class="upload-icon">{{ ui_icon("trades") }}</span><h2>No trades in this range</h2><p>Try another date range or trade type.</p></div>`;
+    return;
+  }
   // One table per strategy (in the menu's order), newest trade first.
   const shown = $("strat").value ? [$("strat").value] : PRESETS;
   $("trades").innerHTML = shown.map(p => {
@@ -131,8 +157,8 @@ function render() {
           <td><b style="color:${t.type === "CE" ? "var(--ce)" : "var(--pe)"}">${t.symbol}</b></td><td>₹${fmt(t.entry)}</td><td>₹${fmt(t.exit)}</td>
           <td class="st ${st}">${st === "TIME_EXIT" ? "15:20 EXIT" : st}</td><td class="${pc}">${t.pnl >= 0 ? "+" : ""}${fmt(t.pnl)}</td>
           <td class="${pc}">${money(t.rs)}</td><td><span class="badge ${mode}">${mode}</span></td>
-          <td class="note"><input type="text" data-id="${esc(t.id)}" value="${esc(J.notes[t.id] || "")}" placeholder="Why taken, what happened…"></td></tr>`;
-      }).join("") || `<tr><td class="muted" colspan="10">No trades in this range — Paper / Live fills this in as it trades in market hours.</td></tr>`}</tbody></table></div></div>`;
+          <td class="note"><input type="text" data-id="${esc(t.id)}" value="${esc(J.notes[t.id] || "")}" aria-label="Note for ${esc(t.symbol)} on ${esc(t.date)}" placeholder="Add a note…"></td></tr>`;
+      }).join("") || `<tr><td class="muted" colspan="10">No trades in this range.</td></tr>`}</tbody></table></div></div>`;
   }).join("");
 }
 
@@ -153,14 +179,30 @@ function drawEquity(c) {
 
 ["from", "to"].forEach(id => $(id).addEventListener("change", load));
 ["strat", "src"].forEach(id => $(id).addEventListener("change", render));
-let noteT = {};
+let noteT = {}, noteVersion = {}, pendingNotes = new Set(), failedNotes = new Set(), noteQueues = {};
+function noteFeedback() {
+  $("noteStatus").textContent = failedNotes.size ? "Some notes could not be saved. Edit those notes to retry." : pendingNotes.size ? "Saving notes…" : "All notes saved.";
+  $("noteStatus").className = failedNotes.size ? "err" : "small";
+}
 $("trades").addEventListener("input", e => {
   const id = e.target.dataset.id; if (!id) return;
-  J.notes[id] = e.target.value;
+  const text = e.target.value, version = noteVersion[id] = (noteVersion[id] || 0) + 1;
+  J.notes[id] = text; pendingNotes.add(id); failedNotes.delete(id); noteFeedback();
   clearTimeout(noteT[id]);
-  noteT[id] = setTimeout(() => fetch("/api/journal/note", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, text: e.target.value }) }), 600);
+  noteT[id] = setTimeout(() => {
+    noteQueues[id] = (noteQueues[id] || Promise.resolve()).then(async () => {
+      try {
+        const response = await appFetch("/api/journal/note", { method:"POST", headers:{"content-type":"application/json"}, body:JSON.stringify({id,text}) });
+        if (!response.ok) throw new Error("Note save failed");
+        if (noteVersion[id] === version) { pendingNotes.delete(id); failedNotes.delete(id); }
+      } catch (error) { if (noteVersion[id] === version) { pendingNotes.delete(id); failedNotes.add(id); } }
+      noteFeedback();
+    });
+  }, 600);
 });
-window.addEventListener("resize", () => J && render());
+window.addEventListener("beforeunload", event => { if (pendingNotes.size || failedNotes.size) { event.preventDefault(); event.returnValue = ""; } });
+window.addEventListener("resize", () => J && drawEquity(lastCurve));
+
 load();
 </script>
 </body>

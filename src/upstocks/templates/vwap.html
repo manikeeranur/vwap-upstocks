@@ -2,15 +2,14 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>upstocks — VWAP 9:30</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+{% from "_icons.html" import ui_icon %}
 {% include "_style.html" %}
 <style>
   main { max-width: none; padding: 20px 24px 48px; }
   /* ── Results table: same look as the frontend app's SMC / VWAP 9:30 tables ── */
-  .mono, table.rt, .foot { font-family: 'Satoshi', Inter, sans-serif; }
+  .mono, table.rt, .foot { font-family: var(--font); }
   .tblwrap { margin-top: 16px; border: 1px solid var(--border); border-radius: 10px; overflow: auto; }
   table.rt { width: 100%; min-width: 1300px; border-collapse: collapse; }
   table.rt thead th { position: sticky; top: 0; background: #f8fafc; border-bottom: 2px solid #cbd5e1; color: #64748b;
@@ -23,20 +22,22 @@
   .s8 { font-size: 9px; } .s7 { font-size: 8px; }
   .tag { display: inline-block; font-size: 9px; font-weight: 700; padding: 2px 5px; border-radius: 3px; margin: 0 3px 3px 0; }
   .muted { color: #94a3b8; } .ink { color: #1e293b; }
-  .c-up { color: #16a34a; } .c-down { color: #e11d48; } .c-amber { color: #b45309; } .c-purple { color: #7c3aed; } .c-slate { color: #64748b; }
+  .c-up { color:var(--ok); } .c-down { color:var(--pe); } .c-amber { color: #b45309; } .c-purple { color: #7c3aed; } .c-slate { color: #64748b; }
   .foot { display: grid; grid-template-columns: repeat(8, 1fr) 1.7fr; border: 1px solid var(--border); border-bottom: 2px solid #cbd5e1; border-radius: 10px; overflow: hidden; margin-top: 16px; background: var(--card); }
   .foot div { padding: 14px 16px; border-right: 1px solid var(--border); } .foot div:last-child { border-right: 0; }
   .foot .lbl { font-size: 10px; letter-spacing: 1.5px; color: #64748b; text-transform: uppercase; }
   .foot b { display: block; font-size: 22px; margin-top: 4px; }
   .foot .sub { font-size: 9px; color: #94a3b8; }
   .cbtn { cursor: pointer; border: 1px solid var(--border); background: var(--card); border-radius: 6px; padding: 4px 7px; font-size: 14px; line-height: 1; }
+  .cbtn { display:inline-flex; align-items:center; justify-content:center; }
+  .cbtn svg { width:16px; height:16px; }
   .cbtn:hover { border-color: var(--accent); }
   .modal { position: fixed; inset: 0; z-index: 100; display: flex; background: var(--card); }
   .modal[hidden] { display: none; }
   .mbox { background: var(--card); width: 100vw; height: 100vh; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
   .mhead, .legend { flex: 0 0 auto; }
   /* Chart popup: Satoshi throughout (header, legend, box labels, and the canvas via layout.fontFamily) */
-  .mbox, .mbox button { font-family: 'Satoshi', 'Inter', system-ui, sans-serif; }
+  .mbox, .mbox button { font-family: var(--font); }
   .mhead { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 14px; }
   .mhead .ttl { font-weight: 700; font-size: 15px; }
   .mhead .seg2 { display: flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
@@ -59,11 +60,11 @@
   .ohlc span { margin-right: 10px; }
   .pbox.tgt { background: #16a34a26; border: 1px solid #16a34a80; }
   .pbox.sl  { background: #e11d4826; border: 1px solid #e11d4880; }
-  .plbl { position: absolute; pointer-events: none; z-index: 4; font: 700 12px 'Satoshi', 'Inter', sans-serif; color: #fff; padding: 2px 7px; border-radius: 3px; white-space: nowrap; }
+  .plbl { position: absolute; pointer-events: none; z-index: 4; font: 700 12px var(--font); color: #fff; padding: 2px 7px; border-radius: 3px; white-space: nowrap; }
   .plbl.tgt { background: #16a34a; } .plbl.sl { background: #e11d48; } .plbl.mid { background: #2563eb; }
   .foot .netcell { border-left: 2px solid; } .foot .netcell.up { background: #16a34a12; border-color: #16a34a; } .foot .netcell.down { background: #e11d4812; border-color: #e11d48; }
   .foot .netcell b { font-size: 26px; font-weight: 700; }
-  .net { margin-top: 16px; padding: 16px 20px; border-radius: 10px; border: 2px solid; display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; font-family: 'Satoshi', Inter, sans-serif; }
+  .net { margin-top: 16px; padding: 16px 20px; border-radius: 10px; border: 2px solid; display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; font-family: var(--font); }
   .net.up { border-color: #16a34a; background: #16a34a0d; } .net.down { border-color: #e11d48; background: #e11d480d; }
   .net .lbl { font-size: 11px; letter-spacing: 1.5px; color: #64748b; text-transform: uppercase; font-weight: 700; }
   .net .val { font-size: 34px; font-weight: 700; line-height: 1.1; }
@@ -75,6 +76,13 @@
   @media (max-width: 900px) { .foot { grid-template-columns: repeat(2, 1fr); } .foot .netcell { grid-column: span 2; } }
   input[type=number], input[type=time] { font: inherit; font-size: 14px; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 9px 10px; }
   .grid { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
+  .config-primary { grid-template-columns:2fr 1fr 1fr; }
+  .config-primary > label:first-child { grid-column:auto !important; }
+  .parameters { margin-top:24px; padding-top:24px; border-top:1px solid var(--border); }
+  .preset-details { padding:8px 14px; border:1px solid var(--border); background:var(--surface); border-radius:8px; margin-top:24px; }
+  .preset-details summary { padding:3px 0; font-size:12px; }
+  #presetNote { margin:10px 0 4px; line-height:1.8; }
+  @media(max-width:540px) { .config-primary > label:first-child { grid-column:1/-1 !important; } }
   details { margin-top: 14px; } summary { cursor: pointer; color: var(--muted); font-weight: 600; }
   .bar { height: 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 999px; overflow: hidden; margin-top: 14px; }
   .bar div { height: 100%; width: 0; background: var(--accent); transition: width .3s; }
@@ -89,66 +97,73 @@
 </head>
 <body>
 {% set active = "vwap" %}{% include "_nav.html" %}
-<main>
-  <h1>Strategy backtest &amp; data — VWAP 9:30 / SMC</h1>
-  <p class="sub">Runs your frontend app's VWAP 9:30 rules on Upstox data for every trading day in the range: which option it would enter, when, why, and how the trade ended. <b>Download ZIP</b> gives a summary plus each traded option's 1-minute CSV for that day — upload those on the <a href="/backtest">Backtest page</a> to test them yourself.</p>
+<main id="main" tabindex="-1">
+  <h1>Strategy backtest</h1>
+  <p class="sub">Configure a strategy. Review every trade.</p>
+  {% include "_research_nav.html" %}
 
   <div class="card">
-    <div class="grid">
-      <label style="grid-column: span 2">Rules (preset)
+    <div class="card-title"><h2>Backtest configuration</h2><span>NIFTY options</span></div>
+    <label id="savedRunsLabel" hidden style="margin-bottom:16px">Saved runs
+      <select id="savedRuns" aria-label="Saved backtest runs" style="max-width:100%;width:100%"><option value="">Choose a saved run</option></select>
+    </label>
+    <div class="grid config-primary">
+      <label style="grid-column: span 2">Strategy
         <select id="preset">
-          <option value="frontend_live" selected>VWAP 9:30 — frontend LIVE rules</option>
-          <option value="smc_live">SMC — frontend LIVE rules</option>
+          <option value="frontend_live" selected>VWAP 9:30</option>
+          <option value="smc_live">SMC</option>
           <option value="ema25_vwap">VWAP + EMA25 + SuperTrend</option>
-          <option value="ema_pullback">EMA9/EMA26 pullback (Mani)</option>
+          <option value="ema_pullback">EMA pullback</option>
         </select>
       </label>
       <label>From <input type="date" id="start" value="{{ start }}"></label>
       <label>To <input type="date" id="end" value="{{ end }}"></label>
-      <label>Premium min ₹ <input type="number" id="min_premium" step="5"></label>
-      <label>Premium max ₹ <input type="number" id="max_premium" step="5"></label>
+      </div>
+    <div class="grid parameters">
+      <label>Min premium ₹ <input type="number" id="min_premium" step="5"></label>
+      <label>Max premium ₹ <input type="number" id="max_premium" step="5"></label>
       <label>Stop-loss % <input type="number" id="sl_pct" step="0.5"></label>
       <label>Target % <input type="number" id="target_pct" step="1"></label>
       <label>Entry from <input type="time" id="entry_start" step="60"></label>
       <label>Lots <input type="number" id="lots" value="1" min="1" step="1"></label>
       <label>Lot size <input type="number" id="lotsize" value="65" min="1" step="1"></label>
     </div>
-    <p class="small" id="presetNote" style="margin:10px 0 0"></p>
-    <details>
-      <summary>More rules</summary>
+    <details class="preset-details"><summary>Strategy rules</summary><p class="small" id="presetNote"></p></details>
+    <details class="advanced-settings">
+      <summary>Advanced settings</summary>
       <div class="grid" style="margin-top:12px">
         <label>Candle minutes <input type="number" id="candle_minutes" min="1" step="1"></label>
-        <label>Breakeven at +% (0 = off) <input type="number" id="breakeven_pct" step="1"></label>
+        <label>Breakeven % (0 = off) <input type="number" id="breakeven_pct" step="1"></label>
         <label>Max trades / day <input type="number" id="max_trades" min="1" step="1"></label>
-        <label>Re-entry cooldown min <input type="number" id="cooldown_min" step="1"></label>
-        <label>Stagnant after hours <input type="number" id="stagnant_hours" step="0.5"></label>
-        <label>Stagnant if peak &lt; pts <input type="number" id="stagnant_points" step="1"></label>
+        <label>Cooldown (minutes) <input type="number" id="cooldown_min" step="1"></label>
+        <label>Stagnant after (hours) <input type="number" id="stagnant_hours" step="0.5"></label>
+        <label>Stagnant peak (points) <input type="number" id="stagnant_points" step="1"></label>
         <label>Time exit <input type="time" id="time_exit" step="60"></label>
-        <label>Chain strikes each side <input type="number" id="chain_strikes" step="1"></label>
-        <label>Skip if entry price hit ≥ N times earlier (0 = off) <input type="number" id="max_entry_visits" min="0" step="1"></label>
-        <label>NIFTY trend must hold N candles <input type="number" id="index_trend_bars" min="1" step="1"></label>
+        <label>Strikes per side <input type="number" id="chain_strikes" step="1"></label>
+        <label>Max price revisits (0 = off) <input type="number" id="max_entry_visits" min="0" step="1"></label>
+        <label>Trend confirmation candles <input type="number" id="index_trend_bars" min="1" step="1"></label>
       </div>
-      <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px">
-        <label class="check"><input type="checkbox" id="live"> Live scan: check every minute, pick the strike by its live price, enter at the live price</label>
-        <label class="check"><input type="checkbox" id="strong_green"> Require a strong green candle (green, body bigger than both wicks)</label>
-        <label class="check"><input type="checkbox" id="atm_offsets_only"> Only ATM, ±50, ±100, ±150 strikes (the frontend backtest's rule)</label>
-        <label class="check"><input type="checkbox" id="align_checkpoints"> Round checkpoints to 5-min boundaries</label>
-        <label class="check"><input type="checkbox" id="include_entry_candle"> Check SL/target from the entry minute itself</label>
-        <label class="check"><input type="checkbox" id="time_exit_first"> 15:20 exit checked before SL/target</label>
-        <label class="check"><input type="checkbox" id="trend_entry"> Enter when EMA25 rising + SuperTrend green start (no VWAP check)</label>
-        <label class="check"><input type="checkbox" id="ema_cross"> Require EMA25 to cross above VWAP on the signal candle</label>
-        <label class="check"><input type="checkbox" id="supertrend"> Require SuperTrend (10, 3) green on the signal candle</label>
-        <label class="check"><input type="checkbox" id="index_trend"> Trade with NIFTY's 1-min SuperTrend (10, 3): green → CE only, red → PE only</label>
-        <label class="check"><input type="checkbox" id="any_strike_in_band"> Live: check every strike in the band (nearest ATM first), not just the nearest one</label>
+      <div class="rule-checks">
+        <label class="check"><input type="checkbox" id="live"> Scan and enter at live prices</label>
+        <label class="check"><input type="checkbox" id="strong_green"> Strong green candle (body larger than wicks)</label>
+        <label class="check"><input type="checkbox" id="atm_offsets_only"> ATM strikes within ±150</label>
+        <label class="check"><input type="checkbox" id="align_checkpoints"> Align to 5-minute checkpoints</label>
+        <label class="check"><input type="checkbox" id="include_entry_candle"> Include entry candle for SL / target</label>
+        <label class="check"><input type="checkbox" id="time_exit_first"> Time exit before SL / target</label>
+        <label class="check"><input type="checkbox" id="trend_entry"> EMA25 rising + SuperTrend entry (no VWAP)</label>
+        <label class="check"><input type="checkbox" id="ema_cross"> EMA25 crosses above VWAP</label>
+        <label class="check"><input type="checkbox" id="supertrend"> Green SuperTrend (10, 3)</label>
+        <label class="check"><input type="checkbox" id="index_trend"> Match NIFTY trend: green → CE, red → PE</label>
+        <label class="check"><input type="checkbox" id="any_strike_in_band"> Scan all strikes in the premium range</label>
       </div>
     </details>
     <div class="row">
       <span class="small" id="status"></span>
       <span style="flex:1"></span>
-      <button class="btn ghost" id="pdf" type="button" disabled>⬇ Download PDF</button>
-      <button class="btn ghost" id="sumcsv" type="button" disabled>⬇ Summary CSV</button>
-      <button class="btn ghost" id="zip" type="button" disabled>⬇ Download ZIP (summary + option CSVs)</button>
-      <button class="btn primary" id="run" type="button">▶ Run</button>
+      <button class="btn ghost" id="pdf" type="button" disabled>{{ ui_icon("download") }} PDF report</button>
+      <button class="btn ghost" id="sumcsv" type="button" disabled>{{ ui_icon("download") }} Summary CSV</button>
+      <button class="btn ghost" id="zip" type="button" disabled>{{ ui_icon("download") }} All data (ZIP)</button>
+      <button class="btn primary" id="run" type="button">{{ ui_icon("play") }} Run backtest</button>
     </div>
     <div class="bar" id="bar" hidden><div></div></div>
     <div id="summary"></div>
@@ -159,6 +174,7 @@
     <p class="err" id="failed" hidden style="margin-top:12px"></p>
     <details id="notradeBox" hidden style="margin-top:12px"><summary id="notradeSum"></summary><div class="small" id="notrade" style="margin-top:8px"></div></details>
   </div>
+  <details class="page-guide"><summary>Export details</summary><p>Export a PDF report, summary CSV, or ZIP with the summary and individual option candles. Use those candles in <a href="/backtest">CSV backtest</a> to compare entries.</p></details>
 </main>
 <div class="modal" id="cmodal" hidden>
   <div class="mbox">
@@ -167,7 +183,7 @@
       <span id="cinfo" class="muted"></span>
       <span style="flex:1"></span>
       <div class="seg2" id="ctf"><button data-tf="1" class="on">1m</button><button data-tf="5">5m</button></div>
-      <button class="btn ghost" id="cclose" type="button" style="padding:5px 12px">✕ Close</button>
+      <button class="btn ghost" id="cclose" type="button" style="padding:5px 12px">Close</button>
     </div>
     <div class="legend" id="clegend"></div>
     <div id="chart"></div>
@@ -177,16 +193,16 @@
 <script>
 const $ = id => document.getElementById(id);
 const fmt = n => (Math.round(n * 100) / 100).toFixed(2);
-let job = null, days = [], timer = null;
+let job = null, days = [], timer = null, polling = false;
 
 const PRESETS = {{ presets | tojson }};
 const NUMS = ["min_premium", "max_premium", "sl_pct", "target_pct", "entry_start", "candle_minutes", "breakeven_pct", "max_trades", "cooldown_min", "stagnant_hours", "stagnant_points", "time_exit", "chain_strikes", "max_entry_visits", "index_trend_bars"];
 const BOOLS = ["live", "strong_green", "atm_offsets_only", "align_checkpoints", "include_entry_candle", "time_exit_first", "ema_cross", "any_strike_in_band", "supertrend", "index_trend", "trend_entry"];
 const NOTES = {
-  smc_live: "Your frontend app's SMC live scan (backend smcService runSMCScan + routes/smc.js): every minute 09:21–14:59, NIFTY 1-min candles scored for Liquidity Grab / FVG / Order Block / Breaker / SMT trap (≥2 needed, EMA-20 trend = bonus), strike nearest ATM in the premium band (₹300–400 — what live used; then ×0.75–×1.75, ×0.5–×2; within 50 pts → nearest the band's middle), entry at the live price, SL 6%, T1 +12% (marker), T2 +24% (exit), SL to entry at +15%, SL and target checked once a minute on the live price, 15:20 exit, max 2 trades (2nd only after a loss, 15 min after exit). Your Account tab's band is now ₹200–300 — enter that to match trades from 7 Oct onward.",
-  ema_pullback: "Mani's EMA9/EMA26 pullback on completed NIFTY 1-min candles (EMAs restart from the day's first close), signals 09:36–14:59, entry at the next minute's open, one trade a day. CE: EMA9 > EMA26, EMA26 rising vs 5 min ago, previous candle's low ≤ its EMA9, close > previous high and > EMA9 (PE mirrored). Option: nearest expiry, premium ≥ ₹150 and < ₹300 closest to ₹225 (premium fields below), volume ≥ 65, and over 5 min premium +2% and OI +0.5% — else wait for the next signal. SL 25% / target 100% of the fill, ₹1 slippage each side; reversal exit after +20% (price up / OI down at the 5-min candle's peak minute, volume ≥ 1.5× the 20-min median, upper wick ≥ 40%, fresh 30-min high) at the next open; 15:20 exit; no breakeven or trailing.",
-  ema25_vwap: "1-min candles, every minute from 09:36: every strike whose live price is in the band (₹280–500), nearest ATM first — the first whose last completed 1-min candle closes above VWAP (1-min, from 09:15) AND is where EMA25 crosses above VWAP (previous candle EMA25 at or below VWAP, this one above) with SuperTrend (10, 3) green on that candle is taken. Only on NIFTY's trend side (NIFTY 1-min SuperTrend green → CE only, red → PE only). Entry at the live price the minute that candle closes (09:40 candle → 09:41). Sideways skip: no entry if the price had already come to the entry level 4+ separate times earlier that day. SL 6% / target 30%, SL to entry at +15%, no stagnant exit, 15:20 exit, max 2 trades (2nd only after a loss, 15 min after exit). EMA25 and SuperTrend warmed up on the previous session.",
-  frontend_live: "Your frontend app's live scan (backend doScan): every minute from 09:36, strike nearest ATM whose live price is ₹300–500, its last completed 5-min candle must close above VWAP and be a strong green candle, entry at the live price, SL 6% (fires on the first touch, like the exchange SL-M order) / target 30% (checked once a minute on the live price), SL to entry at +15% (what October live used; your Account tab now says 10%), 15:20 exit, max 2 trades (2nd only after a loss, 15 min after exit).",
+  smc_live: "Liquidity, fair value gap, and order-block setups with EMA20 confirmation. Entries use the nearest eligible ATM option; the strategy exits at its stop-loss, target, or configured time.",
+  ema_pullback: "EMA9 / EMA26 pullbacks on completed NIFTY candles, with option volume and open-interest confirmation. Enters at the next minute’s open; one trade per day, with reversal and time exits.",
+  ema25_vwap: "EMA25 crossing above VWAP with a green SuperTrend, aligned to NIFTY’s trend. Scans eligible strikes nearest ATM first; repeated visits to the entry price can block a setup.",
+  frontend_live: "Strong green candles above VWAP, using the nearest eligible ATM option. Entries use live prices; stop-loss, target, breakeven, cooldown, and time exit follow the settings below.",
 };
 function applyPreset() {
   const p = PRESETS[$("preset").value];
@@ -204,7 +220,7 @@ function settings() {
   return s;
 }
 
-const label = { SL: "🛑 SL", TARGET: "🎯 Target", TIME_EXIT: "⏱ 15:20 exit", STAGNANT_EXIT: "💤 Stagnant", REVERSAL: "↩ Reversal", EOD: "EOD" };
+const label = { SL: "Stop-loss", TARGET: "Target", TIME_EXIT: "15:20 exit", STAGNANT_EXIT: "Stagnant", REVERSAL: "Reversal", EOD: "EOD" };
 
 // Same formula as the frontend app's VWAP/SMC tables (calcCharges).
 function charges(entry, exit, qty) {
@@ -216,7 +232,7 @@ function charges(entry, exit, qty) {
 const inr = n => (n < 0 ? "−" : "+") + "₹" + Math.abs(n).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const lakh = n => (n < 0 ? "−" : "+") + "₹" + (Math.abs(n) >= 100000 ? (Math.abs(n) / 100000).toFixed(2) + "L" : Math.abs(n).toLocaleString("en-IN", { maximumFractionDigits: 0 }));
 const ampm = t => { if (!t) return "—"; let [h, m] = t.split(":").map(Number); const ap = h >= 12 ? "PM" : "AM"; h = h % 12 || 12; return `${h}:${String(m).padStart(2, "0")} ${ap}`; };
-const STATUS = { TARGET: ["🎯", "TARGET", "up"], SL: ["🛑", "SL", "down"], TIME_EXIT: ["⏱", "TIME EXIT", ""], STAGNANT_EXIT: ["💤", "STAGNANT", ""], REVERSAL: ["↩", "REVERSAL", ""], EOD: ["🕐", "EOD", ""] };
+const STATUS = { TARGET: ["", "TARGET", "up"], SL: ["", "SL", "down"], TIME_EXIT: ["", "TIME EXIT", ""], STAGNANT_EXIT: ["", "STAGNANT", ""], REVERSAL: ["", "REVERSAL", ""], EOD: ["", "EOD", ""] };
 
 const CONCEPT_COLOR = { LiqGrab: "#7c3aed", FVG: "#0284c7", OrdBlock: "#b45309", Breaker: "#ea580c", SMTrap: "#e11d48" };
 const MONTHS = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
@@ -245,10 +261,8 @@ function render() {
     if (t.status === "TARGET") tgt++; else if (t.status === "SL") sl++; else eod++;
     const win = t.status === "TARGET" || ((t.status === "TIME_EXIT" || t.status === "REVERSAL") && t.pnl >= 0);
     const loss = t.status === "SL" || ((t.status === "TIME_EXIT" || t.status === "REVERSAL") && t.pnl < 0);
-    const bg = win ? (dark ? "#052e16" : "#f0fdf4") : loss ? (dark ? "#2d0505" : "#fff5f5") : t.status === "EOD" ? (dark ? "#1c1500" : "#fefce8")
-             : idx % 2 === 0 ? (dark ? "#0a0f16" : "#fff") : (dark ? "#0d1420" : "#fafafa");
+    const bg = idx % 2 === 0 ? "var(--card)" : "var(--bg)";
     const stClr = win ? "#16a34a" : loss ? "#e11d48" : t.status === "EOD" ? "#b45309" : "#0284c7";
-    const stIco = { TARGET: "🎯", SL: "🛑", EOD: "🕐", TIME_EXIT: "⏱", STAGNANT_EXIT: "💤", REVERSAL: "↩" }[t.status] || "⏳";
     const stLbl = { TIME_EXIT: "TIME EXIT", STAGNANT_EXIT: "STAGNANT" }[t.status] || t.status;
     const t1 = isSmc ? +(t.entry * 1.12).toFixed(2) : t.target;  // VWAP has one target: T1 = T2
     const t1Hit = t.status === "TARGET" || !!t.t1_time, t2Hit = t.status === "TARGET";
@@ -276,12 +290,12 @@ function render() {
       <td style="background:${bg}"><span class="v11 c-down">₹${fmt(slShown)}</span></td>
       <td style="background:${bg}"><span class="v11 c-amber">₹${fmt(t1)}</span></td>
       <td style="background:${bg}"><span class="v11 c-up">₹${fmt(t.target)}</span></td>
-      <td style="background:${bg}"><div class="s8" style="font-weight:700;color:${stClr}">${stIco} ${stLbl}</div><div>${hit(t1Hit ? "T1✓" : "T1✗")}${hit(t2Hit ? "T2✓" : "T2✗")}</div><div class="s8" style="font-weight:700;color:${stClr}">${fmtLot(lotPnl)}</div></td>
+      <td style="background:${bg}"><div class="s8" style="font-weight:700;color:${stClr}">${stLbl}</div><div>${hit(t1Hit ? "T1✓" : "T1✗")}${hit(t2Hit ? "T2✓" : "T2✗")}</div><div class="s8" style="font-weight:700;color:${stClr}">${fmtLot(lotPnl)}</div></td>
       <td style="background:${bg}"><div class="v12 ${pc}">${t.pnl >= 0 ? "+" : "−"}₹${fmtFull(lotPnl)}</div><div class="s8 ${pc}" style="font-weight:700">₹${Math.abs(t.pnl).toFixed(2)} × ${qty}</div><div class="s8 ${pc}">${t.pnl >= 0 ? "+" : ""}${fmt(t.pnl_pct)}%</div>${t.pnl !== 0 ? `<div class="s8 c-slate">exit ₹${fmt(exitP)}</div>` : ""}</td>
       <td style="background:${bg}"><div class="v11 c-amber">−₹${fmtFull(c)}</div><div class="s7 muted">incl. STT+GST</div></td>
       <td style="background:${bg}">${t.peak > 0 ? `<div class="v11 c-purple">+${t.peak.toFixed(2)}</div><div class="s8 c-purple" style="font-weight:700">+${(t.peak / t.entry * 100).toFixed(1)}%</div>` : `<span class="muted">—</span>`}</td>
       <td style="background:${bg}">${t.peak > 0 ? `<div class="v12 c-purple">+₹${fmtFull(t.peak * qty)}</div><div class="s8 c-purple" style="font-weight:700">${t.peak.toFixed(2)} × ${qty}</div><div class="s8 c-purple" style="font-weight:700">+${(t.peak / t.entry * 100).toFixed(1)}%</div>` : `<span class="muted">—</span>`}</td>
-      <td style="background:${bg}"><button class="cbtn" data-ci="${idx}" title="Open chart">📈</button></td>
+      <td style="background:${bg}"><button class="cbtn" data-ci="${idx}" title="Open chart" aria-label="Open trade chart">{{ ui_icon("chart") }}</button></td>
     </tr>`;
   }).join("");
   shownTrades = trades;
@@ -308,7 +322,12 @@ function render() {
 const fmtStrike = k => Number(k).toFixed(0);
 
 async function poll() {
-  const r = await fetch(`/api/vwap/job/${job}?since=${days.length}`).then(r => r.json()).catch(() => null);
+  if (polling || !job) return;
+  polling = true;
+  const requestedJob = job;
+  try {
+  const r = await appFetch(`/api/vwap/job/${job}?since=${days.length}`).then(r => r.json()).catch(() => null);
+  if (requestedJob !== job) return;
   if (!r) return;
   if (r.detail) { $("status").textContent = r.detail; clearInterval(timer); $("run").disabled = false; return; }
   days = r.status === "running" ? days.concat(r.days) : r.days;
@@ -324,17 +343,63 @@ async function poll() {
     clearInterval(timer); timer = null;
     $("run").disabled = false;
     $("zip").disabled = $("sumcsv").disabled = $("pdf").disabled = r.status !== "done";
+    loadSavedRuns();
+  }
+  } finally { polling = false; }
+}
+
+async function loadSavedRuns(restoreLatest = false) {
+  try {
+    const response = await appFetch('/api/vwap/jobs');
+    if (!response.ok) return;
+    const { jobs } = await response.json();
+    const select = $("savedRuns");
+    select.replaceChildren(new Option('Choose a saved run', ''));
+    jobs.forEach(run => {
+      const label = $("preset").querySelector(`option[value="${run.preset}"]`)?.textContent || run.preset;
+      select.add(new Option(`${label} · ${run.start} – ${run.end} · ${run.status}`, run.id));
+    });
+    select.value = job || '';
+    $("savedRunsLabel").hidden = !jobs.length;
+    if (restoreLatest && !job && !$("run").disabled && jobs.length) await openSavedRun(jobs[0].id);
+  } catch (_) { /* Saved runs can be fetched again after connectivity returns. */ }
+}
+
+async function openSavedRun(id) {
+  if (!id) return;
+  clearInterval(timer); timer = null;
+  job = id; days = [];
+  $("run").disabled = true;
+  $("zip").disabled = $("sumcsv").disabled = $("pdf").disabled = true;
+  $("status").textContent = 'Loading saved run…';
+  try {
+    const response = await appFetch(`/api/vwap/job/${id}`);
+    const saved = await response.json();
+    if (job !== id) return;
+    if (!response.ok) throw new Error(saved.detail || 'Unable to load this run');
+    $("preset").value = saved.preset; applyPreset();
+    ["start", "end", ...NUMS].forEach(key => { if (saved.settings[key] !== undefined) $(key).value = saved.settings[key]; });
+    BOOLS.forEach(key => { $(key).checked = !!saved.settings[key]; });
+    $("savedRuns").value = id;
+    $("bar").hidden = false;
+    timer = setInterval(poll, 1500); await poll();
+  } catch (error) {
+    if (job !== id) return;
+    $("status").textContent = error.message;
+    $("run").disabled = false;
   }
 }
+$("savedRuns").addEventListener("change", event => openSavedRun(event.target.value));
 
 $("run").addEventListener("click", async () => {
   $("run").disabled = true; $("zip").disabled = $("sumcsv").disabled = $("pdf").disabled = true;
   days = []; render(); $("bar").hidden = false; $("bar").firstElementChild.style.width = "0";
   $("status").textContent = "Starting…";
-  const r = await fetch("/api/vwap/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(settings()) })
+  const r = await appFetch("/api/vwap/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(settings()) })
     .then(r => r.json()).catch(e => ({ detail: e.message }));
   if (!r.id) { $("status").textContent = r.detail || "Failed to start"; $("run").disabled = false; return; }
   job = r.id;
+  loadSavedRuns();
   timer = setInterval(poll, 1500); poll();
 });
 const qtyNow = () => (parseInt($("lots").value) || 1) * (parseInt($("lotsize").value) || 65);
@@ -450,7 +515,7 @@ async function openChart(t) {
   document.body.style.overflow = "hidden";
   const q = new URLSearchParams({ key: t.instrument_key, date: t.date, expiry: t.expiry });
   const fontReady = document.fonts ? Promise.race([document.fonts.load("12px Satoshi"), new Promise(r => setTimeout(r, 1500))]) : Promise.resolve();
-  [chartData] = await Promise.all([fetch(`/api/chart?${q}`).then(r => r.json()).catch(e => ({ detail: e.message })), fontReady]);
+  [chartData] = await Promise.all([appFetch(`/api/chart?${q}`).then(r => r.json()).catch(e => ({ detail: e.message })), fontReady]);
   if (chartData.detail || chartData.error) { $("chart").innerHTML = `<p class="err" style="padding:16px">${chartData.detail || chartData.error}</p>`; return; }
   drawChart();
 }
@@ -460,19 +525,20 @@ function drawChart() {
   const t = chartTrade, d = chartData, el = $("chart");
   if (chart) { chart.remove(); chart = null; }
   el.innerHTML = "";
-  const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+  const theme = getComputedStyle(document.documentElement);
+  const themeColor = name => theme.getPropertyValue(name).trim();
   // Sized to the exact space under the header/legend (autoSize let the canvas
   // grow past it, clipping the time axis) and re-measured on window resize.
   const box = el.getBoundingClientRect();
   chart = LightweightCharts.createChart(el, {
     width: Math.floor(box.width), height: Math.floor(box.height),
-    layout: { background: { color: dark ? "#0f1724" : "#ffffff" }, textColor: dark ? "#94a3b8" : "#475569", fontFamily: "'Satoshi', 'Inter', sans-serif", fontSize: 12 },
-    grid: { vertLines: { color: dark ? "#1e2a3a" : "#f1f5f9" }, horzLines: { color: dark ? "#1e2a3a" : "#f1f5f9" } },
+    layout: { background: { color: themeColor("--card") }, textColor: themeColor("--muted"), fontFamily: getComputedStyle(document.body).fontFamily, fontSize: 12 },
+    grid: { vertLines: { color: themeColor("--surface") }, horzLines: { color: themeColor("--surface") } },
     // Chart times are IST wall-clock stored as UTC — format them as 9:35 AM.
     timeScale: { timeVisible: true, secondsVisible: false, tickMarkFormatter: t => clock12(t) },
     localization: { timeFormatter: t => clock12(t) },
     // Candles above, the volume bars in the bottom band.
-    rightPriceScale: { borderColor: dark ? "#1e2a3a" : "#e2e8f0", scaleMargins: { top: 0.04, bottom: 0.16 } },
+    rightPriceScale: { borderColor: themeColor("--border"), scaleMargins: { top: 0.04, bottom: 0.16 } },
     crosshair: { mode: 0 },
   });
   // Pin the chart's own root to the box's top-left: as an in-flow block it sat
@@ -565,6 +631,7 @@ function drawChart() {
   if (tExit > lastT) tExit = lastT;
   drawPositionBox(candles, t, at(t.entry_time), tExit);
 }
+loadSavedRuns(true);
 </script>
 </body>
 </html>

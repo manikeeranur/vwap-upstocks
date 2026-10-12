@@ -2,162 +2,385 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>upstocks — paper &amp; live trade</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>upstocks — trading overview</title>
+{% from "_icons.html" import ui_icon %}
 {% include "_style.html" %}
 <style>
-  main { max-width: none; padding: 20px 24px 48px; }
-  .bar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 14px; }
-  .bar label { min-width: 120px; }
-  .pill { font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 999px; }
-  .pill.open { background: #16a34a22; color: var(--ok); } .pill.closed { background: #94a3b822; color: var(--muted); }
-  .strat { margin-top: 16px; }
-  .shead { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
-  .shead h2 { font-size: 15px; margin: 0; }
-  .shead .sum { color: var(--muted); font-size: 13px; }
-  .shead .sum b { color: var(--text); }
-  .lots { width: 70px; padding: 5px 8px !important; }
-  .up { color: var(--ok); } .down { color: var(--pe); } .muted { color: var(--muted); }
-  .st { font-weight: 700; } .st.OPEN { color: var(--accent); } .st.SL { color: var(--pe); } .st.TARGET { color: var(--ok); }
-  .st.OPEN::before { content: "● "; animation: blink 1.4s infinite; }
-  @keyframes blink { 50% { opacity: .2; } }
-  .empty { color: var(--muted); font-size: 13px; padding: 10px 0 0; }
-  .note { color: var(--muted); font-size: 13px; margin-top: 10px; }
-  .livechk { color: var(--pe) !important; font-weight: 700 !important; }
-  /* Toggle switches: the real checkbox is hidden, the .sw span next to it is drawn */
-  .tog { gap: 8px; cursor: pointer; user-select: none; position: relative; }
-  .tog input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; }
-  .tog .sw { width: 38px; height: 22px; border-radius: 999px; background: #94a3b8; position: relative; flex: none; transition: background .15s; }
-  .tog .sw::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%;
-                    background: #fff; box-shadow: 0 1px 2px #0003; transition: transform .15s; }
-  .tog input:checked + .sw { background: var(--ok); }
-  .tog input:checked + .sw::after { transform: translateX(16px); }
-  .tog.livechk input:checked + .sw { background: var(--pe); }
-  .tog input:focus-visible + .sw { outline: 2px solid var(--accent); outline-offset: 2px; }
-  .strat.islive { border-color: var(--pe); box-shadow: 0 0 0 1px var(--pe); }
-  .ord { font-size: 11px; } .ord .err { font-size: 11px; }
-  .sq { border-color: var(--pe); color: var(--pe); padding: 5px 12px; }
-  #log { max-height: 220px; overflow: auto; font-size: 12px; white-space: pre-wrap; margin: 8px 0 0; color: var(--muted); }
+.overview-head { display:flex; align-items:center; justify-content:space-between; gap:20px; margin-bottom:28px; }
+.overview-head .sub { margin:6px 0 0; }
+.overview-actions { display:flex; align-items:center; flex-wrap:wrap; gap:12px; flex:none; }
+.mode-badge { display:inline-flex; align-items:center; gap:7px; border:1px solid var(--border); background:var(--card); border-radius:6px; padding:6px 9px; color:var(--muted); font-size:11px; font-weight:500; white-space:nowrap; }
+.mode-badge::before,.pill::before { content:''; width:6px; height:6px; border-radius:50%; background:currentColor; flex:none; }
+.mode-badge.live { color:var(--pe); border-color:color-mix(in srgb,var(--pe) 30%,var(--border)); }
+.workspace-grid { display:grid; grid-template-columns:minmax(0,1fr) 280px; grid-template-areas:'performance performance' 'strategies controls' 'activity controls' 'help controls'; gap:24px; align-items:start; }
+.metrics { grid-area:performance; display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:16px; }
+.metric { padding:20px; min-width:0; border:1px solid var(--border); border-radius:11px; background:var(--card); box-shadow:var(--shadow); }
+.metric.featured { background:var(--accent-soft); border-color:color-mix(in srgb,var(--accent) 18%,var(--border)); }
+.metric-heading { display:flex; justify-content:space-between; align-items:center; gap:10px; }
+.metric-label { display:block; color:var(--muted); font-size:12px; font-weight:500; }
+.metric.featured .metric-label { color:var(--accent); }
+.metric-icon { width:15px; height:15px; color:var(--muted); }
+.metric-unit { font-size:9px; color:var(--accent); border:1px solid color-mix(in srgb,var(--accent) 20%,transparent); border-radius:4px; padding:1px 5px; }
+.profit-line { display:flex; align-items:baseline; gap:8px; }
+.profit-line > span { font-size:10px; color:var(--muted); }
+.metric-value { display:block; font:600 30px/1.25 var(--font); letter-spacing:-1.1px; margin:16px 0 8px; overflow-wrap:anywhere; }
+.metric small { display:block; font-size:11px; color:var(--muted); }
+.session-rail { grid-area:controls; display:grid; gap:16px; position:sticky; top:88px; min-width:0; }
+body .scan-card,body .research-card { padding:20px; }
+.rail-title { display:flex; align-items:center; gap:9px; margin:0 0 20px; }
+.rail-title h2 { margin:0; } .rail-title svg { width:16px; height:16px; color:var(--muted); }
+.market-status { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:20px; }
+.pill { display:inline-flex; align-items:center; gap:7px; font-size:11px; font-weight:500; color:var(--muted); } .pill.open { color:var(--ok); }
+#clock { display:block; font-size:10px; color:var(--muted); margin-top:5px; }
+.scan-actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px 10px; }
+.scan-actions label { grid-column:1/-1; } .scan-actions input { width:100%; }
+.scan-actions .btn { padding:9px; }
+.scan-note { display:flex; align-items:flex-start; gap:8px; margin-top:18px; padding-top:15px; border-top:1px solid var(--border); color:var(--muted); font-size:11px; }
+.scan-note svg { width:13px; height:13px; flex:none; margin-top:2px; } .scan-note p { margin:0; }
+.research-card .rail-title { margin-bottom:8px; }
+.research-link { display:flex; align-items:center; gap:10px; padding:12px 0; color:var(--text); text-decoration:none; }
+.research-link .tool-icon { width:31px; height:31px; display:grid; place-items:center; color:var(--muted); background:var(--surface); border:1px solid var(--border); border-radius:7px; flex:none; }
+.research-link svg { width:15px; height:15px; } .research-link b { display:block; font-size:12px; font-weight:500; }
+.research-link > span:last-child { margin-left:auto; color:var(--muted); } .research-link:hover b { color:var(--accent); }
+.connection { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:20px; padding:12px 16px; border:1px solid var(--pe); border-radius:8px; color:var(--pe); background:var(--card); }
+.strategy-region { grid-area:strategies; min-width:0; }
+.section-heading { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin:0 0 16px; }
+.section-heading h2 { font-size:15px; margin:0; letter-spacing:-.3px; }
+.section-heading span { display:flex; align-items:center; gap:6px; font-size:11px; color:var(--muted); }
+.strategy-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+.strat { container-type:inline-size; }
+body .strat { padding:20px; } .strat.islive { border-color:var(--pe); }
+.strategy-top { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+.strategy-title { display:flex; align-items:center; gap:10px; min-width:0; }
+.strategy-icon { display:grid; place-items:center; width:34px; height:34px; flex:none; border:1px solid var(--border); background:var(--surface); border-radius:8px; color:var(--accent); }
+.strategy-icon svg { width:18px; height:18px; }
+.strategy-title h3 { font-size:13px; margin:0 0 3px; font-weight:600; letter-spacing:-.2px; }
+.strategy-title p { font-size:10px; color:var(--muted); margin:0; }
+.strategy-pnl { text-align:right; flex:none; }
+.strategy-pnl .pnl-label { display:block; color:var(--muted); font-size:10px; margin-bottom:3px; }
+.strategy-pnl b { display:block; font:600 20px/1.3 var(--font); letter-spacing:-.6px; }
+.strategy-pnl small { font-size:10px; color:var(--muted); }
+.strategy-controls { display:flex; flex-wrap:wrap; align-items:center; gap:3px 16px; padding:14px 0; margin-top:18px; border-top:1px solid var(--border); border-bottom:1px solid var(--border); }
+.strategy-controls .quantity { display:flex; align-items:center; justify-content:space-between; flex-basis:100%; gap:10px; color:var(--muted); font-size:10px; }
+.strategy-controls .lots { width:54px; min-height:30px; padding:4px 8px; font-size:12px; }
+.tog { display:flex; gap:8px; cursor:pointer; user-select:none; position:relative; }
+.tog input { position:absolute; opacity:0; width:1px; height:1px; margin:0; }
+.tog .sw { width:30px; height:17px; border-radius:999px; background:color-mix(in srgb,var(--muted) 40%,var(--card)); position:relative; flex:none; transition:background .15s; }
+.tog .sw::after { content:''; position:absolute; top:2px; left:2px; width:13px; height:13px; border-radius:50%; background:#fff; box-shadow:0 1px 2px #0002; transition:transform .15s; }
+.tog input:checked + .sw { background:var(--accent); } .tog input:checked + .sw::after { transform:translateX(13px); }
+.tog.livechk input:checked + .sw { background:var(--pe); } .tog input:focus-visible + .sw { outline:2px solid var(--accent); outline-offset:3px; }
+.islive .livechk { color:var(--pe); }
+.empty-state { display:flex; align-items:center; justify-content:center; gap:8px; padding:22px 0 2px; }
+.empty-mark { display:grid; place-items:center; flex:none; color:var(--muted); }
+.empty-mark svg { width:16px; height:16px; }
+.empty-state b { display:block; font-size:11px; font-weight:400; color:var(--muted); }
+.empty-state p { color:var(--muted); font-size:11px; margin:3px 0 0; }
+.strategy-error { margin:14px 0 0; font-size:11px; padding:12px; background:color-mix(in srgb,var(--pe) 8%,var(--card)); border-radius:6px; color:var(--pe); overflow-wrap:anywhere; }
+.trade-scroll { margin-top:14px; }
+.st { font-weight:500; font-size:10px; } .st.OPEN { color:var(--accent); } .st.SL { color:var(--pe); } .st.TARGET { color:var(--ok); } .ord { font-size:10px; }
+.trade-cards { display:none; }
+.trade-card { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:14px; }
+.trade-card-head { display:flex; gap:8px; justify-content:space-between; align-items:flex-start; font-size:11px; }
+.trade-card-head b { overflow-wrap:anywhere; font-weight:500; }
+.quote-tag { display:inline-block; margin-left:5px; color:var(--accent); font-size:9px; font-weight:500; }.quote-tag.delayed,.section-heading .quote-delayed { color:var(--pe); }
+.trade-card dl { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin:14px 0 0; font-size:11px; }
+.trade-card dt { color:var(--muted); font-size:10px; } .trade-card dd { margin:3px 0 0; font-weight:500; overflow-wrap:anywhere; }
+.trade-card .trade-net { display:flex; align-items:center; justify-content:space-between; margin-top:12px; padding-top:10px; border-top:1px solid var(--border); font-size:11px; }
+.trade-card .ord { margin-top:8px; overflow-wrap:anywhere; }
+.sq { border-color:var(--pe); color:var(--pe) !important; font-size:10px; }
+.log-card { grid-area:activity; }
+.log-card summary { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:0; color:var(--text); font-size:12px; }
+.log-card summary::after { content:'+'; font-size:17px; color:var(--muted); } .log-card[open] summary::after { content:'−'; }
+#log { max-height:240px; overflow:auto; font:11px/1.8 var(--mono); white-space:pre-wrap; overflow-wrap:anywhere; margin:18px 0 0; color:var(--muted); }
+.how-it-works { grid-area:help; margin-top:-14px; font-size:11px; color:var(--muted); }
+.how-it-works p { line-height:1.8; }
+.loading-card { min-height:160px; display:grid; place-items:center; color:var(--muted); }
+@container(max-width:720px) { .trade-scroll { display:none; } .trade-cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(230px,100%),1fr)); gap:10px; margin-top:16px; } }
+@media(max-width:1340px) { .strategy-list { grid-template-columns:1fr; } .strategy-controls .quantity { margin-left:auto; flex-basis:auto; } }
+@media(max-width:1100px) {
+  .workspace-grid { grid-template-columns:minmax(0,1fr); grid-template-areas:'performance' 'controls' 'strategies' 'activity' 'help'; }
+  .session-rail { position:static; } .research-card { display:none; }
+  .scan-toolbar { display:grid; grid-template-columns:1fr 2fr; align-items:center; gap:20px; }
+  .market-status { margin-bottom:0; } .scan-actions { grid-template-columns:repeat(2,minmax(0,1fr)); align-items:end; }
+  .scan-actions label { grid-column:auto; } .metrics { gap:12px; } .metric { padding:16px; } .metric-value { font-size:26px; }
+}
+@media(max-width:640px) {
+  .overview-head { flex-wrap:wrap; gap:14px; margin-bottom:24px; } .overview-actions { width:100%; justify-content:space-between; }
+  .metrics { grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; } .metric-value { font-size:28px; }
+  .metric-label { font-size:11px; } .metric small { font-size:10px; } .metric-unit { display:none; }
+  .scan-toolbar { grid-template-columns:1fr; gap:16px; } .scan-actions { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .strategy-controls { gap:0 16px; } .strategy-controls .quantity { margin-left:0; flex-basis:100%; }
+  .strategy-controls .lots { min-height:44px; } .strategy-controls .sq { width:100%; margin:8px 0; }
+  .trade-scroll { display:none; } .trade-cards { display:grid; gap:10px; margin-top:16px; }
+}
 </style>
 </head>
 <body>
 {% set active = "paper" %}{% include "_nav.html" %}
-<main>
-  <h1>Paper &amp; live trade — all four strategies</h1>
-  <p class="sub">Market days 09:16–15:30 IST, every minute a few seconds after the candle closes, each switched-on strategy runs the same engine as the backtest on today's data so far. <b>Paper</b> only tracks the trades. <b>Live</b> (off by default) sends real Upstox intraday MARKET orders: BUY lots × lot size on a new entry (only if the signal is ≤ 3 min old), SELL when the strategy exits; open positions are always exited even if Live is switched off. Upstox accepts orders only from the static IP registered for your token. The scan runs inside the app — this page just shows it.</p>
-
-  <div class="card">
-    <div class="bar">
-      <div><span class="pill" id="mkt"></span> <span class="muted" id="clock"></span></div>
-      <span style="flex:1"></span>
-      <label>Lot size <input type="number" id="lotsize" min="1" step="1" style="width:90px"></label>
-      <label>Replay a day <input type="date" id="replay"></label>
-      <button class="btn ghost" id="replayBtn" type="button">Replay</button>
-      <button class="btn primary" id="scanBtn" type="button">Scan now</button>
-    </div>
-    <p class="note" id="scanInfo"></p>
+<main id="main" tabindex="-1">
+  <header class="overview-head">
+    <div><h1>Overview</h1><p class="sub">Your trading day, at a glance.</p></div>
+    <div class="overview-actions"><span class="mode-badge" id="modeBadge">Connecting…</span><button class="btn ghost" type="button" id="pauseEntries" hidden>Pause entries</button><a href="/journal" class="btn ghost">View journal {{ ui_icon("arrow") }}</a></div>
+  </header>
+  <div class="connection" id="connection" role="alert" hidden><span id="connectionText"></span><button type="button" class="btn ghost" id="retryBtn">Retry</button></div>
+  <div class="workspace-grid">
+    <section class="metrics" aria-label="Strategy summary">
+      <div class="metric featured"><div class="metric-heading"><span class="metric-label">Total P&amp;L</span><span class="metric-unit">PAPER</span></div><div class="profit-line"><strong class="metric-value" id="totalPnl">—</strong><span>INR</span></div><small id="pnlCaption">Simulated · before charges</small></div>
+      <div class="metric"><div class="metric-heading"><span class="metric-label">Total trades</span>{{ ui_icon("trades", "metric-icon") }}</div><strong class="metric-value" id="totalTrades">—</strong><small id="tradeCaption">Latest scan</small></div>
+      <div class="metric"><div class="metric-heading"><span class="metric-label">Open signals</span>{{ ui_icon("activity", "metric-icon") }}</div><strong class="metric-value" id="openTrades">—</strong><small>Across all strategies</small></div>
+      <div class="metric"><div class="metric-heading"><span class="metric-label">Active strategies</span>{{ ui_icon("layers", "metric-icon") }}</div><strong class="metric-value" id="activeStrats">—</strong><small id="activeCaption">Of 4 available</small></div>
+    </section>
+    <aside class="session-rail" aria-label="Session and research tools">
+      <section class="card scan-card" aria-label="Scan controls">
+        <div class="rail-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4 7h8m4 0h4M4 17h3m4 0h9M12 4v6M7 14v6"/></svg><h2>Trading session</h2></div>
+        <div class="scan-toolbar">
+          <div class="market-status"><span class="pill" id="mkt">Checking market hours</span><span id="clock">All times in IST</span></div>
+          <div class="scan-actions">
+            <label>Lot size <input type="number" id="lotsize" min="1" step="1" inputmode="numeric" required></label>
+            <label class="replay-field">Replay date <input type="date" id="replay"></label>
+            <button class="btn ghost" id="replayBtn" type="button" disabled>Replay day</button>
+            <button class="btn primary" id="scanBtn" type="button" disabled>Scan now</button>
+          </div>
+        </div>
+        <div class="scan-note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><p id="scanInfo" role="status">Connecting to your workspace…</p></div>
+      </section>
+      <section class="card research-card" aria-label="Research shortcuts">
+        <div class="rail-title"><h2>Research tools</h2></div>
+        <a class="research-link" href="/vwap"><span class="tool-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 19V9m6 10V4m6 15v-7m5 7H2"/></svg></span><span><b>Strategy backtest</b></span><span aria-hidden="true">↗</span></a>
+        <a class="research-link" href="/data"><span class="tool-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 17v4h16v-4"/></svg></span><span><b>Market data</b></span><span aria-hidden="true">↗</span></a>
+      </section>
+    </aside>
+    <section class="strategy-region" aria-labelledby="strategy-heading">
+      <div class="section-heading"><h2 id="strategy-heading">Strategies</h2><span id="refreshHint" role="status">Live prices · 1s</span></div>
+      <div id="strats" class="strategy-list" aria-busy="true"><div class="card loading-card">Loading strategy settings…</div></div>
+    </section>
+    <details class="card log-card"><summary>Execution activity</summary><pre id="log">Loading activity…</pre></details>
+    <details class="how-it-works"><summary>Execution details</summary><p>Active strategies scan every minute from 09:16 to 15:30 IST on weekdays, using completed candles. Paper mode tracks simulated trades. Live mode sends real Upstox intraday MARKET orders for lots × lot size, using signals no more than 3 minutes old. Open live positions are still exited if Live is switched off. Orders require the static IP registered with Upstox. The scanner continues while this app is running, even when this page is closed. Past-day replays do not place orders. Replaying today uses your current trading settings.</p></details>
   </div>
-
-  <div id="strats"></div>
-  <div class="card strat"><b>Live order log</b><pre id="log"></pre></div>
 </main>
 <script>
 const $ = id => document.getElementById(id);
-const LABELS = {{ labels | tojson }}, PRESETS = {{ presets | tojson }};
-const fmt = n => (Math.round(n * 100) / 100).toFixed(2);
-const money = n => `${n < 0 ? "−" : ""}₹${Math.abs(Math.round(n)).toLocaleString("en-IN")}`;
-const ampm = s => { if (!s) return "—"; let [h, m] = s.split(":").map(Number); const ap = h >= 12 ? "PM" : "AM"; h = h % 12 || 12; return `${h}:${String(m).padStart(2, "0")} ${ap}`; };
-let S = null, busy = false;
-
+const LABELS = { ...{{ labels | tojson }}, ema25_vwap: "VWAP + EMA25", ema_pullback: "EMA pullback" }, PRESETS = {{ presets | tojson }};
+const DESCRIPTIONS = { frontend_live:'Opening range · VWAP signals', smc_live:'Smart money concepts', ema25_vwap:'Trend confirmation · EMA25', ema_pullback:'Momentum pullback · EMA9 / EMA26' };
+const STRATEGY_ICONS = ['M3 17l5-7 5 4 8-10M16 4h5v5','M4 8h16M4 16h16M8 4v8m8 0v8','M3 16l5-5 5 2 8-8M3 20h18','M3 8l5 7 5-4 4 3 4-9'];
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt = n => Number(n || 0).toFixed(2);
+const money = n => `${n < 0 ? '−' : ''}₹${Math.abs(Math.round(n)).toLocaleString('en-IN')}`;
+const ampm = s => { if (!s) return '—'; const [h,m] = s.split(':').map(Number); return `${h % 12 || 12}:${String(m).padStart(2,'0')} ${h >= 12 ? 'PM' : 'AM'}`; };
+const todayIST = () => { const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date()).map(v => [v.type,v.value])); return `${p.year}-${p.month}-${p.day}`; };
+let S = null, busy = false, saving = false, confirming = false, refreshing = false, refreshVersion = 0;
+let Q = null, quoting = false, quoteFailed = false;
+$('replay').max = todayIST();
 async function api(path, body) {
-  const r = await fetch(path, body === undefined ? {} : { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-  const j = await r.json();
-  if (!r.ok) throw new Error(j.detail || r.statusText);
+  const r = await appFetch(path, body === undefined ? {} : {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { const error = new Error(typeof j.detail === 'string' ? j.detail : j.error || `Request failed (${r.status}). Please try again.`); error.state = j.state; throw error; }
   return j;
 }
-
-function render() {
-  const { state, view } = S;
-  $("mkt").className = `pill ${S.market_open ? "open" : "closed"}`;
-  $("mkt").textContent = S.market_open ? "Market open — scanning every minute" : "Market closed";
-  $("clock").textContent = S.now + " IST";
-  if (document.activeElement !== $("lotsize")) $("lotsize").value = state.lot_size;
-  $("scanInfo").textContent = view.running ? "Scanning…"
-    : view.day ? `Last scan ${view.scanned_at} IST for ${view.day}${view.day !== new Date().toISOString().slice(0, 10) ? " (replay)" : ""}.`
-    : "No scan yet today — the first runs at 09:16 on a market day. Use Scan now or Replay a past day to see the page work.";
-  $("strats").innerHTML = PRESETS.map(p => {
-    const cfg = state.config[p], trades = (view.results || {})[p] || [], err = (view.errors || {})[p];
-    const qty = cfg.lots * state.lot_size;
-    const pts = trades.reduce((a, t) => a + t.pnl, 0), open = trades.filter(t => t.open).length;
-    const livePos = Object.entries(state.orders || {}).filter(([k, o]) => k.startsWith(p + "|") && o.buy && o.buy.order_id && !o.sell).length;
-    const ordCell = o => !o ? "" : o.error ? `<span class="err" title="${o.error.replace(/"/g, "&quot;")}">✕ ${o.at}</span>` : o.order_id ? `✓ ${o.at} <span class="muted">${o.order_id}</span>` : `… ${o.at}`;
-    const rows = trades.map((t, i) => {
-      const st = t.open ? "OPEN" : t.status, pc = t.pnl >= 0 ? "up" : "down";
-      return `<tr><td>${i + 1}</td><td>${ampm(t.entry_time)}</td><td><b style="color:${t.type === "CE" ? "var(--ce)" : "var(--pe)"}">${t.symbol}</b></td>
-        <td>₹${fmt(t.entry)}</td><td>₹${fmt(t.sl)}</td><td>₹${fmt(t.target)}</td>
-        <td class="st ${st}">${st === "TIME_EXIT" ? "15:20 EXIT" : st}</td><td>${t.open ? "—" : ampm(t.exit_time)}</td>
-        <td>₹${fmt(t.exit)}${t.open ? ' <span class="muted">LTP</span>' : ""}</td>
-        <td class="${pc}">${t.pnl >= 0 ? "+" : ""}${fmt(t.pnl)}</td><td class="${pc}">${money(t.pnl * qty)}</td>
-        <td class="ord">${ordCell((t.orders || {}).buy)}</td><td class="ord">${ordCell((t.orders || {}).sell)}</td></tr>`;
-    }).join("");
-    return `<div class="card strat ${cfg.live ? "islive" : ""}">
-      <div class="shead">
-        <h2>${LABELS[p]}</h2>
-        <label class="check tog"><input type="checkbox" role="switch" data-on="${p}" ${cfg.on ? "checked" : ""}><span class="sw"></span> Paper</label>
-        <label class="check tog livechk"><input type="checkbox" role="switch" data-live="${p}" ${cfg.live ? "checked" : ""}><span class="sw"></span> LIVE</label>
-        ${livePos ? `<button class="btn ghost sq" type="button" data-sq="${p}">Square off ${livePos} live</button>` : ""}
-        <label class="check">Lots <input type="number" class="lots" data-lots="${p}" min="1" step="1" value="${cfg.lots}"></label>
-        <span class="muted">qty ${qty}</span>
-        <span style="flex:1"></span>
-        <span class="sum">${trades.length} trade${trades.length === 1 ? "" : "s"}${open ? ` · <b>${open} open</b>` : ""} · P&amp;L <b class="${pts >= 0 ? "up" : "down"}">${pts >= 0 ? "+" : ""}${fmt(pts)} pts · ${money(pts * qty)}</b></span>
-      </div>
-      ${err ? `<p class="err">${err}</p>` : ""}
-      ${!cfg.on && !cfg.live ? `<p class="empty">Off — not scanned.</p>` : trades.length ? `<div class="scroll"><table>
-        <thead><tr><th>#</th><th>Entry</th><th>Option</th><th>Entry ₹</th><th>SL</th><th>Target</th><th>Status</th><th>Exit</th><th>Exit / LTP</th><th>P&amp;L pts</th><th>P&amp;L ₹</th><th>Live BUY</th><th>Live SELL</th></tr></thead>
-        <tbody>${rows}</tbody></table></div>` : `<p class="empty">No trade${view.day ? ` on ${view.day}` : ""} yet.</p>`}
-    </div>`;
-  }).join("");
-  $("log").textContent = (state.log || []).slice().reverse().join("\n") || "No live orders yet.";
+function orderCell(o) {
+  if (!o) return '—';
+  return o.error ? `<span class="err" title="${esc(o.error)}">Needs review · ${esc(o.at)}</span>` : o.order_id ? `Sent · ${esc(o.at)} <span class="muted">${esc(o.order_id)}</span>` : `Pending · ${esc(o.at)}`;
 }
-
-async function refresh() {
-  try { S = await api("/api/paper"); render(); } catch (e) { $("scanInfo").textContent = e.message; }
+function tradeValues(t) {
+  const open = t.open && S.market_open && S.view.day === todayIST();
+  const q = open && Q?.day === S.view.day ? Q.trades?.[t.id] : null;
+  const stale = open && (!q || q.stale || quoteFailed || Date.now() - Date.parse(q.received_at) > 4000);
+  return {price:q?.ltp ?? t.exit, pnl:q?.pnl ?? t.pnl, open, quote:q, stale};
 }
-
-async function scan(day) {
-  if (busy) return; busy = true;
-  $("scanBtn").disabled = $("replayBtn").disabled = true;
-  $("scanInfo").textContent = day ? `Replaying ${day}… (first time fetches that day's data — can take a minute)` : "Scanning…";
-  try { await api(`/api/paper/scan${day ? `?day=${day}` : ""}`, {}); }
-  catch (e) { alert(e.message); }
-  busy = false; $("scanBtn").disabled = $("replayBtn").disabled = false;
-  refresh();
+function priceMarkup(t) {
+  const m = tradeValues(t);
+  return `<span data-trade-price="${esc(t.id)}">₹${fmt(m.price)}</span>${t.open ? `<small data-quote-tag="${esc(t.id)}" class="quote-tag${m.stale ? ' delayed' : ''}">${m.quote ? (m.stale ? 'Delayed' : 'LTP') : 'Candle'}</small>` : ''}`;
 }
-
-$("scanBtn").addEventListener("click", () => scan());
-$("replayBtn").addEventListener("click", () => { if ($("replay").value) scan($("replay").value); });
-$("lotsize").addEventListener("change", async e => { await api("/api/paper/config", { lot_size: +e.target.value }); refresh(); });
-$("strats").addEventListener("click", async e => {
-  const sq = e.target.dataset.sq; if (!sq) return;
-  if (!confirm(`Send SELL market orders now for every open live ${LABELS[sq]} position?`)) return;
-  try { const r = await api("/api/paper/squareoff", { preset: sq }); alert(`${r.sold} sell order(s) sent — see the log.`); } catch (err) { alert(err.message); }
-  refresh();
-});
-$("strats").addEventListener("change", async e => {
-  const on = e.target.dataset.on, lots = e.target.dataset.lots, lv = e.target.dataset.live;
-  if (lv) {
-    try { await api("/api/paper/config", e.target.checked ? { preset: lv, live: true, confirm: "LIVE" } : { preset: lv, live: false }); }
-    catch (err) { alert(err.message); }
-    return refresh();
+function updateLiveValues() {
+  if (!S) return;
+  const marks = new Map(), totals = {}; let total = 0, open = 0, delayed = false;
+  PRESETS.forEach(p => {
+    const qty = S.state.config[p].lots * S.state.lot_size;
+    totals[p] = 0;
+    for (const t of S.view.results?.[p] || []) {
+      const m = {...tradeValues(t), qty}; marks.set(t.id,m); totals[p] += m.pnl * qty;
+      if (m.open) { open++; delayed ||= m.stale; }
+    }
+    total += totals[p];
+  });
+  const text = (node,value) => { if (node.textContent !== value) node.textContent = value; };
+  const color = (node,pnl) => { node.classList.toggle('up',pnl >= 0); node.classList.toggle('down',pnl < 0); };
+  for (const node of document.querySelectorAll('[data-trade-price]')) {
+    const m = marks.get(node.dataset.tradePrice); if (!m) continue;
+    text(node,`₹${fmt(m.price)}`);
+    node.title = m.quote ? `${m.stale ? 'Delayed quote. ' : ''}Received ${new Date(m.quote.received_at).toLocaleTimeString('en-IN',{timeZone:'Asia/Kolkata',hour12:false})} IST` : 'Price from the latest strategy candle';
   }
-  if (on) await api("/api/paper/config", { preset: on, on: e.target.checked });
-  if (lots) await api("/api/paper/config", { preset: lots, lots: +e.target.value });
-  refresh();
+  for (const node of document.querySelectorAll('[data-quote-tag]')) {
+    const m = marks.get(node.dataset.quoteTag); if (!m) continue;
+    text(node,m.quote ? (m.stale ? 'Delayed' : 'LTP') : 'Candle'); node.classList.toggle('delayed',m.stale);
+  }
+  for (const node of document.querySelectorAll('[data-trade-points],[data-trade-pnl]')) {
+    const m = marks.get(node.dataset.tradePoints || node.dataset.tradePnl); if (!m) continue;
+    text(node,node.hasAttribute('data-trade-points') ? `${fmt(m.pnl)}${node.dataset.unit || ''}` : money(m.pnl * m.qty)); color(node,m.pnl);
+  }
+  for (const node of document.querySelectorAll('[data-strategy-pnl]')) {
+    const pnl = totals[node.dataset.strategyPnl]; text(node,S.view.day ? money(pnl) : '—'); color(node,pnl);
+  }
+  if (S.view.day) { text($('totalPnl'),money(total)); color($('totalPnl'),total); }
+  const replay = S.view.day && S.view.day !== todayIST();
+  const label = replay ? 'Replay · prices fixed' : !S.market_open ? 'Market closed' : open ? (delayed ? 'Prices delayed · retrying' : 'Live prices · 1s') : 'Prices · waiting for entry';
+  text($('refreshHint'),label); $('refreshHint').classList.toggle('quote-delayed',!!open && delayed);
+  $('refreshHint').title = open && delayed ? Q?.error || 'Waiting for a fresh price from Upstox.' : 'Open trade prices and running P&L refresh every second.';
+}
+async function refreshQuotes() {
+  if (!S || quoting || document.hidden) return;
+  quoting = true;
+  try {
+    const next = await api('/api/paper/quotes'); Q = next; quoteFailed = false;
+    if (next.view_revision !== S.view_revision || (next.status === 'market_closed' && S.market_open)) await refresh();
+  } catch { quoteFailed = true; }
+  finally { quoting = false; updateLiveValues(); }
+}
+function tradeCard(t, qty) {
+  const st = t.open ? 'OPEN' : t.status, pc = t.pnl >= 0 ? 'up' : 'down';
+  const field = (label,value) => `<div><dt>${label}</dt><dd>${value}</dd></div>`;
+  return `<article class="trade-card"><div class="trade-card-head"><b style="color:${t.type === 'CE' ? 'var(--ce)' : 'var(--pe)'}">${esc(t.symbol)}</b><span class="st ${esc(st)}">${esc(st === 'TIME_EXIT' ? '15:20 EXIT' : st)}</span></div>
+    <dl>${field('Entry',`${ampm(t.entry_time)} · ₹${fmt(t.entry)}`)}${field(t.open ? 'Last price' : 'Exit',`${t.open ? '' : ampm(t.exit_time) + ' · '}${priceMarkup(t)}`)}${field('Stop-loss',`₹${fmt(t.sl)}`)}${field('Target',`₹${fmt(t.target)}`)}</dl>
+    <div class="trade-net"><span data-trade-points="${esc(t.id)}" data-unit=" pts" class="muted">${fmt(t.pnl)} pts</span><b data-trade-pnl="${esc(t.id)}" class="${pc}">${money(t.pnl * qty)}</b></div>
+    ${t.orders?.buy || t.orders?.sell ? `<div class="ord">Live BUY: ${orderCell(t.orders.buy)}<br>Live SELL: ${orderCell(t.orders.sell)}</div>` : ''}</article>`;
+}
+function render() {
+  if (confirming) return;
+  const {state,view} = S;
+  const liveCount = PRESETS.filter(p => state.config[p].live).length;
+  $('modeBadge').textContent = liveCount ? `Live enabled · ${liveCount} ${liveCount === 1 ? 'strategy' : 'strategies'}` : 'Paper mode';
+  $('modeBadge').className = 'mode-badge' + (liveCount ? ' live' : '');
+  if (state.entries_paused) $('modeBadge').textContent = 'Live entries paused';
+  $('pauseEntries').hidden = typeof state.revision !== 'number';
+  $('pauseEntries').textContent = state.entries_paused ? 'Resume entries' : 'Pause entries';
+  $('pauseEntries').disabled = saving;
+  $('pauseEntries').setAttribute('aria-pressed', String(!!state.entries_paused));
+  $('mkt').className = `pill ${S.market_open ? 'open' : 'closed'}`;
+  $('mkt').textContent = S.market_open ? 'Market hours · auto scan on' : 'Outside market hours';
+  $('clock').textContent = S.now + ' IST';
+  if (document.activeElement !== $('lotsize')) $('lotsize').value = state.lot_size;
+  if (!busy) $('scanInfo').textContent = view.running ? 'Scanning market data…' : view.day ? `Last scan ${view.scanned_at} IST · ${view.day}${view.day !== todayIST() ? ' · Replay' : ''}` : 'Ready to scan.';
+  $('scanBtn').disabled = $('replayBtn').disabled = busy || saving || view.running;
+  let pnl = 0, tradesCount = 0, openCount = 0;
+  PRESETS.forEach(p => { const trades = view.results?.[p] || []; pnl += trades.reduce((a,t) => a + t.pnl * state.config[p].lots * state.lot_size,0); tradesCount += trades.length; openCount += trades.filter(t => t.open).length; });
+  $('totalPnl').textContent = view.day ? money(pnl) : '—'; $('totalPnl').className = 'metric-value' + (view.day ? (pnl >= 0 ? ' up' : ' down') : '');
+  $('totalTrades').textContent = view.day ? tradesCount : '—'; $('openTrades').textContent = view.day ? openCount : '—';
+  $('tradeCaption').textContent = view.day ? `${view.day}${view.day !== todayIST() ? ' · Replay' : ' · Today'}` : 'No scans yet';
+  $('activeStrats').textContent = `${PRESETS.filter(p => state.config[p].on || state.config[p].live).length} / ${PRESETS.length}`;
+  $('activeCaption').textContent = liveCount ? `${liveCount} with live orders enabled` : PRESETS.some(p => state.config[p].on) ? 'Paper trading enabled' : 'All strategies paused';
+  const errorCount = Object.keys(view.errors || {}).length;
+  $('pnlCaption').textContent = errorCount ? `Incomplete scan · ${errorCount} ${errorCount === 1 ? 'error' : 'errors'}` : 'Simulated · before charges';
+  if (!$('strats').contains(document.activeElement)) {
+    $('strats').innerHTML = PRESETS.map((p,index) => {
+      const cfg = state.config[p], trades = view.results?.[p] || [], err = view.errors?.[p] || view.errors?.scan;
+      const qty = cfg.lots * state.lot_size, pts = trades.reduce((a,t) => a + t.pnl,0), open = trades.filter(t => t.open).length;
+      const livePos = Object.entries(state.orders || {}).filter(([k,o]) => k.startsWith(p + '|') && o.buy?.order_id && !o.sell).length;
+      const rows = trades.map((t,i) => { const st = t.open ? 'OPEN' : t.status, pc = t.pnl >= 0 ? 'up' : 'down';
+        return `<tr><td>${i+1}</td><td>${ampm(t.entry_time)}</td><td><b style="color:${t.type === 'CE' ? 'var(--ce)' : 'var(--pe)'}">${esc(t.symbol)}</b></td><td>₹${fmt(t.entry)}</td><td>₹${fmt(t.sl)}</td><td>₹${fmt(t.target)}</td><td class="st ${esc(st)}">${esc(st === 'TIME_EXIT' ? '15:20 EXIT' : st)}</td><td>${t.open ? '—' : ampm(t.exit_time)}</td><td>${priceMarkup(t)}</td><td data-trade-points="${esc(t.id)}" class="${pc}">${fmt(t.pnl)}</td><td class="${pc}"><b data-trade-pnl="${esc(t.id)}">${money(t.pnl * qty)}</b></td><td class="ord">${orderCell(t.orders?.buy)}</td><td class="ord">${orderCell(t.orders?.sell)}</td></tr>`;
+      }).join('');
+      return `<section class="card strat ${cfg.live ? 'islive' : ''}" aria-label="${esc(LABELS[p])}">
+        <div class="strategy-top"><div class="strategy-title"><span class="strategy-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="${STRATEGY_ICONS[index]}"/></svg></span><div><h3>${esc(LABELS[p])}</h3><p>${DESCRIPTIONS[p]}</p></div></div><div class="strategy-pnl"><span class="pnl-label">P&amp;L</span><b data-strategy-pnl="${p}" class="${pts >= 0 ? 'up' : 'down'}">${view.day ? money(pts * qty) : '—'}</b><small>${trades.length} trades${open ? ` · ${open} open` : ''}</small></div></div>
+        <div class="strategy-controls">
+          <label class="check tog"><input type="checkbox" role="switch" aria-label="Paper scanning for ${esc(LABELS[p])}" data-on="${p}" ${cfg.on ? 'checked' : ''}><span class="sw"></span>Paper</label>
+          <label class="check tog livechk"><input type="checkbox" role="switch" aria-label="Live orders for ${esc(LABELS[p])}" data-live="${p}" ${cfg.live ? 'checked' : ''}><span class="sw"></span>Live orders</label>
+          ${livePos ? `<button class="btn ghost sq" type="button" data-sq="${p}">Square off ${livePos} live</button>` : ''}
+          <div class="quantity"><label class="check">Lots <input type="number" class="lots" aria-label="Lots for ${esc(LABELS[p])}" data-lots="${p}" min="1" step="1" inputmode="numeric" value="${cfg.lots}" required></label><span>${qty} units</span></div>
+        </div>
+        ${err ? `<p class="strategy-error" role="status">${esc(err)}</p>` : ''}
+        ${trades.length ? `<div class="scroll trade-scroll" tabindex="0" role="region" aria-label="${esc(LABELS[p])} trades; scroll for more columns"><table><thead><tr><th>#</th><th>Entry</th><th>Option</th><th>Entry ₹</th><th>SL</th><th>Target</th><th>Status</th><th>Exit</th><th>Exit / LTP</th><th>P&amp;L pts</th><th>P&amp;L ₹</th><th>Live BUY</th><th>Live SELL</th></tr></thead><tbody>${rows}</tbody></table></div><div class="trade-cards">${trades.map(t => tradeCard(t,qty)).join('')}</div>` : `<div class="empty-state"><span class="empty-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/></svg></span><div><b>${!cfg.on && !cfg.live ? 'Strategy paused' : err ? 'Market data unavailable' : 'Awaiting signal'}</b><p>${!cfg.on && !cfg.live ? 'Enable Paper to start tracking signals.' : err ? 'Check the message above and try scanning again.' : view.day ? `No trades for ${esc(view.day)}.` : ''}</p></div></div>`}
+      </section>`;
+    }).join('');
+  }
+  $('strats').setAttribute('aria-busy','false');
+  $('log').textContent = (state.log || []).slice().reverse().join('\n') || 'No live orders yet.';
+  updateLiveValues();
+}
+const editingConfig = () => S && document.activeElement?.matches('#lotsize, #strats input');
+async function refresh() {
+  if (refreshing || busy || saving || confirming || editingConfig()) return;
+  refreshing = true; const version = refreshVersion;
+  try { const next = await api('/api/paper'); if (version !== refreshVersion || confirming || editingConfig()) return; S = next; $('connection').hidden = true; render(); }
+  catch (e) { if (version !== refreshVersion) return; $('connectionText').textContent = 'Unable to update. Showing the last available data. ' + e.message; $('connection').hidden = false; $('refreshHint').textContent = 'Connection interrupted'; }
+  finally { refreshing = false; if (version !== refreshVersion && !busy && !saving) refresh(); }
+}
+async function confirmAction(options) {
+  if (confirming) return false;
+  confirming = true; refreshVersion++;
+  try { return await confirmUI(options); }
+  finally { confirming = false; }
+}
+async function saveConfig(body, input) {
+  if (!S) return;
+  if (saving || confirming || (busy && body.entries_paused === undefined)) { if (input && S) { if (input.type === 'checkbox') input.checked = body.live !== undefined ? S.state.config[body.preset].live : S.state.config[body.preset].on; else input.value = body.preset ? S.state.config[body.preset].lots : S.state.lot_size; } notifyUI('Please wait for the current action to finish.'); return; }
+  saving = true; refreshVersion++;
+  try {
+    const result = await api('/api/paper/config', {...body, revision:S.state.revision}); if (S) S.state = result.state;
+    if (input?.type === 'checkbox') input.checked = body.live !== undefined ? result.state.config[body.preset].live : result.state.config[body.preset].on;
+    notifyUI(body.entries_paused === true ? 'New live entries paused. Paper scans and exits continue.' : body.entries_paused === false ? 'Live entries resumed for enabled strategies.' : 'Strategy settings saved.');
+  } catch(e) {
+    if (e.state && S) S.state = e.state;
+    if (input && S) { if (input.type === 'checkbox') input.checked = body.live !== undefined ? S.state.config[body.preset].live : S.state.config[body.preset].on; else input.value = body.preset ? S.state.config[body.preset].lots : S.state.lot_size; }
+    notifyUI(e.message,true);
+  } finally { saving = false; if (S) render(); }
+}
+async function scan(day) {
+  if (busy || saving || confirming || !S) return;
+  busy = true; refreshVersion++;
+  $('scanBtn').disabled = $('replayBtn').disabled = true;
+  $('scanBtn').textContent = day ? 'Scan now' : 'Scanning…'; $('replayBtn').textContent = day ? 'Replaying…' : 'Replay day';
+  $('scanInfo').textContent = day ? `Replaying ${day}… The first request can take a minute.` : 'Scanning completed candles…';
+  try { await api(`/api/paper/scan${day ? '?day=' + encodeURIComponent(day) : ''}`,{}); notifyUI(day ? 'Replay complete.' : 'Scan complete.'); }
+  catch(e) { notifyUI(e.message,true); }
+  finally { busy = false; $('scanBtn').textContent = 'Scan now'; $('replayBtn').textContent = 'Replay day'; $('scanBtn').disabled = $('replayBtn').disabled = false; await refresh(); }
+}
+$('scanBtn').addEventListener('click',() => scan());
+$('pauseEntries').addEventListener('click', async () => {
+  if (!S || saving || confirming) return;
+  const paused = !S.state.entries_paused;
+  const enabled = PRESETS.filter(p => S.state.config[p].live);
+  if (!paused && enabled.length && !await confirmAction({
+    title:'Resume live entries?', message:'Enabled live strategies can place new real orders again. Existing exits continue.',
+    confirmText:'Resume entries', danger:true, facts:[['Strategies',enabled.map(p => LABELS[p]).join(', ')]]
+  })) return;
+  saveConfig({entries_paused:paused, ...(!paused ? {confirm:'LIVE'} : {})});
 });
-refresh();
-setInterval(() => { if (!busy) refresh(); }, 10000);
+$('retryBtn').addEventListener('click',refresh);
+$('replayBtn').addEventListener('click',() => { const input = $('replay'); if (!input.value) { notifyUI('Choose a date to replay.',true); input.focus(); return; } input.max = todayIST(); if (input.reportValidity()) scan(input.value); });
+$('lotsize').addEventListener('change',e => { if(e.target.reportValidity()) saveConfig({lot_size:Number(e.target.value)},e.target); });
+$('strats').addEventListener('click',async e => {
+  const button = e.target.closest('[data-sq]'); if(!button || busy || saving || confirming) return;
+  const p = button.dataset.sq;
+  const positions = Object.entries(S.state.orders || {}).filter(([id,order]) => id.startsWith(p + '|') && order.buy?.order_id && !order.sell).length;
+  if(!await confirmAction({
+    title:'Close live positions?', message:'Send market sell orders for all open live positions in this strategy.',
+    confirmText:'Send sell orders', danger:true, facts:[['Strategy',LABELS[p]],['Open positions',String(positions)]]
+  })) return;
+  saving = true; refreshVersion++; button.disabled = true;
+  try { const result = await api('/api/paper/squareoff',{preset:p}); notifyUI(`${result.sold} sell order(s) sent. See live order activity.`); }
+  catch(err) { notifyUI(err.message,true); }
+  finally { saving = false; button.disabled = false; await refresh(); }
+});
+$('strats').addEventListener('change',async e => {
+  const input = e.target, {on,lots,live:lv} = input.dataset;
+  if(lv) {
+    const enabled = input.checked, cfg = S.state.config[lv];
+    input.checked = cfg.live;
+    if (busy || saving || confirming) { notifyUI('Please wait for the current action to finish.'); return; }
+    if(enabled && !await confirmAction({
+      title:'Enable live orders?', message:'New signals will send real buy orders to Upstox. Positions will be sold when the strategy exits.',
+      confirmText:'Enable live orders', danger:true,
+      facts:[['Strategy',LABELS[lv]],['Order size',`${cfg.lots * S.state.lot_size} units · ${cfg.lots} ${cfg.lots === 1 ? 'lot' : 'lots'}`]]
+    })) return;
+    saveConfig({preset:lv,live:enabled,...(enabled ? {confirm:'LIVE'} : {})},input);
+  } else if(on) saveConfig({preset:on,on:input.checked},input);
+  else if(lots && input.reportValidity()) saveConfig({preset:lots,lots:Number(input.value)},input);
+});
+$('strats').addEventListener('focusout',() => { setTimeout(() => { if(S && !saving && !confirming && !$('strats').contains(document.activeElement)) render(); },0); });
+document.addEventListener('visibilitychange',() => { if(!document.hidden) { refresh(); refreshQuotes(); } });
+refresh().then(refreshQuotes);
+setInterval(() => { if(!document.hidden) refresh(); },10000);
+setInterval(() => { if(!document.hidden) { updateLiveValues(); refreshQuotes(); } },1000);
 </script>
 </body>
 </html>

@@ -2,17 +2,17 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>upstocks — backtest</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+{% from "_icons.html" import ui_icon %}
 {% include "_style.html" %}
 <style>
   main { max-width: 1280px; }
   .drop { border: 2px dashed var(--border); border-radius: 12px; padding: 28px; text-align: center; color: var(--muted); cursor: pointer; }
   .drop.over { border-color: var(--accent); color: var(--accent); }
-  .settings { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end; margin-top: 16px; }
-  .settings label { min-width: 120px; }
+  .settings { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)) auto; gap:16px; align-items:end; margin-top:24px; }
+  .settings label { min-width:0; }
+  @media(max-width:1100px) { .settings { grid-template-columns:repeat(2,minmax(0,1fr)); } }
   td input { width: 100%; min-width: 92px; padding: 6px 8px !important; }
   td select { padding: 6px 8px; }
   td, th { vertical-align: middle; }
@@ -26,25 +26,29 @@
 </style>
 </head>
 <body>
-{% set active = "" %}{% include "_nav.html" %}
-<main>
-  <h1>Backtest — SL / target check</h1>
-  <p class="sub">Upload the CSV files you downloaded (one option each). For every file, enter the entry time and entry price; each 1-minute candle from the entry minute on is checked against the stop-loss and target. Files are read in your browser — nothing is uploaded.</p>
+{% set active = "backtest" %}{% include "_nav.html" %}
+<main id="main" tabindex="-1">
+  <h1>CSV backtest</h1>
+  <p class="sub">Test entries against your own candle data.</p>
+  {% include "_research_nav.html" %}
 
   <div class="card">
-    <label class="drop" id="drop">
+    <div class="card-title"><h2>Import candle data</h2><span>CSV files</span></div>
+    <label class="drop" id="drop" role="button" tabindex="0" aria-label="Choose CSV files for backtesting">
       <input type="file" id="files" accept=".csv,text/csv" multiple hidden>
-      <b>Click to choose CSV files</b> or drop them here — several at once
+      <span class="upload-icon">{{ ui_icon("upload") }}</span><b>Drop your CSV files here</b><span>or click to browse · processed on your device</span>
     </label>
     <div class="settings">
       <label>Stop-loss % <input type="number" id="slPct" value="6" min="0.1" step="0.1"></label>
       <label>Target % <input type="number" id="tgtPct" value="30" min="0.1" step="0.1"></label>
-      <label>Qty (₹ P&amp;L) <input type="number" id="qty" value="65" min="1" step="1"></label>
-      <label>Same entry time for all <input type="time" id="allTime" step="60"></label>
+      <label>Quantity <input type="number" id="qty" value="65" min="1" step="1"></label>
+      <label>Entry time <input type="time" id="allTime" step="60"></label>
       <button class="btn ghost" id="applyTime" type="button">Apply time</button>
+    </div>
+    <div class="row">
       <span style="flex:1"></span>
       <button class="btn ghost" id="clear" type="button">Clear</button>
-      <button class="btn primary" id="export" type="button" disabled>⬇ Export results</button>
+      <button class="btn primary" id="export" type="button" disabled>{{ ui_icon("download") }} Export results</button>
     </div>
     <div id="summary"></div>
     <div class="scroll"><table id="tbl" hidden>
@@ -54,10 +58,12 @@
       </tr></thead>
       <tbody id="rows"></tbody>
     </table></div>
-    <p class="small" id="note" hidden>The entry minute's own candle is included (the price can hit SL/target within that minute). If one candle touches both SL and target, SL is assumed first — a candle doesn't say which came first. "No hit" means neither level was reached before the file's last candle; it's marked at that last close.</p>
+    <p class="small" id="note" hidden>Includes the entry candle. If both levels are touched, stop-loss is assumed first. Unclosed trades use the final candle’s close.</p>
   </div>
+  <details class="page-guide"><summary>Simulation details</summary><p>Import one CSV per option, then set an entry time and price. Each candle is checked against your stop-loss and target. Files stay on your device.</p></details>
 </main>
 <script>
+document.getElementById("drop").addEventListener("keydown", event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); document.getElementById("files").click(); } });
 const $ = id => document.getElementById(id);
 const MON = { JAN: "01", FEB: "02", MAR: "03", APR: "04", MAY: "05", JUN: "06", JUL: "07", AUG: "08", SEP: "09", OCT: "10", NOV: "11", DEC: "12" };
 let files = []; // { id, name, meta, candles:[{t:"YYYY-MM-DD HH:MM", o,h,l,c}], dates:[], entryDate, entryTime, entryPrice, result }
@@ -163,7 +169,7 @@ function render() {
       const cls = p >= 0 ? "up" : "down";
       const peakPct = (r.peak - parseFloat(f.entryPrice)) / parseFloat(f.entryPrice) * 100;
       cells = `<td>${fmt(r.sl)}</td><td>${fmt(r.tgt)}</td>
-        <td class="res ${r.result}">${r.result === "SL" ? "🛑 SL hit" : r.result === "TARGET" ? "🎯 Target hit" : "No hit"}${r.both ? '<div class="small">SL & target same candle</div>' : ""}</td>
+        <td class="res ${r.result}">${r.result === "SL" ? "Stop-loss" : r.result === "TARGET" ? "Target hit" : "No hit"}${r.both ? '<div class="small">SL & target same candle</div>' : ""}</td>
         <td>${r.exitT.slice(5)}</td><td>${fmt(r.exit)}</td>
         <td class="${cls}">${p >= 0 ? "+" : ""}${fmt(p)}</td><td class="${cls}">${pct >= 0 ? "+" : ""}${fmt(pct)}%</td>
         <td class="${cls}">${p >= 0 ? "+" : "−"}₹${Math.abs(p * qty).toLocaleString("en-IN", { maximumFractionDigits: 0 })}</td>
@@ -180,8 +186,8 @@ function render() {
   $("export").disabled = !done;
   $("summary").innerHTML = done ? `<div class="summary">
     <div><span class="small">Tested</span><b>${done} / ${files.length}</b></div>
-    <div><span class="small">🎯 Target hit</span><b class="up">${nT}</b></div>
-    <div><span class="small">🛑 SL hit</span><b class="down">${nSL}</b></div>
+    <div><span class="small">Target hit</span><b class="up">${nT}</b></div>
+    <div><span class="small">Stop-loss</span><b class="down">${nSL}</b></div>
     <div><span class="small">No hit</span><b>${nO}</b></div>
     <div><span class="small">Win rate</span><b>${nT + nSL ? fmt(nT / (nT + nSL) * 100) + "%" : "—"}</b></div>
     <div><span class="small">Total pts</span><b class="${pts >= 0 ? "up" : "down"}">${pts >= 0 ? "+" : ""}${fmt(pts)}</b></div>

@@ -1,0 +1,15 @@
+{% macro ui_icon(name, class_name='') -%}
+{% set paths = {
+  'download': '<path d="M12 3v12m-5-5 5 5 5-5M4 17v4h16v-4"/>',
+  'upload': '<path d="M12 16V4m-5 5 5-5 5 5M4 17v4h16v-4"/>',
+  'arrow': '<path d="M5 12h14m-5-5 5 5-5 5"/>',
+  'refresh': '<path d="M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 12-2l2 7M4 12l2 7a7 7 0 0 0 12-2"/>',
+  'activity': '<path d="M3 12h4l3-8 4 16 3-8h4"/>',
+  'chart': '<path d="M3 17l6-6 4 4 8-8M14 7h7v7"/>',
+  'layers': '<path d="m12 3 9 5-9 5-9-5 9-5Zm-9 9 9 5 9-5M3 16l9 5 9-5"/>',
+  'trades': '<path d="M4 7h16l-4-4M20 17H4l4 4"/>',
+  'play': '<path d="m8 5 11 7-11 7V5Z"/>',
+  'lock': '<rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/>'
+} %}
+<svg class="{{ class_name }}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{{ paths.get(name, '') | safe }}</svg>
+{%- endmacro %}

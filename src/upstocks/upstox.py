@@ -16,18 +16,19 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+import math
 from datetime import date, datetime, timedelta, timezone
 from urllib.parse import quote
 
 import httpx
-from dotenv import load_dotenv
 
 from collections import deque
 from pathlib import Path
 import hashlib
 import json
+import logging
 
-load_dotenv(Path(__file__).resolve().parents[2] / ".env")
+log = logging.getLogger(__name__)
 
 BASE = "https://api.upstox.com"
 NIFTY = "NSE_INDEX|Nifty 50"
@@ -68,6 +69,30 @@ def client() -> httpx.AsyncClient:
     return _client
 
 
+def configure(cache_dir: Path) -> None:
+    global _DISK, _rate_lock, _quote_lock
+    _DISK = cache_dir
+    _rate_lock = asyncio.Lock()
+    _quote_lock = asyncio.Lock()
+
+
+async def close() -> None:
+    """Cancel shared reads and release sockets during application shutdown."""
+    global _client, _last_start, _last_quote_start
+    pending = list(_inflight.values())
+    for task in pending:
+        task.cancel()
+    await asyncio.gather(*pending, return_exceptions=True)
+    _inflight.clear()
+    _cache.clear()
+    _starts.clear()
+    _last_start = 0.0
+    _last_quote_start = 0.0
+    if _client is not None:
+        await _client.aclose()
+        _client = None
+
+
 # Upstox limits: 50/s, 500/min AND 2000 per 30 min. Spacing alone (8/s)
 # still blew the 30-min budget across a few multi-week runs, so this keeps a
 # sliding window of request start times and waits until a call fits under
@@ -78,6 +103,62 @@ _WINDOWS = ((60.0, 450), (1800.0, 1900))
 _rate_lock = asyncio.Lock()
 _last_start = 0.0
 _starts: deque[float] = deque()
+
+# LTP has its own per-API limit. One batched request/second stays below the
+# documented 2,000/30min budget without consuming the candle/order limiter.
+# https://upstox.com/developer/api-documentation/rate-limiting/
+_quote_lock = asyncio.Lock()
+_last_quote_start = 0.0
+
+
+class QuoteUnavailable(UpstoxError):
+    def __init__(self, message, retry_after=0):
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
+async def ltp_quotes(instrument_keys: list[str]) -> dict[str, float]:
+    """Read one uncached batch; response keys are symbols, not instrument keys.
+
+    https://upstox.com/developer/api-documentation/ltp-v3/
+    V3 LTP has no exchange timestamp; consumers must label receipt time honestly.
+    """
+    global _last_quote_start
+    keys = sorted(set(instrument_keys))
+    if not keys:
+        return {}
+    if len(keys) > 100:
+        raise ValueError("Too many open instruments for one quote batch")
+    headers = {"Accept": "application/json", "Authorization": f"Bearer {_token()}"}
+    async with _quote_lock:
+        await asyncio.sleep(max(0, _last_quote_start + 1.0 - time.monotonic()))
+        _last_quote_start = time.monotonic()
+        response = await client().get("/v3/market-quote/ltp", params={"instrument_key": ",".join(keys)},
+                                      headers=headers, timeout=2.5)
+    if response.status_code == 429:
+        try:
+            retry_after = float(response.headers.get("Retry-After", "30"))
+            if not math.isfinite(retry_after):
+                retry_after = 30
+        except ValueError:
+            retry_after = 30
+        raise QuoteUnavailable("Live quotes are rate limited. Retrying shortly.", max(1, min(300, retry_after)))
+    if response.status_code in {401, 403}:
+        raise QuoteUnavailable("Live quotes unavailable. Check broker access.", 30)
+    try:
+        body = response.json()
+        if response.status_code != 200 or body.get("status") != "success" or not isinstance(body.get("data"), dict):
+            raise ValueError("Unexpected quote response")
+    except (ValueError, AttributeError) as exc:
+        raise QuoteUnavailable("Live quotes unavailable. Retrying shortly.") from exc
+    prices = {}
+    for row in body["data"].values():
+        if not isinstance(row, dict) or row.get("instrument_token") not in keys:
+            continue
+        price = row.get("last_price")
+        if type(price) in (float, int) and math.isfinite(price) and price > 0:
+            prices[row["instrument_token"]] = float(price)
+    return prices
 
 
 async def _throttle() -> None:
@@ -137,16 +218,16 @@ async def _disk_cached(key: str, fn):
             _cache[key] = (time.time(), val)
             return val
         except (OSError, ValueError):
-            pass
+            log.warning("Ignoring unreadable market-data cache")
     val = await fn()
     _cache[key] = (time.time(), val)
     try:
-        _DISK.mkdir(exist_ok=True)
+        _DISK.mkdir(parents=True, exist_ok=True)
         tmp = f.with_suffix(".tmp")
         tmp.write_text(json.dumps(val))
         tmp.replace(f)
     except OSError:
-        pass
+        log.warning("Unable to persist market-data cache", exc_info=True)
     return val
 
 

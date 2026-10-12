@@ -1,477 +1,155 @@
-"""upstocks — download NIFTY 50 option premium candles (live or expired) as CSV.
-
-Pick an expiry, a strike and CE/PE, a start date and an interval; the range
-always ends on (or before) the contract's expiry. The page is server-rendered
-(expiry list included); strikes for the chosen expiry load from /api/contracts.
-"""
-from __future__ import annotations
-
-import csv
-import io
-from datetime import date, datetime, timedelta
-from pathlib import Path
-
-import uvicorn
-from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
-from fastapi.templating import Jinja2Templates
-
+"""Application composition root: configuration, lifecycle, and HTTP boundaries."""
 import asyncio
-import uuid
-import zipfile
-
-from . import ema_pullback, live, pdf_report, smc, upstox, vwap
-
-app = FastAPI(title="upstocks")
-
-
-@app.middleware("http")
-async def _no_cache_pages(request: Request, call_next):
-    # Pages change as the app is updated — never let the browser reuse an old copy.
-    resp = await call_next(request)
-    if resp.headers.get("content-type", "").startswith("text/html"):
-        resp.headers["Cache-Control"] = "no-store"
-    return resp
-templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
-
-
-def _parse_day(s: str, name: str) -> date:
-    try:
-        return date.fromisoformat(s)
-    except ValueError:
-        raise HTTPException(400, f"{name} must be YYYY-MM-DD")
-
-
-async def _resolve(expiry: str, strike: float, opt_type: str) -> tuple[dict, bool]:
-    exp_set = set(await upstox.expired_expiries())
-    for c in await upstox.contracts(expiry):
-        if c["strike_price"] == strike and c["instrument_type"] == opt_type:
-            return c, expiry in exp_set
-    raise HTTPException(404, f"No NIFTY {strike:g} {opt_type} for expiry {expiry}")
-
-
-def _in_market_hours(ts: str) -> bool:
-    hm = ts[11:16]
-    return "09:15" <= hm <= "15:29"
-
-
-async def _load(expiry: str, strike: float, opt_type: str, start: str, end: str | None, interval: str, market_hours: bool):
-    opt_type = opt_type.upper()
-    if opt_type not in ("CE", "PE"):
-        raise HTTPException(400, "type must be CE or PE")
-    exp_day = _parse_day(expiry, "expiry")
-    a = _parse_day(start, "from")
-    b = min(_parse_day(end, "to") if end else exp_day, exp_day, upstox.today_ist())
-    if a > b:
-        raise HTTPException(400, f"from ({a}) is after to ({b})")
-    contract, expired = await _resolve(expiry, strike, opt_type)
-    try:
-        rows = await upstox.candles(contract["instrument_key"], interval, a, b, expired)
-    except upstox.UpstoxError as e:
-        raise HTTPException(502, str(e))
-    if market_hours and interval != "1d":
-        rows = [r for r in rows if _in_market_hours(r[0])]
-    return contract, expired, a, b, rows
-
-
-def candles_csv(rows: list[list]) -> str:
-    buf = io.StringIO()
-    w = csv.writer(buf)
-    w.writerow(["date", "time", "open", "high", "low", "close", "volume", "oi"])
-    for ts, o, h, l, c, v, oi in rows:
-        w.writerow([ts[:10], ts[11:16], o, h, l, c, v, oi])
-    return buf.getvalue()
-
-
-def csv_name(expiry: str, strike: float, opt_type: str, interval: str, a, b) -> str:
-    """Same pattern the Backtest page reads the expiry/strike/type back from."""
-    exp_tag = datetime.strptime(expiry, "%Y-%m-%d").strftime("%d%b%y").upper()
-    return f"NIFTY_{exp_tag}_{strike:g}_{opt_type.upper()}_{interval}_{a}_to_{b}.csv"
-
-
-@app.exception_handler(upstox.UpstoxError)
-async def _upstox_error(_: Request, e: upstox.UpstoxError):
-    return JSONResponse({"error": str(e)}, status_code=502)
-
-
-@app.get("/")
-async def home():
-    return RedirectResponse("/paper")
-
-
-@app.get("/data", response_class=HTMLResponse)
-async def index(request: Request):
-    error = None
-    try:
-        expiries = await upstox.expiries()
-    except upstox.UpstoxError as e:
-        expiries, error = [], str(e)
-    return templates.TemplateResponse(request, "index.html", {
-        "expiries": expiries, "error": error, "intervals": list(upstox.INTERVALS),
-        "today": upstox.today_ist().isoformat(),
-    })
-
-
-@app.on_event("startup")
-async def _start_paper() -> None:
-    live.start()
-
-
-# ─── Paper auto-trade (live.py) ───────────────────────────────────────────────
-@app.get("/paper", response_class=HTMLResponse)
-async def paper_page(request: Request):
-    return templates.TemplateResponse(request, "paper.html", {"labels": live.LABELS, "presets": live.PRESETS})
-
-
-@app.get("/api/paper")
-async def paper_state():
-    return {"state": live.STATE, "view": live.VIEW, "market_open": live.market_open(),
-            "now": live.now_ist().strftime("%a %d %b %H:%M:%S")}
-
-
-@app.post("/api/paper/config")
-async def paper_config(request: Request):
-    b = await request.json()
-    p = b.get("preset")
-    if p is not None and p not in live.PRESETS:
-        raise HTTPException(400, f"unknown preset {p!r}")
-    if b.get("live") is True and b.get("confirm") != "LIVE":
-        raise HTTPException(400, "turning Live on needs confirm: LIVE")
-    live.set_config(p, on=b.get("on"), live=b.get("live"), lots=b.get("lots"), lot_size=b.get("lot_size"))
-    return {"state": live.STATE}
-
-
-@app.get("/journal", response_class=HTMLResponse)
-async def journal_page(request: Request):
-    return templates.TemplateResponse(request, "journal.html", {"labels": live.LABELS, "presets": live.PRESETS,
-                                                                "today": upstox.today_ist().isoformat()})
-
-
-@app.get("/calendar", response_class=HTMLResponse)
-async def calendar_page(request: Request):
-    return templates.TemplateResponse(request, "calendar.html", {"labels": live.LABELS, "presets": live.PRESETS,
-                                                                 "today": upstox.today_ist().isoformat()})
-
-
-@app.get("/api/journal")
-async def journal_data(start: str = Query(...), end: str = Query(...)):
-    _parse_day(start, "start"), _parse_day(end, "end")
-    return live.journal(start, end)
-
-
-@app.post("/api/journal/note")
-async def journal_note(request: Request):
-    b = await request.json()
-    if not b.get("id"):
-        raise HTTPException(400, "id is required")
-    live.set_note(b["id"], str(b.get("text") or ""))
-    return {"ok": True}
-
-
-
-@app.post("/api/paper/squareoff")
-async def paper_squareoff(request: Request):
-    p = (await request.json()).get("preset")
-    if p not in live.PRESETS:
-        raise HTTPException(400, f"unknown preset {p!r}")
-    return {"sold": await live.square_off(p)}
-
-
-@app.post("/api/paper/scan")
-async def paper_scan(day: str | None = None):
-    """Scan now — today, or replay a past `day` (YYYY-MM-DD) to see what paper would have done."""
-    return await live.scan(_parse_day(day, "day") if day else None)
-
-
-@app.get("/account", response_class=HTMLResponse)
-async def account_page(request: Request):
-    """Profile, funds, holdings, positions, orders and trades — server-rendered.
-    Each section loads independently; a static-IP refusal is shown per section."""
-    acct = await upstox.account()
-    blocked = all(v["error"] and "static IP" in v["error"] for v in acct.values())
-    return templates.TemplateResponse(request, "account.html", {"a": acct, "blocked": blocked,
-                                                                "now": datetime.now(upstox.IST).strftime("%d %b %Y %H:%M")})
-
-
-@app.get("/api/account")
-async def api_account():
-    return await upstox.account()
-
-
-@app.get("/backtest", response_class=HTMLResponse)
-async def backtest(request: Request):
-    """SL/target check over uploaded CSVs — parsing and maths run in the browser."""
-    return templates.TemplateResponse(request, "backtest.html", {})
-
-
-@app.get("/api/contracts")
-async def api_contracts(expiry: str):
-    rows = await upstox.contracts(expiry)
-    strikes = sorted({r["strike_price"] for r in rows})
-    return {"expiry": expiry, "strikes": strikes, "lotSize": rows[0]["lot_size"] if rows else None}
-
-
-@app.get("/api/find-strike")
-async def api_find_strike(expiry: str, premium: float, type: str = Query(..., alias="type"),
-                          day: str = Query(..., alias="date"), time: str = "09:15"):
-    """Strike whose premium at `date time` was nearest the typed `premium`."""
-    opt_type = type.upper()
-    if opt_type not in ("CE", "PE"):
-        raise HTTPException(400, "type must be CE or PE")
-    if premium <= 0:
-        raise HTTPException(400, "premium must be > 0")
-    try:
-        hh, mm = (int(x) for x in time.split(":"))
-        assert 0 <= hh < 24 and 0 <= mm < 60
-    except (ValueError, AssertionError):
-        raise HTTPException(400, "time must be HH:MM")
-    d = _parse_day(day, "date")
-    if d > _parse_day(expiry, "expiry"):
-        raise HTTPException(400, f"{d} is after expiry {expiry}")
-    return await upstox.find_strike_by_premium(expiry, opt_type, d, f"{hh:02d}:{mm:02d}", premium)
-
-
-@app.get("/api/preview")
-async def api_preview(expiry: str, strike: float, type: str = Query(..., alias="type"),
-                      start: str = Query(..., alias="from"), end: str | None = Query(None, alias="to"),
-                      interval: str = "1m", market_hours: bool = True):
-    contract, expired, a, b, rows = await _load(expiry, strike, type, start, end, interval, market_hours)
-    return {
-        "symbol": contract["trading_symbol"], "instrumentKey": contract["instrument_key"],
-        "expired": expired, "from": a.isoformat(), "to": b.isoformat(),
-        "count": len(rows), "head": rows[:10], "tail": rows[-5:] if len(rows) > 10 else [],
-    }
-
-
-@app.get("/download")
-async def download(expiry: str, strike: float, type: str = Query(..., alias="type"),
-                   start: str = Query(..., alias="from"), end: str | None = Query(None, alias="to"),
-                   interval: str = "1m", market_hours: bool = True):
-    contract, _, a, b, rows = await _load(expiry, strike, type, start, end, interval, market_hours)
-    name = csv_name(expiry, strike, type, interval, a, b)
-    return StreamingResponse(iter([candles_csv(rows)]), media_type="text/csv",
-                             headers={"Content-Disposition": f'attachment; filename="{name}"'})
-
-
-def main() -> None:
-    # Local only: the token gives full read access to your Upstox account data.
-    uvicorn.run("upstocks.app:app", host="127.0.0.1", port=3400, reload=False)
-
-
-# ─── VWAP 9:30 strategy runs ──────────────────────────────────────────────────
-# A run over many days takes minutes (Upstox rate limit), so it's a background
-# job: POST starts it, the page polls its progress, and the ZIP is built from
-# the cached candles once it's done. Jobs live in memory (lost on restart).
-JOBS: dict[str, dict] = {}
-
-
-def _settings_from(body: dict) -> vwap.Settings:
-    from dataclasses import replace
-    preset = body.get("preset") or "frontend_live"
-    if preset not in vwap.PRESETS:
-        raise HTTPException(400, f"unknown preset {preset!r}")
-    try:
-        st = replace(vwap.Settings(start=date.fromisoformat(body["start"]), end=date.fromisoformat(body["end"])),
-                     **vwap.PRESETS[preset])
-    except (KeyError, ValueError):
-        raise HTTPException(400, "start and end (YYYY-MM-DD) are required")
-    for f in ("min_premium", "max_premium", "sl_pct", "target_pct", "target1_pct", "breakeven_pct", "stagnant_hours", "stagnant_points"):
-        if body.get(f) not in (None, ""):
-            setattr(st, f, float(body[f]))
-    for f in ("candle_minutes", "max_trades", "cooldown_min", "chain_strikes", "max_entry_visits", "index_trend_bars"):
-        if body.get(f) not in (None, ""):
-            setattr(st, f, int(body[f]))
-    for f in ("entry_start", "time_exit", "last_entry"):
-        if body.get(f):
-            setattr(st, f, str(body[f])[:5])
-    for f in ("strong_green", "live", "atm_offsets_only", "align_checkpoints", "include_entry_candle", "time_exit_first", "ema_cross", "any_strike_in_band", "supertrend", "index_trend", "trend_entry"):
-        if f in body:
-            setattr(st, f, bool(body[f]))
-    if st.start > st.end:
-        raise HTTPException(400, "start is after end")
-    if (st.end - st.start).days > 400:
-        raise HTTPException(400, "range too long (max ~13 months)")
-    return st
-
-
-async def _run_job(job: dict) -> None:
-    st: vwap.Settings = job["settings"]
-    try:
-        last = min(st.end, upstox.today_ist())
-        # NIFTY trend rule: fetch a week earlier so each day's SuperTrend is
-        # warmed up on the previous session (the extra days aren't run).
-        allspot = await vwap.trading_days_and_spot(st.start - timedelta(days=7) if st.index_trend else st.start, last)
-        keys = sorted(allspot)
-        prev_spot = {d: allspot[keys[i - 1]] if i else [] for i, d in enumerate(keys)}
-        spot = {d: b for d, b in allspot.items() if d >= st.start.isoformat()}
-        job["total"] = len(spot)
-        # Weekdays with no NIFTY candles: exchange holidays, or a recent session
-        # Upstox hasn't published yet — say so instead of skipping silently.
-        wk = [st.start + timedelta(days=i) for i in range((last - st.start).days + 1)]
-        job["missing"] = [d.isoformat() for d in wk if d.weekday() < 5 and d.isoformat() not in spot]
-        sem = asyncio.Semaphore(3)  # overlap network waits; the throttle caps the rate
-
-        async def one(d: str, bars):
-            async with sem:
-                job["current"] = d
-                try:
-                    if st.strategy == "smc":
-                        res = await smc.run_day(date.fromisoformat(d), st, bars)
-                    elif st.strategy == "ema_pullback":
-                        res = await ema_pullback.run_day(date.fromisoformat(d), st, bars)
-                    else:
-                        res = await vwap.run_day(date.fromisoformat(d), st, bars, prev_spot[d])
-                    out = {"date": res.date, "expiry": res.expiry, "note": res.note,
-                           "trades": [vwap.trade_dict(t) for t in res.trades]}
-                except Exception as e:  # one bad day must not kill the run
-                    out = {"date": d, "expiry": None, "note": f"error: {e}", "trades": []}
-                job["days"].append(out)
-                job["done"] += 1
-
-        await asyncio.gather(*(one(d, b) for d, b in spot.items()))
-        job["days"].sort(key=lambda x: x["date"])
-        job["status"] = "done"
-    except Exception as e:
-        job["status"], job["error"] = "error", str(e)
-
-
-@app.get("/vwap", response_class=HTMLResponse)
-async def vwap_page(request: Request):
-    # From = 1st of the current month, To = today (IST).
-    end = upstox.today_ist()
-    start = end.replace(day=1)
-    from dataclasses import asdict, replace
-    presets = {k: {f: v for f, v in asdict(replace(vwap.Settings(start=start, end=end), **ov)).items()
-                   if f not in ("start", "end")} for k, ov in vwap.PRESETS.items()}
-    return templates.TemplateResponse(request, "vwap.html", {"start": start.isoformat(), "end": end.isoformat(),
-                                                             "presets": presets})
-
-
-@app.post("/api/vwap/run")
-async def vwap_run(request: Request):
-    st = _settings_from(await request.json())
-    jid = uuid.uuid4().hex[:10]
-    body_preset = (await request.json()).get("preset") or "frontend_live"
-    job = {"id": jid, "settings": st, "preset": body_preset, "status": "running", "done": 0, "total": None,
-           "current": None, "days": [], "error": None, "missing": []}
-    JOBS[jid] = job
-    job["task"] = asyncio.create_task(_run_job(job))
-    return {"id": jid}
-
-
-@app.get("/api/chart")
-async def chart_data(key: str, day: str = Query(..., alias="date"), expiry: str = Query(...)):
-    """One option's day for the trade chart: 1-min bars (market hours), the
-    5-min bars the strategy uses, and its 5-min VWAP (same maths as the engine).
-    Times are IST "HH:MM"; a 5-min bar is stamped with its first minute.
-    `prev_close1` / `prev_close5`: the previous session's closes (same cached
-    span, no extra call) so the chart's EMA is warmed up from 9:15."""
-    d = _parse_day(day, "date")
-    expired = expiry in set(await upstox.expired_expiries())
-    rows = await vwap.span_rows(key, d, expiry, expired)
-    bars = vwap._market([r for r in rows if r[0][:10] == day])
-    prev_day = max((r[0][:10] for r in rows if r[0][:10] < day), default=None)
-    prev = vwap._market([r for r in rows if r[0][:10] == prev_day]) if prev_day else []
-    nm = vwap.aggregate(bars, 5)
-    vw = vwap.vwap_series(nm)
-    return {
-        "date": day,
-        "bars1": [list(b[:6]) for b in bars],
-        "bars5": [[vwap._add(b[0], -4), *b[1:6]] for b in nm],
-        "prev_close1": [b[4] for b in prev],
-        "prev_close5": [b[4] for b in vwap.aggregate(prev, 5)],
-        # VWAP of a 5-min candle is known when it closes → stamp at its last minute
-        "vwap5": [[b[0], v] for b, v in zip(nm, vw)],
-    }
-
-
-@app.get("/api/vwap/job/{jid}")
-async def vwap_job(jid: str, since: int = 0):
-    job = JOBS.get(jid) or {}
-    if not job:
-        raise HTTPException(404, "unknown job (the server may have restarted)")
-    return {"id": jid, "status": job["status"], "done": job["done"], "total": job["total"],
-            "current": job["current"], "error": job["error"], "missing": job["missing"],
-            "days": sorted(job["days"], key=lambda x: x["date"]) if job["status"] != "running" else job["days"][since:]}
-
-
-def _summary_csv(days: list[dict], qty: int) -> str:
-    buf = io.StringIO()
-    w = csv.writer(buf)
-    w.writerow(["date", "expiry", "trade", "option", "type", "strike", "entry_time", "entry_price", "sl", "target",
-                "signal_candle", "candle_close", "vwap", "other_side", "result", "exit_time", "exit_price",
-                "pnl_pts", "pnl_pct", f"pnl_rupees_qty{qty}", "peak_pts", "sl_moved_to_breakeven", "t1_time", "why", "file", "note"])
-    for d in days:
-        if not d["trades"]:
-            w.writerow([d["date"], d["expiry"] or "", "", "", "", "", "", "", "", "", "", "", "", "", "NO_TRADE",
-                        "", "", "", "", "", "", "", "", "", "", d["note"]])
-        for i, t in enumerate(d["trades"], 1):
-            w.writerow([t["date"], t["expiry"], i, t["symbol"], t["type"], f'{t["strike"]:g}', t["entry_time"], t["entry"],
-                        t["sl"], t["target"], t["candle"], t["close"], t["vwap"], t["other"], t["status"],
-                        t["exit_time"] or "", t["exit"], t["pnl"], t["pnl_pct"], round(t["pnl"] * qty, 2), t["peak"],
-                        t["sl_to_breakeven"], t.get("t1_time") or "", t.get("why") or "",
-                        csv_name(t["expiry"], t["strike"], t["type"], "1m", t["date"], t["date"]), ""])
-    return buf.getvalue()
-
-
-@app.get("/api/vwap/job/{jid}/zip")
-async def vwap_zip(jid: str, qty: int = 65):
-    job = JOBS.get(jid)
-    if not job or job["status"] != "done":
-        raise HTTPException(409, "run not finished")
-    st: vwap.Settings = job["settings"]
-    days = sorted(job["days"], key=lambda x: x["date"])
-    mem = io.BytesIO()
-    with zipfile.ZipFile(mem, "w", zipfile.ZIP_DEFLATED) as z:
-        z.writestr("summary.csv", _summary_csv(days, qty))
-        seen = set()
-        exp_set = set(await upstox.expired_expiries())
-        for d in days:
-            for t in d["trades"]:
-                name = csv_name(t["expiry"], t["strike"], t["type"], "1m", t["date"], t["date"])
-                if name in seen:
-                    continue
-                seen.add(name)
-                day = date.fromisoformat(t["date"])
-                rows = await upstox.candles(t["instrument_key"], "1m", day, day, t["expiry"] in exp_set)
-                rows = [r for r in rows if "09:15" <= r[0][11:16] <= "15:29"]
-                z.writestr(f"options/{name}", candles_csv(rows))
-    fname = f"vwap930_{st.start}_to_{st.end}.zip"
-    return StreamingResponse(iter([mem.getvalue()]), media_type="application/zip",
-                             headers={"Content-Disposition": f'attachment; filename="{fname}"'})
-
-
-@app.get("/api/vwap/job/{jid}/summary.csv")
-async def vwap_summary(jid: str, qty: int = 65):
-    job = JOBS.get(jid)
-    if not job or job["status"] != "done":
-        raise HTTPException(409, "run not finished")
-    st: vwap.Settings = job["settings"]
-    return StreamingResponse(iter([_summary_csv(sorted(job["days"], key=lambda x: x["date"]), qty)]),
-                             media_type="text/csv",
-                             headers={"Content-Disposition": f'attachment; filename="vwap930_summary_{st.start}_to_{st.end}.csv"'})
-
-
-PRESET_LABELS = {"frontend_live": "VWAP 9:30 — frontend LIVE rules", "smc_live": "SMC — frontend LIVE rules",
-                 "ema25_vwap": "VWAP + EMA25 + SuperTrend", "ema_pullback": "EMA9/EMA26 pullback (Mani)"}
-
-
-@app.get("/api/vwap/job/{jid}/report.pdf")
-async def vwap_pdf(jid: str, lots: int = 20, lot_size: int = 65):
-    job = JOBS.get(jid)
-    if not job or job["status"] != "done":
-        raise HTTPException(409, "run not finished")
-    st: vwap.Settings = job["settings"]
-    days = sorted(job["days"], key=lambda x: x["date"])
-    label = PRESET_LABELS.get(job.get("preset"), "Strategy backtest")
-    rules = (f"₹{st.min_premium:g}–{st.max_premium:g} · SL {st.sl_pct:g}% · target {st.target_pct:g}%"
-             + (f" · T1 {st.target1_pct:g}%" if st.target1_pct else "")
-             + (f" · breakeven at +{st.breakeven_pct:g}%" if st.breakeven_pct else "")
-             + f" · entries from {st.entry_start} · max {st.max_trades} trades/day")
-    missing = f" · no Upstox data: {', '.join(job['missing'])}" if job.get("missing") else ""
-    pdf = pdf_report.build(days, title=f"{label}  ·  {st.start} → {st.end}",
-                           subtitle=f"{rules} · {len(days)} trading days · lots {lots}×{lot_size}{missing}",
-                           lots=lots, lot_size=lot_size)
-    name = f"{'smc' if st.strategy == 'smc' else 'vwap930'}_{st.start}_to_{st.end}.pdf"
-    return StreamingResponse(iter([pdf]), media_type="application/pdf",
-                             headers={"Content-Disposition": f'attachment; filename="{name}"'})
+from contextlib import asynccontextmanager
+import logging
+import sqlite3
+
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+import httpx
+import uvicorn
+
+from . import upstox
+from .api import market, operations, pages, research, trading
+from .config import AppSettings
+from .database import Database, ProcessLock
+from .middleware import RequestLoggingMiddleware
+from .observability import SERVER_LOG_CONFIG, close_logging, configure_logging, redact
+from .repository import ConfigurationConflict, Repository
+from .security import DashboardGuard
+from .services.backtests import BacktestService
+from .services.trading import TradingService
+from .services.quotes import QuoteService
+
+log = logging.getLogger("upstocks.app")
+
+
+def create_app(settings: AppSettings | None = None) -> FastAPI:
+    settings = settings or AppSettings.from_env()
+
+    @asynccontextmanager
+    async def lifespan(app):
+        lock = ProcessLock(settings.database_path)
+        lock.acquire()
+        handlers = []
+        trading_service = backtests = quotes = None
+        app.state.ready = False
+        try:
+            handlers = configure_logging(settings)
+            database = Database(settings.database_path, settings.sqlite_timeout)
+            await asyncio.to_thread(database.initialize)
+            repository = Repository(database)
+            await asyncio.to_thread(repository.migrate_legacy, settings.legacy_dir)
+            await asyncio.to_thread(repository.recover)
+            upstox.configure(settings.cache_dir)
+            trading_service = await asyncio.to_thread(TradingService, repository)
+            backtests = BacktestService(repository, settings.max_backtests)
+            app.state.database = database
+            app.state.repository = repository
+            app.state.dashboard_token = await asyncio.to_thread(repository.dashboard_token)
+            app.state.export_lock = asyncio.Lock()
+            app.state.audit_failures = 0
+            app.state.trading = trading_service
+            quotes = QuoteService(trading_service)
+            app.state.quotes = quotes
+            app.state.backtests = backtests
+            if settings.scanner_enabled:
+                trading_service.start()
+            app.state.ready = True
+            await asyncio.to_thread(repository.event, "startup", "Application started", details={"implementation": repository.implementation})
+            log.info("Application started")
+            yield
+        except Exception:
+            log.exception("Application lifecycle failed")
+            raise
+        finally:
+            app.state.ready = False
+            try:
+                if trading_service:
+                    await trading_service.stop()
+                if quotes:
+                    await quotes.stop()
+                if backtests:
+                    await backtests.stop()
+                await upstox.close()
+                if trading_service:
+                    await asyncio.to_thread(trading_service.repository.event, "shutdown", "Application stopped")
+                log.info("Application stopped")
+            finally:
+                close_logging(handlers)
+                lock.release()
+
+    app = FastAPI(title="Upstocks", version="0.2.0", lifespan=lifespan)
+    app.state.settings = settings
+    app.state.ready = False
+    app.add_middleware(DashboardGuard, allowed_hosts=settings.allowed_hosts)
+    app.add_middleware(RequestLoggingMiddleware)
+    for router in (pages.router, trading.router, market.router, research.router, operations.router):
+        app.include_router(router)
+
+    @app.exception_handler(ConfigurationConflict)
+    async def configuration_conflict(request: Request, exc: ConfigurationConflict):
+        return JSONResponse({"detail": str(exc), "state": request.app.state.trading.snapshot()["state"]}, status_code=409)
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(request: Request, exc: RequestValidationError):
+        # Do not echo raw request input (which may contain credentials).
+        fields = [{"field": ".".join(map(str, error["loc"])), "message": redact(error["msg"])} for error in exc.errors()]
+        return JSONResponse({"detail": "; ".join(f"{e['field']}: {e['message']}" for e in fields),
+                             "errors": fields}, status_code=422)
+
+    @app.exception_handler(upstox.UpstoxError)
+    async def broker_error(request: Request, exc: upstox.UpstoxError):
+        log.warning("Broker request failed: %s", redact(str(exc)))
+        message = redact(str(exc))
+        return JSONResponse({"detail": message, "error": message}, status_code=502)
+
+    @app.exception_handler(httpx.RequestError)
+    async def network_error(request: Request, exc: httpx.RequestError):
+        log.warning("Broker connection failed: %s", type(exc).__name__)
+        return JSONResponse({"detail": "Unable to reach the broker. Try again shortly."}, status_code=502)
+
+    @app.exception_handler(sqlite3.Error)
+    async def database_error(request: Request, exc: sqlite3.Error):
+        log.exception("Database operation failed")
+        return JSONResponse({"detail": "Storage unavailable. Check application logs before retrying an order action.",
+                             "request_id": request.state.request_id}, status_code=503)
+
+    @app.exception_handler(Exception)
+    async def internal_error(request: Request, exc: Exception):
+        rid = getattr(request.state, "request_id", "")
+        return JSONResponse({"detail": "Unexpected server error. See application logs.", "request_id": rid},
+                            status_code=500, headers={"X-Request-ID": rid, "Cache-Control": "no-store"})
+
+    @app.get("/health/live", include_in_schema=False)
+    async def liveness():
+        return {"status": "ok"}
+
+    @app.get("/health/ready", include_in_schema=False)
+    async def readiness(request: Request):
+        if not app.state.ready:
+            return JSONResponse({"status": "starting"}, status_code=503)
+        health = await asyncio.to_thread(request.app.state.repository.health)
+        scanner = request.app.state.trading._task
+        healthy = not settings.scanner_enabled or scanner is not None and not scanner.done()
+        return JSONResponse({"status": "ok" if healthy else "degraded", **health,
+                             "scanner": "running" if scanner and not scanner.done() else "disabled" if not settings.scanner_enabled else "stopped",
+                             "active_backtests": len(request.app.state.backtests.tasks),
+                             "entries_paused": request.app.state.trading.state["entries_paused"],
+                             "audit_failures": request.app.state.audit_failures}, status_code=200 if healthy else 503)
+
+    return app
+
+
+app = create_app()
+
+
+def main():
+    settings = AppSettings.from_env()
+    uvicorn.run(create_app(settings), host=settings.host, port=settings.port, workers=1,
+                access_log=False, log_level=settings.log_level.lower(), log_config=SERVER_LOG_CONFIG)
+
+
+if __name__ == "__main__":
+    main()

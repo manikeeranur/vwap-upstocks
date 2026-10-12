@@ -2,10 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>upstocks — account</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+{% from "_icons.html" import ui_icon %}
 {% include "_style.html" %}
 <style>
   main { max-width: none; padding: 20px 24px 48px; }
@@ -14,35 +13,42 @@
   .kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
   .kv div { background: var(--card); padding: 12px 14px; }
   .kv span { display: block; font-size: 11px; letter-spacing: 1.2px; text-transform: uppercase; color: var(--muted); }
-  .kv b { display: block; margin-top: 4px; font-family: 'Satoshi', Inter, sans-serif; font-size: 15px; }
-  table { width: 100%; border-collapse: collapse; font-family: 'Satoshi', Inter, sans-serif; font-size: 12px; }
+  .kv b { display: block; margin-top: 4px; font-family: var(--font); font-size: 15px; }
+  table { width: 100%; border-collapse: collapse; font-family: var(--font); font-size: 12px; }
   th { text-align: left; font-size: 10px; letter-spacing: 1.4px; text-transform: uppercase; color: var(--muted); padding: 8px 10px; border-bottom: 2px solid var(--border); white-space: nowrap; }
   td { padding: 9px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
   .tbl { border: 1px solid var(--border); border-radius: 10px; overflow: auto; background: var(--card); }
   .up { color: var(--ok); } .down { color: var(--pe); } .muted { color: var(--muted); }
   .warn { border: 1px solid #f59e0b; background: #f59e0b14; border-radius: 10px; padding: 14px 16px; margin-top: 16px; line-height: 1.6; }
   .secerr { color: var(--pe); font-size: 13px; padding: 10px 0; }
+  body .account-empty { display:flex; flex-direction:column; align-items:center; text-align:center; padding:64px 24px; }
+  .account-empty .upload-icon { width:48px; height:48px; margin-bottom:20px; }
+  body .account-empty h2 { font-size:18px; margin:0 0 8px; }
+  .account-empty p { color:var(--muted); max-width:470px; margin:0 0 16px; line-height:1.8; }
+  .account-empty details { margin-top:20px; max-width:470px; font-size:12px; }
+  .account-empty details p { margin:10px 0 0; }
 </style>
 </head>
 <body>
 {% set active = "account" %}{% include "_nav.html" %}
-<main>
-  <h1>Account</h1>
-  <p class="sub">Your Upstox profile, funds, holdings, positions, orders and today's trades — loaded {{ now }} IST. Refresh the page to update.</p>
+<main id="main" tabindex="-1">
+  <header class="page-heading"><div><h1>Broker account</h1><p class="sub">Your Upstox balances and activity.</p></div><div class="heading-actions"><span class="account-timestamp">{{ now }} IST</span><a class="btn ghost" href="/account">{{ ui_icon("refresh") }} Refresh</a></div></header>
 
   {% if blocked %}
-  <div class="warn">
-    <b>Upstox is refusing account data from this computer.</b><br>
-    Your token only allows profile / funds / portfolio / order calls from the <b>static IP</b> registered on your Upstox account,
-    and this Mac's internet IP isn't it. Fix: Upstox Developer Console → your app → <b>Static IP</b> → add this computer's public IP
-    (search "what is my IP"), or run upstocks on the machine whose IP is registered. Market data (Download, VWAP / SMC) is not affected.
-  </div>
+  <section class="card account-empty">
+    <span class="upload-icon">{{ ui_icon("lock") }}</span>
+    <h2>Account access restricted</h2>
+    <p>Upstox account data is available from your registered IP.<br>You can still use market data and research tools.</p>
+    <a class="btn ghost" href="/data">Explore market data {{ ui_icon("arrow") }}</a>
+    <details><summary>Connection details</summary><p>Register this computer’s public IP in Upstox Developer Console → your app → Static IP, or open the app on your registered machine.</p></details>
+  </section>
   {% endif %}
 
-  {% macro err(sec) %}{% if a[sec].error %}<div class="secerr">⚠ {{ a[sec].error }}</div>{% endif %}{% endmacro %}
+  {% macro err(sec) %}{% if a[sec].error %}<div class="secerr">{{ a[sec].error }}</div>{% endif %}{% endmacro %}
   {% macro money(v) %}{% if v is number %}₹{{ "{:,.2f}".format(v) }}{% else %}—{% endif %}{% endmacro %}
   {% macro pnl(v) %}{% if v is number %}<span class="{{ 'up' if v >= 0 else 'down' }}">{{ '+' if v >= 0 else '−' }}₹{{ "{:,.2f}".format(v|abs) }}</span>{% else %}—{% endif %}{% endmacro %}
 
+  {% if not blocked %}
   <section class="sec">
     <h2>Profile</h2>
     {{ err("profile") }}
@@ -80,7 +86,7 @@
   </section>
 
   <section class="sec">
-    <h2>Positions (today)</h2>
+    <h2>Today’s positions</h2>
     {{ err("positions") }}
     {% set rows = a.positions.data or [] %}
     {% if a.positions.data is not none %}
@@ -119,7 +125,7 @@
   </section>
 
   <section class="sec">
-    <h2>Orders (today)</h2>
+    <h2>Today’s orders</h2>
     {{ err("orders") }}
     {% set rows = a.orders.data or [] %}
     {% if a.orders.data is not none %}
@@ -138,7 +144,7 @@
   </section>
 
   <section class="sec">
-    <h2>Trades (today)</h2>
+    <h2>Today’s trades</h2>
     {{ err("trades") }}
     {% set rows = a.trades.data or [] %}
     {% if a.trades.data is not none %}
@@ -154,6 +160,7 @@
     {% else %}<p class="muted">No trades today.</p>{% endif %}
     {% endif %}
   </section>
+  {% endif %}
 </main>
 </body>
 </html>
