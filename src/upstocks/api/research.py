@@ -14,7 +14,9 @@ from .common import candles_csv, csv_name
 
 router = APIRouter()
 PRESET_LABELS = {"frontend_live": "VWAP 9:30 — frontend LIVE rules", "smc_live": "SMC — frontend LIVE rules",
-                 "ema25_vwap": "VWAP + EMA25 + SuperTrend", "ema_pullback": "EMA9/EMA26 pullback (Mani)"}
+                 "ema25_vwap": "VWAP + EMA25 + SuperTrend", "ema_pullback": "EMA9/EMA26 pullback (Mani)",
+                 "smc_ema_combo": "SMC + EMA9/26 pullback (combined, 1 trade a day)",
+                 "smc_tuned": "SMC Tuned (1 trade a day, reversal exit)"}
 
 
 async def _job(request, jid):

@@ -112,8 +112,10 @@
         <select id="preset">
           <option value="frontend_live" selected>VWAP 9:30</option>
           <option value="smc_live">SMC</option>
+          <option value="smc_tuned">SMC Tuned</option>
           <option value="ema25_vwap">VWAP + EMA25 + SuperTrend</option>
           <option value="ema_pullback">EMA pullback</option>
+          <option value="smc_ema_combo">SMC + EMA pullback (combined, 1 trade a day)</option>
         </select>
       </label>
       <label>From <input type="date" id="start" value="{{ start }}"></label>
@@ -138,6 +140,8 @@
         <label>Cooldown (minutes) <input type="number" id="cooldown_min" step="1"></label>
         <label>Stagnant after (hours) <input type="number" id="stagnant_hours" step="0.5"></label>
         <label>Stagnant peak (points) <input type="number" id="stagnant_points" step="1"></label>
+        <label>Last entry <input type="time" id="last_entry" step="60"></label>
+        <label>Reversal exit after +% <input type="number" id="ep_rev_activate" min="0" step="5"></label>
         <label>Time exit <input type="time" id="time_exit" step="60"></label>
         <label>Strikes per side <input type="number" id="chain_strikes" step="1"></label>
         <label>Max price revisits (0 = off) <input type="number" id="max_entry_visits" min="0" step="1"></label>
@@ -149,6 +153,7 @@
         <label class="check"><input type="checkbox" id="atm_offsets_only"> ATM strikes within ±150</label>
         <label class="check"><input type="checkbox" id="align_checkpoints"> Align to 5-minute checkpoints</label>
         <label class="check"><input type="checkbox" id="include_entry_candle"> Include entry candle for SL / target</label>
+        <label class="check"><input type="checkbox" id="rev_exit"> Reversal exit (EMA9/26 pattern: price up &amp; OI down at the 5-min peak, volume ≥ 1.5×, upper wick ≥ 40%, fresh 30-min high) — SMC</label>
         <label class="check"><input type="checkbox" id="time_exit_first"> Time exit before SL / target</label>
         <label class="check"><input type="checkbox" id="trend_entry"> EMA25 rising + SuperTrend entry (no VWAP)</label>
         <label class="check"><input type="checkbox" id="ema_cross"> EMA25 crosses above VWAP</label>
@@ -196,10 +201,12 @@ const fmt = n => (Math.round(n * 100) / 100).toFixed(2);
 let job = null, days = [], timer = null, polling = false;
 
 const PRESETS = {{ presets | tojson }};
-const NUMS = ["min_premium", "max_premium", "sl_pct", "target_pct", "entry_start", "candle_minutes", "breakeven_pct", "max_trades", "cooldown_min", "stagnant_hours", "stagnant_points", "time_exit", "chain_strikes", "max_entry_visits", "index_trend_bars"];
-const BOOLS = ["live", "strong_green", "atm_offsets_only", "align_checkpoints", "include_entry_candle", "time_exit_first", "ema_cross", "any_strike_in_band", "supertrend", "index_trend", "trend_entry"];
+const NUMS = ["min_premium", "max_premium", "sl_pct", "target_pct", "entry_start", "candle_minutes", "breakeven_pct", "max_trades", "cooldown_min", "stagnant_hours", "stagnant_points", "last_entry", "time_exit", "chain_strikes", "max_entry_visits", "index_trend_bars", "ep_rev_activate"];
+const BOOLS = ["live", "strong_green", "atm_offsets_only", "align_checkpoints", "include_entry_candle", "time_exit_first", "ema_cross", "any_strike_in_band", "supertrend", "index_trend", "trend_entry", "rev_exit"];
 const NOTES = {
   smc_live: "Liquidity, fair value gap, and order-block setups with EMA20 confirmation. Entries use the nearest eligible ATM option; the strategy exits at its stop-loss, target, or configured time.",
+  smc_tuned: "The SMC engine (Liquidity Grab / FVG / Order Block / Breaker / SMT trap on NIFTY 1-min, ≥2 needed) tuned for one trade a day on 1 Apr – 30 Sep 2026: entries 09:32–12:00, strike within ±20 strikes of ATM in the ₹100–800 band (nearest ATM; within 50 pts → premium nearest ₹450), entry at the option's last 1-min close, SL 50%, target 120%, SL to entry at +25%, reversal exit after +35% (the EMA9/26 pattern: price up & OI down at a 5-min candle's peak minute, volume ≥ 1.5× median, upper wick ≥ 40%, fresh 30-min high → out at the next minute's open), max 1 trade a day, 15:15 exit. Backtest 1 Apr – 30 Sep: net ₹1,56,361 for 1 lot after charges, 98 trades, max drawdown ₹35,028 — tuned on that same period, so expect less going forward.",
+  smc_ema_combo: "SMC and EMA9/26 pullback as one strategy, ONE trade a day, 1 lot: both scan, and whichever signals first is traded (the other's trade that day is skipped; a tie goes to SMC). Settings from a joint search on 1 Apr – 30 Sep 2026 — SMC: entries 09:32–14:59, ₹100–800, SL 50%, target 150%, SL to entry at +25%, reversal exit after +35%, 15:15 exit; EMA9/26: premium ₹200–<300, SL 50%, target 100%, rest as Mani's rules. Trades are tagged [SMC] / [EMA9/26]. The rule fields below don't apply here. Backtest 1 Apr – 30 Sep 2026: net ₹2,05,873 for 1 lot after charges, 123 trades — tuned on that same period, so expect less going forward.",
   ema_pullback: "EMA9 / EMA26 pullbacks on completed NIFTY candles, with option volume and open-interest confirmation. Enters at the next minute’s open; one trade per day, with reversal and time exits.",
   ema25_vwap: "EMA25 crossing above VWAP with a green SuperTrend, aligned to NIFTY’s trend. Scans eligible strikes nearest ATM first; repeated visits to the entry price can block a setup.",
   frontend_live: "Strong green candles above VWAP, using the nearest eligible ATM option. Entries use live prices; stop-loss, target, breakeven, cooldown, and time exit follow the settings below.",
@@ -247,7 +254,8 @@ function render() {
   const trades = sorted.flatMap(d => d.trades).sort((a, b) => (a.date + a.entry_time).localeCompare(b.date + b.entry_time));
   const failed = sorted.filter(d => !d.trades.length && /^error/.test(d.note || ""));
   const noTrade = sorted.filter(d => !d.trades.length && !/^error/.test(d.note || ""));
-  const isSmc = trades.length ? trades[0].candle === "" : $("preset").value === "smc_live";
+  // The combined preset mixes SMC and EMA9/26 rows — show them all in the general layout.
+  const isSmc = $("preset").value === "smc_ema_combo" ? false : trades.length ? trades[0].candle === "" : $("preset").value === "smc_live";
   const dark = matchMedia("(prefers-color-scheme: dark)").matches;
   // VWAP = the frontend's VWAP 9:30 table (as on the live site); SMC = its SMC table (SIGNALS + CMP).
   const heads = ["#", "DATE", "TIME", isSmc ? "SIGNALS" : "CONCEPTS", "STRIKE", "ENTRY", ...(isSmc ? ["CMP"] : []), "SL", "T1", "T2", "STATUS",

@@ -108,6 +108,10 @@ class Settings:
     ep_prem_rise: float = 2.0
     ep_oi_rise: float = 0.5
     ep_rev_activate: float = 20.0
+    # SMC: the EMA9/26 pullback's reversal exit (price up / OI down at a 5-min
+    # candle's peak minute, volume ≥ 1.5× median, upper wick ≥ 40%, fresh 30-min
+    # high) once the gain reached ep_rev_activate %; exit at the next minute's open.
+    rev_exit: bool = False
     slippage: float = 0.0
 
 
@@ -144,6 +148,20 @@ PRESETS["ema_pullback"] = {"strategy": "ema_pullback", "min_premium": 150, "max_
                            "sl_pct": 25, "target_pct": 100, "entry_start": "09:36", "last_entry": "14:59",
                            "max_trades": 1, "time_exit": "15:20", "breakeven_pct": 0, "stagnant_hours": 0,
                            "strong_green": False, "candle_minutes": 1, "slippage": 1.0}
+# SMC Tuned: the same SMC engine, tuned 2026-10-13 for ONE trade a day on 1 Apr – 30 Sep
+# 2026 (exactly 6 months), plus the EMA9/26 reversal exit: net ₹1,56,361 for 1 lot after
+# charges, 98 trades, max drawdown ₹35,028. (The 2-trades-a-day version — SL 33%,
+# breakeven 20%, 09:28 start, 15:25 exit, max 2, cooldown 30 — made ₹1,66,456 on that
+# window.) The plain "smc_live" preset above keeps the original live values.
+PRESETS["smc_tuned"] = {"strategy": "smc", "live": False, "entry_start": "09:32", "last_entry": "12:00",
+                        "min_premium": 100, "max_premium": 800,
+                        "sl_pct": 50, "target_pct": 120, "target1_pct": 12, "breakeven_pct": 25,
+                        "rev_exit": True, "ep_rev_activate": 35,
+                        "max_trades": 1, "cooldown_min": 30, "chain_strikes": 20, "time_exit": "15:15",
+                        "include_entry_candle": False, "time_exit_first": True, "strong_green": False,
+                        "atm_offsets_only": False, "stagnant_hours": 0, "sl_on_low": False}
+# SMC + EMA9/26 pullback as one strategy (combo.py): one trade a day — whichever signals first.
+PRESETS["smc_ema_combo"] = {"strategy": "combo"}
 KITE_OFFSETS = [0, -50, 50, -100, 100, -150, 150]
 
 

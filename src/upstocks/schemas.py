@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, 
 
 from . import vwap
 
-Preset = Literal["frontend_live", "smc_live", "ema25_vwap", "ema_pullback"]
+Preset = Literal["frontend_live", "smc_live", "ema25_vwap", "ema_pullback", "smc_ema_combo", "smc_tuned"]
 
 
 class Input(BaseModel):
@@ -62,6 +62,7 @@ class BacktestRequest(Input):
     chain_strikes: int | None = Field(default=None, ge=1, le=100)
     max_entry_visits: int | None = Field(default=None, ge=0, le=100)
     index_trend_bars: int | None = Field(default=None, ge=1, le=100)
+    ep_rev_activate: float | None = Field(default=None, ge=0, le=10000)
     entry_start: str | None = Field(default=None, pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
     time_exit: str | None = Field(default=None, pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
     last_entry: str | None = Field(default=None, pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
@@ -76,6 +77,7 @@ class BacktestRequest(Input):
     supertrend: StrictBool | None = None
     index_trend: StrictBool | None = None
     trend_entry: StrictBool | None = None
+    rev_exit: StrictBool | None = None
 
     @field_validator("start", "end", mode="before")
     @classmethod

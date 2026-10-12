@@ -4,7 +4,7 @@ from datetime import date, timedelta
 import logging
 import uuid
 
-from .. import ema_pullback, smc, upstox, vwap
+from .. import combo, ema_pullback, smc, upstox, vwap
 from ..observability import redact, request_id
 
 log = logging.getLogger(__name__)
@@ -64,6 +64,8 @@ class BacktestService:
                             result = await smc.run_day(date.fromisoformat(day), settings, bars)
                         elif settings.strategy == "ema_pullback":
                             result = await ema_pullback.run_day(date.fromisoformat(day), settings, bars)
+                        elif settings.strategy == "combo":
+                            result = await combo.run_day(date.fromisoformat(day), settings, bars)
                         else:
                             result = await vwap.run_day(date.fromisoformat(day), settings, bars, prev_spot[day])
                         out = {"date": result.date, "expiry": result.expiry, "note": result.note,

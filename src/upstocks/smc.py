@@ -26,7 +26,9 @@ from datetime import date
 from functools import cmp_to_key
 
 from . import upstox
-from .vwap import STEP, Bar, DayResult, Settings, Trade, _add, _market, _mins, _nearest_expiry, _round2, day_rows, resolve_live
+from .ema_pullback import _bars_oi, reversal
+from .vwap import (STEP, Bar, DayResult, Settings, Trade, _add, _market, _mins, _nearest_expiry, _round2, day_rows,
+                   resolve_live, span_rows)
 
 # Bar = (hhmm, open, high, low, close, volume)
 O, H, L, C = 1, 2, 3, 4
@@ -189,7 +191,16 @@ async def run_day(day: date, s: Settings, spot_bars: list[Bar]) -> DayResult:
                 return cands[0], (blo, bhi)
         return None, None
 
-    def resolve(c: dict, direction: str, entry: float, mark: str, why: str, spot: float, side: dict) -> Trade:
+    oi_cache: dict[str, list[tuple]] = {}
+
+    async def oi_bars(c: dict) -> list[tuple]:
+        k = c["instrument_key"]
+        if k not in oi_cache:
+            oi_cache[k] = _bars_oi(await span_rows(k, day, expiry, expired), day.isoformat())
+        return oi_cache[k]
+
+    def resolve(c: dict, direction: str, entry: float, mark: str, why: str, spot: float, side: dict,
+                obars: list[tuple] | None = None) -> Trade:
         risk = _round2(entry * s.sl_pct / 100)
         reward = _round2(entry * s.target_pct / 100)
         sl0, tgt = _round2(entry - risk), _round2(entry + reward)
@@ -202,9 +213,15 @@ async def run_day(day: date, s: Settings, spot_bars: list[Bar]) -> DayResult:
             ei = next((i for i, b in enumerate(all_bars) if b[0] >= mark), len(all_bars))
             status, exit_p, exit_t, peak, moved, t1_time = resolve_live(all_bars, ei, entry, mark, s, sl0, tgt, t1)
             later = []
+        by_t = {x[0]: x for x in obars} if obars else {}
+        oi_idx = {x[0]: i for i, x in enumerate(obars)} if obars else {}
+        armed = pending = False
         for t, _o, h, l, cl, _v in later:
             if s.time_exit_first and t >= s.time_exit:
                 status, exit_p, exit_t = "TIME_EXIT", cl, t
+                break
+            if pending:  # reversal seen on the 5-min candle that just closed
+                status, exit_p, exit_t = "REVERSAL", _o, t
                 break
             peak = max(peak, _round2(h - entry))
             if s.breakeven_pct > 0 and not moved and peak > 0 and peak / entry * 100 >= s.breakeven_pct:
@@ -217,6 +234,13 @@ async def run_day(day: date, s: Settings, spot_bars: list[Bar]) -> DayResult:
             if h >= tgt:
                 status, exit_p, exit_t = "TARGET", tgt, t
                 break
+            if obars:
+                armed = armed or h >= entry * (1 + s.ep_rev_activate / 100)
+                k = oi_idx.get(t)
+                # a clock 5-min candle (09:15, 09:20 …) formed wholly from the entry minute on completes now
+                if armed and k is not None and (_mins(t) - 555) % 5 == 4 and k >= 4 \
+                        and obars[k - 4][0] == _add(t, -4) and obars[k - 4][0] >= mark and reversal(obars, by_t, k - 4):
+                    pending = True
         if status == "EOD" and later:
             exit_p, exit_t = later[-1][C], later[-1][0]
         pnl = _round2(exit_p - entry)
@@ -254,7 +278,7 @@ async def run_day(day: date, s: Settings, spot_bars: list[Bar]) -> DayResult:
         why = (f"{'bull' if direction == 'CE' else 'bear'} {side['score']}/5: {'+'.join(side['concepts'])}"
                f"{' +EMA✓' if side['trendOk'] else ''} (eff {eff}, {strength}) · spot {spot:.2f} · "
                f"premium band ₹{band[0]}–{band[1]}")
-        tr = resolve(c, direction, ltp, mark, why, spot, side)
+        tr = resolve(c, direction, ltp, mark, why, spot, side, await oi_bars(c) if s.rev_exit else None)
         res.trades.append(tr)
         recent.append((direction, c["strike_price"], minute))
         if not (tr.pnl < 0 or tr.status == "SL"):  # SL at breakeven fills below entry live → a loss

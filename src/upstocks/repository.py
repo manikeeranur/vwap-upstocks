@@ -10,7 +10,7 @@ import uuid
 from .database import Database, utc_now
 from .observability import clean, redact, request_id
 
-PRESETS = ("frontend_live", "smc_live", "ema25_vwap", "ema_pullback")
+PRESETS = ("frontend_live", "smc_live", "ema25_vwap", "ema_pullback", "smc_tuned", "smc_ema_combo")
 
 
 def encode(value):
@@ -41,7 +41,7 @@ class Repository:
         self.db = db
         self.run_id = uuid.uuid4().hex
         root = Path(__file__).parent
-        files = ("live.py", "vwap.py", "smc.py", "ema_pullback.py", "services/trading.py", "upstox.py")
+        files = ("live.py", "vwap.py", "smc.py", "ema_pullback.py", "combo.py", "services/trading.py", "upstox.py")
         hashes = {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in files}
         self.implementation = {"files": hashes, "sha256": hashlib.sha256(encode(hashes).encode()).hexdigest()}
 
@@ -136,6 +136,13 @@ class Repository:
                 conn.execute("INSERT INTO notes VALUES (?,?,?)", (tid, text, utc_now()))
             conn.execute("INSERT INTO metadata VALUES ('legacy_import',?)", (encode({"at": utc_now(), "sources": manifests}),))
             _audit(conn, "migration", "Legacy migration completed", {"sources": list(sources), "orders": len(orders)})
+
+    def ensure_presets(self):
+        """Give strategies added after the first start a settings row (paper on, live off, 1 lot);
+        existing rows are left as they are."""
+        with self.db.connect(write=True) as conn:
+            for preset in PRESETS:
+                conn.execute("INSERT OR IGNORE INTO strategy_config VALUES (?,1,0,1)", (preset,))
 
     def state(self):
         with self.db.connect() as conn:

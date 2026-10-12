@@ -161,9 +161,9 @@ body .strat { padding:20px; } .strat.islive { border-color:var(--pe); }
 </main>
 <script>
 const $ = id => document.getElementById(id);
-const LABELS = { ...{{ labels | tojson }}, ema25_vwap: "VWAP + EMA25", ema_pullback: "EMA pullback" }, PRESETS = {{ presets | tojson }};
-const DESCRIPTIONS = { frontend_live:'Opening range · VWAP signals', smc_live:'Smart money concepts', ema25_vwap:'Trend confirmation · EMA25', ema_pullback:'Momentum pullback · EMA9 / EMA26' };
-const STRATEGY_ICONS = ['M3 17l5-7 5 4 8-10M16 4h5v5','M4 8h16M4 16h16M8 4v8m8 0v8','M3 16l5-5 5 2 8-8M3 20h18','M3 8l5 7 5-4 4 3 4-9'];
+const LABELS = { ...{{ labels | tojson }}, ema25_vwap: "VWAP + EMA25", ema_pullback: "EMA pullback", smc_ema_combo: "SMC + EMA (1/day)" }, PRESETS = {{ presets | tojson }};
+const DESCRIPTIONS = { frontend_live:'Opening range · VWAP signals', smc_live:'Smart money concepts', ema25_vwap:'Trend confirmation · EMA25', ema_pullback:'Momentum pullback · EMA9 / EMA26', smc_tuned:'SMC · tuned, 1 trade a day', smc_ema_combo:'SMC or EMA pullback · first signal, 1 trade a day' };
+const STRATEGY_ICONS = ['M3 17l5-7 5 4 8-10M16 4h5v5','M4 8h16M4 16h16M8 4v8m8 0v8','M3 16l5-5 5 2 8-8M3 20h18','M3 8l5 7 5-4 4 3 4-9','M4 8h16M4 16h16M8 4v8m8 0v8M18 3l3 3-3 3','M4 7h7v10H4zM13 7h7v10h-7z'];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt = n => Number(n || 0).toFixed(2);
 const money = n => `${n < 0 ? '−' : ''}₹${Math.abs(Math.round(n)).toLocaleString('en-IN')}`;

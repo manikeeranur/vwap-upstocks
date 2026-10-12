@@ -41,6 +41,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
             await asyncio.to_thread(database.initialize)
             repository = Repository(database)
             await asyncio.to_thread(repository.migrate_legacy, settings.legacy_dir)
+            await asyncio.to_thread(repository.ensure_presets)
             await asyncio.to_thread(repository.recover)
             upstox.configure(settings.cache_dir)
             trading_service = await asyncio.to_thread(TradingService, repository)
