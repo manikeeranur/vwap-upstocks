@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, 
 
 from . import vwap
 
-Preset = Literal["frontend_live", "smc_live", "ema25_vwap", "ema_pullback", "smc_ema_combo", "smc_tuned"]
+Preset = Literal["frontend_live", "smc_live", "ema25_vwap", "ema_pullback", "smc_ema_combo", "smc_tuned", "harmonic"]
 
 
 class Input(BaseModel):

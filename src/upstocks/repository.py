@@ -10,7 +10,7 @@ import uuid
 from .database import Database, utc_now
 from .observability import clean, redact, request_id
 
-PRESETS = ("frontend_live", "smc_live", "ema25_vwap", "ema_pullback", "smc_tuned", "smc_ema_combo")
+PRESETS = ("frontend_live", "smc_live", "ema25_vwap", "ema_pullback", "smc_tuned", "smc_ema_combo", "harmonic")
 
 
 def encode(value):
@@ -41,7 +41,7 @@ class Repository:
         self.db = db
         self.run_id = uuid.uuid4().hex
         root = Path(__file__).parent
-        files = ("live.py", "vwap.py", "smc.py", "ema_pullback.py", "combo.py", "services/trading.py", "upstox.py")
+        files = ("live.py", "vwap.py", "smc.py", "ema_pullback.py", "combo.py", "harmonic.py", "services/trading.py", "upstox.py")
         hashes = {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in files}
         self.implementation = {"files": hashes, "sha256": hashlib.sha256(encode(hashes).encode()).hexdigest()}
 

@@ -145,7 +145,7 @@ function renderDetail() {
     <div class="scroll"><table><thead><tr><th>Strategy</th><th>In → out</th><th>Option</th><th>Entry</th><th>Exit</th><th>Status</th><th>P&amp;L pts</th><th>P&amp;L ₹</th><th>Note</th></tr></thead><tbody>${
     ts.map(t => `<tr><td>${LABELS[t.preset]}</td><td>${ampm(t.entry_time)} → ${t.open ? "…" : ampm(t.exit_time)}</td>
       <td><b style="color:${t.type === "CE" ? "var(--ce)" : "var(--pe)"}">${t.symbol}</b></td><td>₹${fmt(t.entry)}</td><td>₹${fmt(t.exit)}</td>
-      <td class="st ${t.status}">${t.open ? "OPEN" : t.status === "TIME_EXIT" ? "15:20 EXIT" : t.status}</td>
+      <td class="st ${t.status}">${t.open ? "OPEN" : t.status === "TIME_EXIT" ? "TIME EXIT" : t.status}</td>
       <td class="${t.rs >= 0 ? "up" : "down"}">${t.pnl >= 0 ? "+" : ""}${fmt(t.pnl)}</td><td class="${t.rs >= 0 ? "up" : "down"}">${money(t.rs)}</td>
       <td class="muted" style="text-align:left;white-space:normal">${(J.notes[t.id] || "").replace(/</g, "&lt;")}</td></tr>`).join("")
     || `<tr><td class="muted" colspan="9">No trades that day.</td></tr>`}</tbody></table></div>`;

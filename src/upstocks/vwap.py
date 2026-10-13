@@ -112,6 +112,15 @@ class Settings:
     # candle's peak minute, volume ≥ 1.5× median, upper wick ≥ 40%, fresh 30-min
     # high) once the gain reached ep_rev_activate %; exit at the next minute's open.
     rev_exit: bool = False
+    # Harmonic (harmonic.py): Fib level, zigzag swing %, touch tolerance (fraction of
+    # the leg), strike points in the money, trailing stop, expiry-day skip.
+    harm_fib: float = 0.58
+    harm_zz: float = 0.25
+    harm_tol: float = 0.06
+    harm_itm: float = 400
+    harm_skip_expiry: bool = True
+    trail_start: float = 0              # 0 = no trailing stop
+    trail_giveback: float = 40
     slippage: float = 0.0
 
 
@@ -160,6 +169,16 @@ PRESETS["smc_tuned"] = {"strategy": "smc", "live": False, "entry_start": "09:32"
                         "max_trades": 1, "cooldown_min": 30, "chain_strikes": 20, "time_exit": "15:15",
                         "include_entry_candle": False, "time_exit_first": True, "strong_green": False,
                         "atm_offsets_only": False, "stagnant_hours": 0, "sl_on_low": False}
+# Harmonic (harmonic.py) — "B-Pro": 0.58 Fib pullback on NIFTY 1-min swings, ITM-400,
+# one trade a day 09:30–11:15, no expiry days, safety SL 50% (never hit in the tuning
+# year — it's there for crash days), target 150%, trailing after
+# +40% (give back 40%), reversal exit after +30%, 15:00 exit. Tuned on 1 Oct 2025 – 30 Sep
+# 2026: net ₹3,10,815 for 1 lot after charges, 117 trades, every month profitable.
+PRESETS["harmonic"] = {"strategy": "harmonic", "harm_fib": 0.58, "harm_zz": 0.25, "harm_tol": 0.06,
+                       "harm_itm": 400, "harm_skip_expiry": True, "entry_start": "09:30", "last_entry": "11:15",
+                       "sl_pct": 50, "target_pct": 150, "trail_start": 40, "trail_giveback": 40,
+                       "rev_exit": True, "ep_rev_activate": 30, "time_exit": "15:00", "max_trades": 1,
+                       "live": False, "strong_green": False, "stagnant_hours": 0, "breakeven_pct": 0}
 # SMC + EMA9/26 pullback as one strategy (combo.py): one trade a day — whichever signals first.
 PRESETS["smc_ema_combo"] = {"strategy": "combo"}
 KITE_OFFSETS = [0, -50, 50, -100, 100, -150, 150]

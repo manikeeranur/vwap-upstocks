@@ -86,7 +86,7 @@
   details { margin-top: 14px; } summary { cursor: pointer; color: var(--muted); font-weight: 600; }
   .bar { height: 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 999px; overflow: hidden; margin-top: 14px; }
   .bar div { height: 100%; width: 0; background: var(--accent); transition: width .3s; }
-  .res { font-weight: 700; } .res.SL { color: var(--pe); } .res.TARGET { color: var(--ok); } .res.EOD, .res.TIME_EXIT, .res.STAGNANT_EXIT, .res.REVERSAL { color: #b45309; }
+  .res { font-weight: 700; } .res.SL { color: var(--pe); } .res.TARGET { color: var(--ok); } .res.EOD, .res.TIME_EXIT, .res.STAGNANT_EXIT, .res.REVERSAL, .res.TRAIL { color: #b45309; }
   .up { color: var(--ok); } .down { color: var(--pe); } .small { font-size: 12px; color: var(--muted); }
   .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-top: 16px; }
   .summary div { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
@@ -113,6 +113,7 @@
           <option value="frontend_live" selected>VWAP 9:30</option>
           <option value="smc_live">SMC</option>
           <option value="smc_tuned">SMC Tuned</option>
+          <option value="harmonic">Harmonic</option>
           <option value="ema25_vwap">VWAP + EMA25 + SuperTrend</option>
           <option value="ema_pullback">EMA pullback</option>
           <option value="smc_ema_combo">SMC + EMA pullback (combined, 1 trade a day)</option>
@@ -205,6 +206,7 @@ const NUMS = ["min_premium", "max_premium", "sl_pct", "target_pct", "entry_start
 const BOOLS = ["live", "strong_green", "atm_offsets_only", "align_checkpoints", "include_entry_candle", "time_exit_first", "ema_cross", "any_strike_in_band", "supertrend", "index_trend", "trend_entry", "rev_exit"];
 const NOTES = {
   smc_live: "Liquidity, fair value gap, and order-block setups with EMA20 confirmation. Entries use the nearest eligible ATM option; the strategy exits at its stop-loss, target, or configured time.",
+  harmonic: "EXPIRY DAY: NO TRADES. Harmonic (Fibonacci pullback) on NIFTY 1-min swings (a swing counts once price reverses 0.25%): after a leg, price pulls back to the 0.58 Fib level (± 6% of the leg) and a candle closes back in the leg's direction → up-leg CE, down-leg PE, one trade a day 09:30–11:15, no trades on expiry days. Option 400 pts in the money, entry at the next minute's open. Safety stop-loss 50% (never hit in the tuning year — it guards against crash days); target 150%; trailing stop once +40% (gives back 40% of the gain); EMA9/26 reversal exit after +30%; 15:00 exit. Tuned on 1 Oct 2025 – 30 Sep 2026: net ₹3,10,815 for 1 lot after charges, 117 trades, every month profitable, max drawdown ₹37,664 — tuned on that same year, so expect less going forward. The rule fields below aren't used by this strategy except the dates.",
   smc_tuned: "The SMC engine (Liquidity Grab / FVG / Order Block / Breaker / SMT trap on NIFTY 1-min, ≥2 needed) tuned for one trade a day on 1 Apr – 30 Sep 2026: entries 09:32–12:00, strike within ±20 strikes of ATM in the ₹100–800 band (nearest ATM; within 50 pts → premium nearest ₹450), entry at the option's last 1-min close, SL 50%, target 120%, SL to entry at +25%, reversal exit after +35% (the EMA9/26 pattern: price up & OI down at a 5-min candle's peak minute, volume ≥ 1.5× median, upper wick ≥ 40%, fresh 30-min high → out at the next minute's open), max 1 trade a day, 15:15 exit. Backtest 1 Apr – 30 Sep: net ₹1,56,361 for 1 lot after charges, 98 trades, max drawdown ₹35,028 — tuned on that same period, so expect less going forward.",
   smc_ema_combo: "SMC and EMA9/26 pullback as one strategy, ONE trade a day, 1 lot: both scan, and whichever signals first is traded (the other's trade that day is skipped; a tie goes to SMC). Settings from a joint search on 1 Apr – 30 Sep 2026 — SMC: entries 09:32–14:59, ₹100–800, SL 50%, target 150%, SL to entry at +25%, reversal exit after +35%, 15:15 exit; EMA9/26: premium ₹200–<300, SL 50%, target 100%, rest as Mani's rules. Trades are tagged [SMC] / [EMA9/26]. The rule fields below don't apply here. Backtest 1 Apr – 30 Sep 2026: net ₹2,05,873 for 1 lot after charges, 123 trades — tuned on that same period, so expect less going forward.",
   ema_pullback: "EMA9 / EMA26 pullbacks on completed NIFTY candles, with option volume and open-interest confirmation. Enters at the next minute’s open; one trade per day, with reversal and time exits.",
@@ -227,7 +229,7 @@ function settings() {
   return s;
 }
 
-const label = { SL: "Stop-loss", TARGET: "Target", TIME_EXIT: "15:20 exit", STAGNANT_EXIT: "Stagnant", REVERSAL: "Reversal", EOD: "EOD" };
+const label = { SL: "Stop-loss", TARGET: "Target", TIME_EXIT: "15:20 exit", STAGNANT_EXIT: "Stagnant", REVERSAL: "Reversal", TRAIL: "Trailing stop", EOD: "EOD" };
 
 // Same formula as the frontend app's VWAP/SMC tables (calcCharges).
 function charges(entry, exit, qty) {
@@ -239,7 +241,7 @@ function charges(entry, exit, qty) {
 const inr = n => (n < 0 ? "−" : "+") + "₹" + Math.abs(n).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const lakh = n => (n < 0 ? "−" : "+") + "₹" + (Math.abs(n) >= 100000 ? (Math.abs(n) / 100000).toFixed(2) + "L" : Math.abs(n).toLocaleString("en-IN", { maximumFractionDigits: 0 }));
 const ampm = t => { if (!t) return "—"; let [h, m] = t.split(":").map(Number); const ap = h >= 12 ? "PM" : "AM"; h = h % 12 || 12; return `${h}:${String(m).padStart(2, "0")} ${ap}`; };
-const STATUS = { TARGET: ["", "TARGET", "up"], SL: ["", "SL", "down"], TIME_EXIT: ["", "TIME EXIT", ""], STAGNANT_EXIT: ["", "STAGNANT", ""], REVERSAL: ["", "REVERSAL", ""], EOD: ["", "EOD", ""] };
+const STATUS = { TARGET: ["", "TARGET", "up"], SL: ["", "SL", "down"], TIME_EXIT: ["", "TIME EXIT", ""], STAGNANT_EXIT: ["", "STAGNANT", ""], REVERSAL: ["", "REVERSAL", ""], TRAIL: ["", "TRAILING SL", ""], EOD: ["", "EOD", ""] };
 
 const CONCEPT_COLOR = { LiqGrab: "#7c3aed", FVG: "#0284c7", OrdBlock: "#b45309", Breaker: "#ea580c", SMTrap: "#e11d48" };
 const MONTHS = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
@@ -267,8 +269,9 @@ function render() {
     const exitP = t.entry + t.pnl, c = charges(t.entry, exitP, qty), lotPnl = t.pnl * qty;
     pts += t.pnl; chg += c;
     if (t.status === "TARGET") tgt++; else if (t.status === "SL") sl++; else eod++;
-    const win = t.status === "TARGET" || ((t.status === "TIME_EXIT" || t.status === "REVERSAL") && t.pnl >= 0);
-    const loss = t.status === "SL" || ((t.status === "TIME_EXIT" || t.status === "REVERSAL") && t.pnl < 0);
+    const soft = ["TIME_EXIT", "REVERSAL", "TRAIL"].includes(t.status);
+    const win = t.status === "TARGET" || (soft && t.pnl >= 0);
+    const loss = t.status === "SL" || (soft && t.pnl < 0);
     const bg = idx % 2 === 0 ? "var(--card)" : "var(--bg)";
     const stClr = win ? "#16a34a" : loss ? "#e11d48" : t.status === "EOD" ? "#b45309" : "#0284c7";
     const stLbl = { TIME_EXIT: "TIME EXIT", STAGNANT_EXIT: "STAGNANT" }[t.status] || t.status;

@@ -162,8 +162,8 @@ body .strat { padding:20px; } .strat.islive { border-color:var(--pe); }
 <script>
 const $ = id => document.getElementById(id);
 const LABELS = { ...{{ labels | tojson }}, ema25_vwap: "VWAP + EMA25", ema_pullback: "EMA pullback", smc_ema_combo: "SMC + EMA (1/day)" }, PRESETS = {{ presets | tojson }};
-const DESCRIPTIONS = { frontend_live:'Opening range · VWAP signals', smc_live:'Smart money concepts', ema25_vwap:'Trend confirmation · EMA25', ema_pullback:'Momentum pullback · EMA9 / EMA26', smc_tuned:'SMC · tuned, 1 trade a day', smc_ema_combo:'SMC or EMA pullback · first signal, 1 trade a day' };
-const STRATEGY_ICONS = ['M3 17l5-7 5 4 8-10M16 4h5v5','M4 8h16M4 16h16M8 4v8m8 0v8','M3 16l5-5 5 2 8-8M3 20h18','M3 8l5 7 5-4 4 3 4-9','M4 8h16M4 16h16M8 4v8m8 0v8M18 3l3 3-3 3','M4 7h7v10H4zM13 7h7v10h-7z'];
+const DESCRIPTIONS = { frontend_live:'Opening range · VWAP signals', smc_live:'Smart money concepts', ema25_vwap:'Trend confirmation · EMA25', ema_pullback:'Momentum pullback · EMA9 / EMA26', smc_tuned:'SMC · tuned, 1 trade a day', smc_ema_combo:'SMC or EMA pullback · first signal, 1 trade a day', harmonic:'0.58 Fib pullback · ITM-400 · 1 trade a day · no trades on expiry day' };
+const STRATEGY_ICONS = ['M3 17l5-7 5 4 8-10M16 4h5v5','M4 8h16M4 16h16M8 4v8m8 0v8','M3 16l5-5 5 2 8-8M3 20h18','M3 8l5 7 5-4 4 3 4-9','M4 8h16M4 16h16M8 4v8m8 0v8M18 3l3 3-3 3','M4 7h7v10H4zM13 7h7v10h-7z','M3 18l5-12 4 8 3-5 6 9'];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt = n => Number(n || 0).toFixed(2);
 const money = n => `${n < 0 ? '−' : ''}₹${Math.abs(Math.round(n)).toLocaleString('en-IN')}`;
@@ -240,8 +240,8 @@ async function refreshQuotes() {
 function tradeCard(t, qty) {
   const st = t.open ? 'OPEN' : t.status, pc = t.pnl >= 0 ? 'up' : 'down';
   const field = (label,value) => `<div><dt>${label}</dt><dd>${value}</dd></div>`;
-  return `<article class="trade-card"><div class="trade-card-head"><b style="color:${t.type === 'CE' ? 'var(--ce)' : 'var(--pe)'}">${esc(t.symbol)}</b><span class="st ${esc(st)}">${esc(st === 'TIME_EXIT' ? '15:20 EXIT' : st)}</span></div>
-    <dl>${field('Entry',`${ampm(t.entry_time)} · ₹${fmt(t.entry)}`)}${field(t.open ? 'Last price' : 'Exit',`${t.open ? '' : ampm(t.exit_time) + ' · '}${priceMarkup(t)}`)}${field('Stop-loss',`₹${fmt(t.sl)}`)}${field('Target',`₹${fmt(t.target)}`)}</dl>
+  return `<article class="trade-card"><div class="trade-card-head"><b style="color:${t.type === 'CE' ? 'var(--ce)' : 'var(--pe)'}">${esc(t.symbol)}</b><span class="st ${esc(st)}">${esc(st === 'TIME_EXIT' ? 'TIME EXIT' : st)}</span></div>
+    <dl>${field('Entry',`${ampm(t.entry_time)} · ₹${fmt(t.entry)}`)}${field(t.open ? 'Last price' : 'Exit',`${t.open ? '' : ampm(t.exit_time) + ' · '}${priceMarkup(t)}`)}${field('Stop-loss', t.sl > 0 ? `₹${fmt(t.sl)}` : 'None (trailing / time exit)')}${field('Target',`₹${fmt(t.target)}`)}</dl>
     <div class="trade-net"><span data-trade-points="${esc(t.id)}" data-unit=" pts" class="muted">${fmt(t.pnl)} pts</span><b data-trade-pnl="${esc(t.id)}" class="${pc}">${money(t.pnl * qty)}</b></div>
     ${t.orders?.buy || t.orders?.sell ? `<div class="ord">Live BUY: ${orderCell(t.orders.buy)}<br>Live SELL: ${orderCell(t.orders.sell)}</div>` : ''}</article>`;
 }
@@ -277,7 +277,7 @@ function render() {
       const qty = cfg.lots * state.lot_size, pts = trades.reduce((a,t) => a + t.pnl,0), open = trades.filter(t => t.open).length;
       const livePos = Object.entries(state.orders || {}).filter(([k,o]) => k.startsWith(p + '|') && o.buy?.order_id && !o.sell).length;
       const rows = trades.map((t,i) => { const st = t.open ? 'OPEN' : t.status, pc = t.pnl >= 0 ? 'up' : 'down';
-        return `<tr><td>${i+1}</td><td>${ampm(t.entry_time)}</td><td><b style="color:${t.type === 'CE' ? 'var(--ce)' : 'var(--pe)'}">${esc(t.symbol)}</b></td><td>₹${fmt(t.entry)}</td><td>₹${fmt(t.sl)}</td><td>₹${fmt(t.target)}</td><td class="st ${esc(st)}">${esc(st === 'TIME_EXIT' ? '15:20 EXIT' : st)}</td><td>${t.open ? '—' : ampm(t.exit_time)}</td><td>${priceMarkup(t)}</td><td data-trade-points="${esc(t.id)}" class="${pc}">${fmt(t.pnl)}</td><td class="${pc}"><b data-trade-pnl="${esc(t.id)}">${money(t.pnl * qty)}</b></td><td class="ord">${orderCell(t.orders?.buy)}</td><td class="ord">${orderCell(t.orders?.sell)}</td></tr>`;
+        return `<tr><td>${i+1}</td><td>${ampm(t.entry_time)}</td><td><b style="color:${t.type === 'CE' ? 'var(--ce)' : 'var(--pe)'}">${esc(t.symbol)}</b></td><td>₹${fmt(t.entry)}</td><td>₹${fmt(t.sl)}</td><td>₹${fmt(t.target)}</td><td class="st ${esc(st)}">${esc(st === 'TIME_EXIT' ? 'TIME EXIT' : st)}</td><td>${t.open ? '—' : ampm(t.exit_time)}</td><td>${priceMarkup(t)}</td><td data-trade-points="${esc(t.id)}" class="${pc}">${fmt(t.pnl)}</td><td class="${pc}"><b data-trade-pnl="${esc(t.id)}">${money(t.pnl * qty)}</b></td><td class="ord">${orderCell(t.orders?.buy)}</td><td class="ord">${orderCell(t.orders?.sell)}</td></tr>`;
       }).join('');
       return `<section class="card strat ${cfg.live ? 'islive' : ''}" aria-label="${esc(LABELS[p])}">
         <div class="strategy-top"><div class="strategy-title"><span class="strategy-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="${STRATEGY_ICONS[index]}"/></svg></span><div><h3>${esc(LABELS[p])}</h3><p>${DESCRIPTIONS[p]}</p></div></div><div class="strategy-pnl"><span class="pnl-label">P&amp;L</span><b data-strategy-pnl="${p}" class="${pts >= 0 ? 'up' : 'down'}">${view.day ? money(pts * qty) : '—'}</b><small>${trades.length} trades${open ? ` · ${open} open` : ''}</small></div></div>

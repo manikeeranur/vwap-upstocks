@@ -115,8 +115,8 @@ def build(days: list[dict], *, title: str, subtitle: str, lots: int, lot_size: i
         tgt += st == "TARGET"
         sl += st == "SL"
         eod += st not in ("TARGET", "SL")
-        win = st == "TARGET" or (st in ("TIME_EXIT", "REVERSAL") and pnl >= 0)
-        loss = st == "SL" or (st in ("TIME_EXIT", "REVERSAL") and pnl < 0)
+        win = st == "TARGET" or (st in ("TIME_EXIT", "REVERSAL", "TRAIL") and pnl >= 0)
+        loss = st == "SL" or (st in ("TIME_EXIT", "REVERSAL", "TRAIL") and pnl < 0)
         tints.append("#f0fdf4" if win else "#fff5f5" if loss else "#fefce8" if st == "EOD" else ("#ffffff" if i % 2 == 0 else "#fafafa"))
         st_clr = UP if win else DOWN if loss else AMBER if st == "EOD" else CE_C
         dir_c = CE_C if t["type"] == "CE" else PE_C

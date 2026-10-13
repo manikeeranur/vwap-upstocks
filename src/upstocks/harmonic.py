@@ -1,0 +1,174 @@
+"""Harmonic (Fibonacci pullback) — "Harmonic B-Pro", one trade a day.
+
+- NIFTY 1-min candles (previous session + today) → zigzag swings: a swing high/low
+  counts only once price has reversed harm_zz % from it (no look-ahead).
+- Last confirmed leg P1→P2. Up-leg: once price has pulled back to within harm_tol
+  of the leg around P2 − harm_fib·leg and a green candle closes back above that
+  level (close ≥ previous close), with price never below P1 → CE. Down-leg mirrored
+  → PE. Signals from entry_start to last_entry; skipped on expiry days.
+- Option harm_itm points in the money (CE ATM−400 / PE ATM+400), nearest expiry,
+  entry at the next minute's open.
+- Exits: SL sl_pct % (preset 50 % — a safety stop for crash days; it was never hit in the
+  tuning year), target target_pct %, trailing stop once the
+  high reached +trail_start % (give back trail_giveback % of the gain), the
+  EMA9/26 pullback's reversal exit once +ep_rev_activate % (out at the next
+  minute's open), time exit at time_exit (at that minute's open).
+
+Tuned 2026-10-13 on 1 Oct 2025 – 30 Sep 2026 (1 lot, after charges): net ₹3,10,815,
+117 trades, 81 wins, every month profitable, max drawdown ₹37,664.
+"""
+from __future__ import annotations
+
+from datetime import date
+
+from . import upstox
+from .ema_pullback import _bars_oi, reversal
+from .vwap import DayResult, Settings, Trade, _add, _mins, _nearest_expiry, _round2, span_rows
+
+
+def zigzag(cs: list, pct: float) -> list:
+    """Pivots (index of the extreme, price, 'H'/'L', index where it got confirmed)."""
+    piv, trend = [], 0
+    hi_i, hi_p, lo_i, lo_p = 0, cs[0][2], 0, cs[0][3]
+    ext_i = ext_p = None
+    for i, c in enumerate(cs):
+        if trend == 0:
+            if c[2] > hi_p:
+                hi_i, hi_p = i, c[2]
+            if c[3] < lo_p:
+                lo_i, lo_p = i, c[3]
+            if hi_p >= lo_p * (1 + pct / 100):
+                if lo_i < hi_i:
+                    piv.append((lo_i, lo_p, "L", i)); trend, ext_i, ext_p = 1, hi_i, hi_p
+                else:
+                    piv.append((hi_i, hi_p, "H", i)); trend, ext_i, ext_p = -1, lo_i, lo_p
+        elif trend == 1:
+            if c[2] >= ext_p:
+                ext_i, ext_p = i, c[2]
+            elif c[3] <= ext_p * (1 - pct / 100):
+                piv.append((ext_i, ext_p, "H", i)); trend, ext_i, ext_p = -1, i, c[3]
+        else:
+            if c[3] <= ext_p:
+                ext_i, ext_p = i, c[3]
+            elif c[2] >= ext_p * (1 + pct / 100):
+                piv.append((ext_i, ext_p, "L", i)); trend, ext_i, ext_p = 1, i, c[2]
+    return piv
+
+
+def first_signal(cs: list, piv: list, fib: float, tol: float, i0: int, start_t: str, last_t: str):
+    """(candle index, 'CE'/'PE', leg) of the first pullback signal in [start_t, last_t], or None."""
+    for i in range(i0, len(cs)):
+        c, pc = cs[i], cs[i - 1]
+        if c[0] < start_t:
+            continue
+        if c[0] > last_t:
+            return None
+        conf = [p for p in piv if p[3] <= i]
+        if len(conf) < 2:
+            continue
+        p1, p2 = conf[-2], conf[-1]
+        leg = abs(p2[1] - p1[1])
+        win = cs[p2[3]:i + 1]
+        if p2[2] == "H":
+            lvl = p2[1] - fib * leg
+            if any(x[3] <= lvl + tol * leg for x in win[:-1]) and min(x[3] for x in win) > p1[1] \
+                    and c[4] > lvl and c[4] > c[1] and c[4] >= pc[4]:
+                return i, "CE", (p1[1], p2[1])
+        else:
+            lvl = p2[1] + fib * leg
+            if any(x[2] >= lvl - tol * leg for x in win[:-1]) and max(x[2] for x in win) < p1[1] \
+                    and c[4] < lvl and c[4] < c[1] and c[4] <= pc[4]:
+                return i, "PE", (p1[1], p2[1])
+    return None
+
+
+def resolve(ob: list, ei: int, mark: str, s: Settings):
+    """Walk the option's minutes from the entry minute: (status, exit price, exit minute, peak gain, trailed)."""
+    entry = ob[ei][1]
+    sl0 = entry * (1 - s.sl_pct / 100)
+    sl, tg = sl0, entry * (1 + s.target_pct / 100)
+    armed = pending = False
+    peak, by_t = entry, None
+    for k in range(ei, len(ob)):
+        t, o, h, l = ob[k][:4]
+        if t >= s.time_exit:
+            return "TIME_EXIT", o, t, peak - entry, sl > sl0
+        if pending:
+            return "REVERSAL", o, t, peak - entry, sl > sl0
+        if l <= sl:
+            return ("TRAIL" if sl > sl0 else "SL"), min(sl, o), t, peak - entry, sl > sl0
+        if h >= tg:
+            return "TARGET", max(tg, o), t, peak - entry, sl > sl0
+        peak = max(peak, h)
+        if s.trail_start and peak >= entry * (1 + s.trail_start / 100):
+            sl = max(sl, peak - (peak - entry) * s.trail_giveback / 100)
+        if s.rev_exit:
+            armed = armed or h >= entry * (1 + s.ep_rev_activate / 100)
+            # a clock 5-min candle formed wholly from the entry minute on completes now
+            if armed and (_mins(t) - 555) % 5 == 4 and k >= 4 and ob[k - 4][0] == _add(t, -4) and ob[k - 4][0] >= mark:
+                by_t = by_t or {b[0]: b for b in ob}
+                if reversal(ob, by_t, k - 4):
+                    pending = True
+    return "EOD", ob[-1][4], ob[-1][0], peak - entry, sl > sl0
+
+
+async def run_day(day: date, s: Settings, spot_bars: list, prev_spot: list | None = None) -> DayResult:
+    expiry = await _nearest_expiry(day)
+    res = DayResult(day.isoformat(), expiry)
+    if not expiry:
+        res.note = "no expiry"
+        return res
+    d = day.isoformat()
+    if s.harm_skip_expiry and expiry == d:
+        res.note = "expiry day — no harmonic trade"
+        return res
+    prev = list(prev_spot or [])
+    if not prev:  # backtests pass only today's bars: fetch the previous session for the swings
+        days = await vwap_days(day)
+        prev = days
+    cs = prev + list(spot_bars)
+    if len(cs) < 3:
+        res.note = "not enough NIFTY candles"
+        return res
+    sig = first_signal(cs, zigzag(cs, s.harm_zz), s.harm_fib, s.harm_tol, len(prev) + 1, s.entry_start, s.last_entry)
+    if not sig:
+        res.note = f"no {s.harm_fib:g} Fib pullback signal {s.entry_start}–{s.last_entry}"
+        return res
+    i, side, (p1, p2) = sig
+    t, spot = cs[i][0], cs[i][4]
+    atm = round(spot / 50) * 50
+    strike = atm - s.harm_itm if side == "CE" else atm + s.harm_itm
+    expired = expiry in set(await upstox.expired_expiries())
+    c = next((c for c in await upstox.contracts(expiry)
+              if c["strike_price"] == strike and c["instrument_type"] == side), None)
+    if not c:
+        res.note = f"no {strike:g} {side} contract"
+        return res
+    ob = _bars_oi(await span_rows(c["instrument_key"], day, expiry, expired), d)
+    mark = _add(t, 1)
+    ei = next((k for k, b in enumerate(ob) if b[0] >= mark), -1)
+    if ei < 0:
+        res.note = f"no {strike:g} {side} candle at {mark}"
+        return res
+    entry = ob[ei][1]
+    status, exit_p, exit_t, peak, trailed = resolve(ob, ei, mark, s)
+    pnl = _round2(exit_p - entry)
+    res.trades.append(Trade(
+        date=d, expiry=expiry, symbol=c["trading_symbol"], strike=c["strike_price"], type=side,
+        instrument_key=c["instrument_key"], entry_time=ob[ei][0], entry=_round2(entry),
+        sl=_round2(entry * (1 - s.sl_pct / 100)), target=_round2(entry * (1 + s.target_pct / 100)),
+        candle=f"{t}–{mark}", close=spot, vwap=0.0,
+        other=f"leg {p1:.2f} → {p2:.2f}", status=status, exit_time=exit_t, exit=_round2(exit_p), pnl=pnl,
+        pnl_pct=_round2(pnl / entry * 100), peak=_round2(peak), sl_to_breakeven=trailed, spot=spot,
+        why=f"{s.harm_fib:g} Fib pullback · leg {p1:.0f}→{p2:.0f} · ITM {s.harm_itm:g}",
+    ))
+    return res
+
+
+async def vwap_days(day: date) -> list:
+    """The previous session's NIFTY 1-min bars (for the zigzag), from the cached span."""
+    from datetime import timedelta
+    from . import vwap
+    spot = await vwap.trading_days_and_spot(day - timedelta(days=10), day)
+    keys = [k for k in sorted(spot) if k < day.isoformat()]
+    return spot[keys[-1]] if keys else []

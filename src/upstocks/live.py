@@ -2,14 +2,14 @@
 from dataclasses import replace
 from datetime import date, datetime, timedelta
 
-from . import combo, ema_pullback, smc, upstox, vwap
+from . import combo, ema_pullback, harmonic, smc, upstox, vwap
 
-PRESETS = ["frontend_live", "smc_live", "ema25_vwap", "ema_pullback", "smc_tuned", "smc_ema_combo"]
+PRESETS = ["frontend_live", "smc_live", "ema25_vwap", "ema_pullback", "smc_tuned", "smc_ema_combo", "harmonic"]
 
 
 LABELS = {"frontend_live": "VWAP 9:30", "smc_live": "SMC", "ema25_vwap": "VWAP + EMA25 + SuperTrend",
           "ema_pullback": "EMA9/EMA26 pullback (Mani)", "smc_tuned": "SMC Tuned",
-          "smc_ema_combo": "SMC + EMA pullback (1 trade a day)"}
+          "smc_ema_combo": "SMC + EMA pullback (1 trade a day)", "harmonic": "Harmonic"}
 
 
 FRESH_MIN = 3
@@ -47,6 +47,8 @@ async def run_engine(preset: str, day: date) -> list[dict] | None:
         res = await ema_pullback.run_day(day, st, spot[d])
     elif st.strategy == "combo":
         res = await combo.run_day(day, st, spot[d])
+    elif st.strategy == "harmonic":
+        res = await harmonic.run_day(day, st, spot[d], prev)
     else:
         res = await vwap.run_day(day, st, spot[d], prev)
     return [vwap.trade_dict(t) for t in res.trades]

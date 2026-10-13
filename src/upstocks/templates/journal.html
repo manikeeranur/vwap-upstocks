@@ -155,7 +155,7 @@ function render() {
         const mode = t.live ? "live" : "paper";
         return `<tr><td>${t.date}</td><td>${ampm(t.entry_time)} → ${t.open ? "…" : ampm(t.exit_time)}</td>
           <td><b style="color:${t.type === "CE" ? "var(--ce)" : "var(--pe)"}">${t.symbol}</b></td><td>₹${fmt(t.entry)}</td><td>₹${fmt(t.exit)}</td>
-          <td class="st ${st}">${st === "TIME_EXIT" ? "15:20 EXIT" : st}</td><td class="${pc}">${t.pnl >= 0 ? "+" : ""}${fmt(t.pnl)}</td>
+          <td class="st ${st}">${st === "TIME_EXIT" ? "TIME EXIT" : st}</td><td class="${pc}">${t.pnl >= 0 ? "+" : ""}${fmt(t.pnl)}</td>
           <td class="${pc}">${money(t.rs)}</td><td><span class="badge ${mode}">${mode}</span></td>
           <td class="note"><input type="text" data-id="${esc(t.id)}" value="${esc(J.notes[t.id] || "")}" aria-label="Note for ${esc(t.symbol)} on ${esc(t.date)}" placeholder="Add a note…"></td></tr>`;
       }).join("") || `<tr><td class="muted" colspan="10">No trades in this range.</td></tr>`}</tbody></table></div></div>`;
