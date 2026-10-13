@@ -74,6 +74,13 @@
     table.rt tbody tr:hover td { background: #111a2e !important; } .ink { color: #e2e8f0; }
   }
   @media (max-width: 900px) { .foot { grid-template-columns: repeat(2, 1fr); } .foot .netcell { grid-column: span 2; } }
+  /* Results summary: one compact row (scrolls sideways on narrow screens) */
+  body .foot.oneline { display: flex; overflow-x: auto; grid-template-columns: none; }
+  body .foot.oneline > div { flex: 1 0 auto; padding: 8px 12px; min-width: 0; white-space: nowrap; grid-column: auto; }
+  body .foot.oneline .lbl { font-size: 9px; letter-spacing: .8px; }
+  body .foot.oneline b { font-size: 15px; margin-top: 2px; overflow-wrap: normal; }
+  body .foot.oneline .netcell b { font-size: 17px; }
+  body .foot.oneline .sub { display: none; }
   input[type=number], input[type=time] { font: inherit; font-size: 14px; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 9px 10px; }
   .grid { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
   .config-primary { grid-template-columns:2fr 1fr 1fr; }
@@ -313,7 +320,7 @@ function render() {
   $("tblwrap").hidden = !trades.length;
   const closed = tgt + sl, lotTotal = pts * qty;
   const net = lotTotal - chg, nc = net >= 0 ? "c-up" : "c-down";
-  $("summary").innerHTML = trades.length ? `<div class="foot">
+  $("summary").innerHTML = trades.length ? `<div class="foot oneline">
     <div><span class="lbl">Total trades</span><b class="ink">${trades.length}</b></div>
     <div><span class="lbl">Target hit</span><b class="c-up">${tgt}</b></div>
     <div><span class="lbl">SL hit</span><b class="c-down">${sl}</b></div>
