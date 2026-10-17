@@ -103,6 +103,7 @@ _WINDOWS = ((60.0, 450), (1800.0, 1900))
 _rate_lock = asyncio.Lock()
 _last_start = 0.0
 _starts: deque[float] = deque()
+throttled_until = 0.0  # wall-clock time a rate-limit pause ends (shown to the user)
 
 # LTP has its own per-API limit. One batched request/second stays below the
 # documented 2,000/30min budget without consuming the candle/order limiter.
@@ -175,6 +176,9 @@ async def _throttle() -> None:
                     wait = max(wait, in_win[0] + span - now + 0.05)
             if wait <= 0:
                 break
+            if wait > 2:
+                global throttled_until
+                throttled_until = time.time() + wait
             await asyncio.sleep(min(wait, 5.0))
         _last_start = time.monotonic()
         _starts.append(_last_start)
@@ -346,6 +350,23 @@ async def _fetch_candles(instrument_key: str, interval: str, start: date, end: d
         seen.add(r[0])
         out.append(r)
     return out
+
+
+async def daily_history(instrument_key: str, start: date, end: date) -> list[list]:
+    """Uncached daily candles oldest-first, one request per ≤10 years (the
+    v3 limit for day candles). Equity prices come split/bonus-adjusted."""
+    key = quote(instrument_key, safe="")
+    rows, cur = [], start
+    while cur <= end:
+        try:
+            ten_years = cur.replace(year=cur.year + 10) - timedelta(days=1)
+        except ValueError:  # 29 Feb
+            ten_years = cur.replace(year=cur.year + 10, day=28) - timedelta(days=1)
+        stop = min(ten_years, end)
+        d = await _get(f"/v3/historical-candle/{key}/days/1/{stop}/{cur}")
+        rows += d["data"]["candles"]
+        cur = stop + timedelta(days=1)
+    return sorted({r[0]: r for r in rows}.values(), key=lambda r: r[0])
 
 
 # ─── Orders (live auto-trade) ─────────────────────────────────────────────────

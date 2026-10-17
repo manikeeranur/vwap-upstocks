@@ -11,7 +11,7 @@ import httpx
 import uvicorn
 
 from . import upstox
-from .api import market, operations, pages, research, trading
+from .api import market, momentum, operations, pages, research, trading
 from .config import AppSettings
 from .database import Database, ProcessLock
 from .middleware import RequestLoggingMiddleware
@@ -19,6 +19,7 @@ from .observability import SERVER_LOG_CONFIG, close_logging, configure_logging, 
 from .repository import ConfigurationConflict, Repository
 from .security import DashboardGuard
 from .services.backtests import BacktestService
+from .services.momentum import MomentumService
 from .services.trading import TradingService
 from .services.quotes import QuoteService
 
@@ -33,7 +34,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         lock = ProcessLock(settings.database_path)
         lock.acquire()
         handlers = []
-        trading_service = backtests = quotes = None
+        trading_service = backtests = quotes = momentum_service = None
         app.state.ready = False
         try:
             handlers = configure_logging(settings)
@@ -55,6 +56,8 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
             quotes = QuoteService(trading_service)
             app.state.quotes = quotes
             app.state.backtests = backtests
+            momentum_service = MomentumService(settings.cache_dir, settings.database_path.parent / "momentum_last.json")
+            app.state.momentum = momentum_service
             if settings.scanner_enabled:
                 trading_service.start()
             app.state.ready = True
@@ -73,6 +76,8 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
                     await quotes.stop()
                 if backtests:
                     await backtests.stop()
+                if momentum_service:
+                    await momentum_service.stop()
                 await upstox.close()
                 if trading_service:
                     await asyncio.to_thread(trading_service.repository.event, "shutdown", "Application stopped")
@@ -86,7 +91,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     app.state.ready = False
     app.add_middleware(DashboardGuard, allowed_hosts=settings.allowed_hosts)
     app.add_middleware(RequestLoggingMiddleware)
-    for router in (pages.router, trading.router, market.router, research.router, operations.router):
+    for router in (pages.router, trading.router, market.router, research.router, momentum.router, operations.router):
         app.include_router(router)
 
     @app.exception_handler(ConfigurationConflict)

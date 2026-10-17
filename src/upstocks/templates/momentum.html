@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>upstocks — Momentum rotation</title>
+{% include "_style.html" %}
+<style>
+  :root { --s1:#2a78d6; --s2:#eb6834; }
+  @media (prefers-color-scheme: dark) { :root { --s1:#3987e5; --s2:#d95926; } }
+  .stack { display:grid; gap:20px; margin-top:20px; }
+  .bar { height:8px; background:var(--surface); border:1px solid var(--border); border-radius:999px; overflow:hidden; margin-top:14px; }
+  .bar div { height:100%; width:0; background:var(--accent); transition:width .3s; }
+  .bar.indef div { width:30%; animation:slide 1.2s ease-in-out infinite; }
+  @keyframes slide { from { margin-left:-30%; } to { margin-left:100%; } }
+  .kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(112px,1fr)); gap:10px; }
+  .kpis div { border:1px solid var(--border); border-radius:9px; padding:12px 14px; background:var(--card); }
+  .kpis span { color:var(--muted); font-size:11px; } .kpis b { display:block; font-size:19px; font-weight:600; letter-spacing:-.4px; margin-top:2px; }
+  .kpis small { color:var(--muted); font-size:11px; }
+  .legend { display:flex; flex-wrap:wrap; gap:6px 18px; font-size:12px; color:var(--muted); margin-bottom:8px; min-height:20px; }
+  .legend i { display:inline-block; width:16px; border-top:2px solid; vertical-align:middle; margin-right:6px; }
+  .legend b { color:var(--text); font-weight:600; margin-left:4px; }
+  .chart { height:340px; position:relative; } .chart.dd { height:150px; }
+  .chart table { margin:0 !important; width:auto !important; font-size:inherit; border-collapse:separate; }
+  .chart td, .chart th { padding:0 !important; border:0 !important; background:none !important; }
+  table.heat td { text-align:center; padding:8px 6px; font-size:11.5px; min-width:58px; border:2px solid var(--card); }
+  table.heat th { text-align:center; } table.heat td:first-child, table.heat th:first-child { text-align:left; font-weight:600; }
+  table.heat td.yr { font-weight:600; border-left:2px solid var(--border); }
+  .pill { display:inline-block; font-size:11px; padding:2px 7px; border-radius:5px; background:var(--surface); margin:2px 4px 2px 0; white-space:nowrap; }
+  .pill.buy { background:var(--accent-soft); color:var(--ok); } .pill.sell { background:color-mix(in srgb,var(--pe) 12%,transparent); color:var(--pe); }
+  td.wrap { white-space:normal; text-align:left; min-width:240px; }
+  .note { margin-top:14px; padding:12px 14px; border:1px solid var(--border); border-radius:8px; background:var(--surface); color:var(--muted); font-size:12px; line-height:1.7; }
+  .tabs { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:14px; }
+  .flag { font-size:11px; color:var(--muted); }
+  .scroll.tall { max-height:520px; overflow:auto; }
+  .scroll.tall thead th { position:sticky; top:0; z-index:1; }
+  .l { text-align:left !important; }
+  table.heat td.strong { color:#fff; }
+  @media (prefers-color-scheme: dark) { table.heat td.strong { color:#0b0b0b; } }
+  .seg.mini { min-height:32px; display:inline-flex; } .seg.mini button { padding:3px 10px; }
+</style>
+</head>
+<body>
+{% set active = "momentum" %}{% include "_nav.html" %}
+<main id="main" tabindex="-1">
+  <h1>Momentum rotation</h1>
+  <p class="sub">NSE equities, rebalanced every month end. Ranks the 500 most-traded stocks by risk-adjusted 6- and 12-month return, holds the top N.</p>
+  {% include "_research_nav.html" %}
+
+  <div class="card">
+    <div class="card-title"><h2>Backtest configuration</h2><span>NSE EQ · daily · Upstox</span></div>
+    <div class="grid">
+      <label>From <input type="date" id="start" value="{{ start }}" min="2001-01-01"></label>
+      <label>To <input type="date" id="end" value="{{ end }}"></label>
+      <label>Capital ₹ <input type="number" id="capital" value="1000000" min="10000" step="10000"></label>
+      <label>Slots (N) <input type="number" id="slots" value="1" min="1" max="50" step="1"></label>
+    </div>
+    <details>
+      <summary>Rule parameters</summary>
+      <div class="grid" style="margin-top:16px">
+        <label>Universe (top by turnover) <input type="number" id="universe" value="500" min="20" max="2000" step="10"></label>
+        <label>Sell if rank worse than <input type="number" id="exit_rank" value="20" min="1" max="2000" step="1"></label>
+        <label>Moving average (days) <input type="number" id="sma_days" value="100" min="10" max="250" step="1"></label>
+        <label>Cost per buy / sell % <input type="number" id="cost_pct" value="0.1" min="0" max="5" step="0.05"></label>
+      </div>
+    </details>
+    <div class="row">
+      <button class="btn primary" id="run" type="button">Run backtest</button>
+      <label class="check"><input type="checkbox" id="refresh_all"> Update prices for every stock</label>
+      <span class="small" id="status" role="status" aria-live="polite"></span>
+    </div>
+    <div class="bar" id="bar" hidden><div></div></div>
+    <p class="note">The first run downloads daily prices for every NSE EQ company share (~2,350 Upstox requests; ETFs are excluded); Upstox allows about 2,000 every 30 minutes, so expect 30–45 minutes. Prices are cached, and later runs only fetch new days. While the market is open, downloads are slowed so the live scanner keeps its share of the API.<br>
+    Uses stocks <b>listed today</b> — companies that delisted or merged are missing, which flatters past results (survivorship bias). Decisions use month-end closes; orders fill at the next open. Data runs up to yesterday's close.</p>
+  </div>
+
+  <div id="results" hidden>
+    <div class="stack">
+      <section class="card" aria-labelledby="perf-h">
+        <div class="card-title"><h2 id="perf-h">Performance</h2><span id="perfMeta"></span></div>
+        <div class="kpis" id="kpis"></div>
+      </section>
+
+      <section class="card" aria-labelledby="eq-h">
+        <div class="card-title"><h2 id="eq-h">Portfolio value</h2>
+          <div class="seg mini" role="group" aria-label="Scale"><button type="button" class="on" data-scale="0">Linear</button><button type="button" data-scale="1">Log</button></div></div>
+        <div class="legend" id="eqLegend"></div>
+        <div class="chart" id="eqChart" role="img" aria-label="Portfolio value against NIFTY 50"></div>
+        <div class="legend" id="ddLegend" style="margin-top:18px"></div>
+        <div class="chart dd" id="ddChart" role="img" aria-label="Drawdown from peak"></div>
+      </section>
+
+      <section class="card" aria-labelledby="mo-h">
+        <div class="card-title"><h2 id="mo-h">Monthly returns</h2><span>% change in portfolio value</span></div>
+        <div class="scroll"><table class="heat" id="heat"></table></div>
+      </section>
+
+      <section class="card" aria-labelledby="now-h">
+        <div class="card-title"><h2 id="now-h">Now</h2><span id="nowMeta"></span></div>
+        <div id="nowNote" class="small" style="margin-bottom:12px"></div>
+        <h3 style="font-size:13px;margin:0 0 4px">Holdings at the end of the backtest</h3>
+        <div class="scroll"><table id="holdings"></table></div>
+        <h3 style="font-size:13px;margin:24px 0 4px">Ranking <span class="flag" id="rankDate"></span></h3>
+        <div class="scroll tall"><table id="ranking"></table></div>
+      </section>
+
+      <section class="card" aria-labelledby="log-h">
+        <div class="card-title"><h2 id="log-h">Month-end decisions</h2><span id="logMeta"></span></div>
+        <div class="scroll tall"><table id="months"></table></div>
+      </section>
+
+      <section class="card" aria-labelledby="tr-h">
+        <div class="card-title"><h2 id="tr-h">Closed trades</h2><a class="btn ghost" href="/api/momentum/trades.csv">Download CSV</a></div>
+        <div class="scroll tall"><table id="trades"></table></div>
+      </section>
+    </div>
+  </div>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const inr = (n, d = 0) => n == null ? '—' : '₹' + Number(n).toLocaleString('en-IN', {maximumFractionDigits: d, minimumFractionDigits: d});
+const pct = (n, d = 1) => n == null ? '—' : `${n > 0 ? '+' : ''}${Number(n).toFixed(d)}%`;
+const at = (d, t) => d ? `${d} <span class="flag">${t || ''}</span>` : '—';
+const cls = n => n > 0 ? 'up' : n < 0 ? 'down' : '';
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+let timer = null, charts = [], result = null;
+
+function body() {
+  const n = id => Number($(id).value);
+  return { start: $('start').value, end: $('end').value, capital: n('capital'), slots: n('slots'), universe: n('universe'),
+           exit_rank: n('exit_rank'), sma_days: n('sma_days'), cost_pct: n('cost_pct'), refresh_all: $('refresh_all').checked };
+}
+
+function showJob(j) {
+  const running = j.status === 'running';
+  $('run').disabled = running;
+  $('bar').hidden = !running;
+  $('bar').classList.toggle('indef', running && !j.total);
+  $('bar').firstElementChild.style.width = j.total ? `${(j.done / j.total * 100).toFixed(1)}%` : '';
+  if (running) {
+    const n = j.total ? ` · ${j.done.toLocaleString('en-IN')} / ${j.total.toLocaleString('en-IN')}` : '';
+    const failed = j.failed?.length ? ` · ${j.failed.length} failed` : '';
+    const wait = j.waiting_until ? ` · paused for the Upstox rate limit, resumes about ${j.waiting_until} IST` : '';
+    $('status').textContent = `${j.phase}${n}${failed}${wait}`;
+  } else if (j.status === 'error') {
+    $('status').innerHTML = `<span class="err">${esc(j.error)}</span>`;
+  } else if (j.status === 'done') {
+    $('status').textContent = '';
+  }
+}
+
+async function poll() {
+  const j = await appFetch('/api/momentum/job').then(r => r.json()).catch(() => null);
+  if (!j) return;
+  showJob(j);
+  if (j.status !== 'running') {
+    clearInterval(timer); timer = null;
+    if (j.status === 'done') await loadResult();
+  }
+}
+
+async function run() {
+  $('status').textContent = 'Starting…';
+  const r = await appFetch('/api/momentum/run', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body()) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { $('status').innerHTML = `<span class="err">${esc(j.detail || r.statusText)}</span>`; return; }
+  showJob(j);
+  if (!timer) timer = setInterval(poll, 1500);
+}
+$('run').addEventListener('click', run);
+
+async function loadResult() {
+  const r = await appFetch('/api/momentum/result');
+  if (!r.ok) return;
+  result = await r.json();
+  render(result);
+}
+
+function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+
+function render(res) {
+  $('results').hidden = false;
+  const s = res.stats, st = res.settings;
+  ['start','capital','universe','exit_rank','sma_days','cost_pct'].forEach(k => { if (st[k] != null) $(k).value = st[k]; });
+  $('perfMeta').textContent = `${st.start} → ${res.data?.through || st.end} · ${st.slots} slots · ${inr(st.capital)} start`;
+  const k = (label, val, sub = '', c = '') => `<div><span>${label}</span><b class="${c}">${val}</b><small>${sub}</small></div>`;
+  $('kpis').innerHTML = [
+    k('Final value', inr(s.final), `${pct(s.total)} total`, cls(s.total)),
+    k('CAGR', pct(s.cagr), `NIFTY 50 ${pct(s.bench_cagr)}`, cls(s.cagr)),
+    k('Max drawdown', pct(s.max_dd), `NIFTY 50 ${pct(s.bench_max_dd)}`, 'down'),
+    k('Volatility', pct(s.vol).replace('+', ''), 'annualised'),
+    k('Sharpe', s.sharpe?.toFixed(2) ?? '—', 'risk-free 0'),
+    k('Closed trades', s.trades.toLocaleString('en-IN'), `${pct(s.win_rate).replace('+', '')} winners`),
+    k('Avg holding', s.avg_days == null ? '—' : `${s.avg_days} days`, 'calendar days'),
+    k('Costs paid', inr(s.costs), `${st.cost_pct}% per side`),
+  ].join('');
+  drawCharts(res);
+  heatmap(res.monthly);
+  now(res);
+  monthsTable(res.months);
+  tradesTable(res.trades);
+  const d = res.data;
+  if (d) $('logMeta').textContent = `${d.stocks.toLocaleString('en-IN')} stocks · ${d.downloaded.toLocaleString('en-IN')} updated this run${d.failed ? ` · ${d.failed} failed` : ''}`;
+}
+
+function drawCharts(res) {
+  charts.forEach(c => c.remove()); charts = [];
+  const text = css('--muted'), grid = css('--border'), s1 = css('--s1'), s2 = css('--s2'), down = css('--pe');
+  const base = el => LightweightCharts.createChart(el, {
+    autoSize: true, layout: { background: { color: 'transparent' }, textColor: text, fontFamily: css('--font') },
+    grid: { vertLines: { visible: false }, horzLines: { color: grid } },
+    rightPriceScale: { borderVisible: false }, timeScale: { borderVisible: false },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Magnet }, handleScroll: false, handleScale: false,
+    localization: { priceFormatter: p => '₹' + Math.round(p).toLocaleString('en-IN') },
+  });
+  const eq = base($('eqChart'));
+  const pts = rows => rows.map(([t, v]) => ({ time: t, value: v }));
+  const strat = eq.addLineSeries({ color: s1, lineWidth: 2, priceLineVisible: false, lastValueVisible: true, title: 'Strategy' });
+  strat.setData(pts(res.equity));
+  let bench = null;
+  if (res.benchmark) {
+    bench = eq.addLineSeries({ color: s2, lineWidth: 2, priceLineVisible: false, lastValueVisible: true, title: 'NIFTY 50' });
+    bench.setData(pts(res.benchmark));
+  }
+  eq.timeScale().fitContent();
+  const last = { s: res.equity.at(-1), b: res.benchmark?.at(-1) };
+  const legend = (sv, bv, date) => {
+    $('eqLegend').innerHTML = `<span><i style="border-color:${s1}"></i>Strategy<b>${inr(sv)}</b></span>` +
+      (bench ? `<span><i style="border-color:${s2}"></i>NIFTY 50 (same capital)<b>${inr(bv)}</b></span>` : '') +
+      `<span>${esc(date)}</span>`;
+  };
+  legend(last.s?.[1], last.b?.[1], last.s?.[0]);
+  eq.subscribeCrosshairMove(p => {
+    if (!p.time) return legend(last.s?.[1], last.b?.[1], last.s?.[0]);
+    legend(p.seriesData.get(strat)?.value, bench && p.seriesData.get(bench)?.value, p.time);
+  });
+
+  // Drawdown from the running peak.
+  let peak = -Infinity;
+  const dd = res.equity.map(([t, v]) => { peak = Math.max(peak, v); return { time: t, value: +((v / peak - 1) * 100).toFixed(2) }; });
+  const ddc = base($('ddChart'));
+  ddc.applyOptions({ localization: { priceFormatter: p => p.toFixed(1) + '%' } });
+  const dds = ddc.addAreaSeries({ lineColor: down, topColor: down + '10', bottomColor: down + '55', lineWidth: 2, priceLineVisible: false, invertFilledArea: true });
+  dds.setData(dd);
+  ddc.timeScale().fitContent();
+  const worst = dd.reduce((a, b) => b.value < a.value ? b : a, dd[0] || { value: 0, time: '' });
+  const ddLegend = (v, t) => { $('ddLegend').innerHTML = `<span>Drawdown from peak<b>${v.toFixed(1)}%</b></span><span>${esc(t)}</span>`; };
+  ddLegend(dd.at(-1)?.value ?? 0, `deepest ${worst.value.toFixed(1)}% on ${worst.time}`);
+  ddc.subscribeCrosshairMove(p => p.time ? ddLegend(p.seriesData.get(dds)?.value ?? 0, p.time) : ddLegend(dd.at(-1)?.value ?? 0, `deepest ${worst.value.toFixed(1)}% on ${worst.time}`));
+  // Keep both time axes in step.
+  eq.timeScale().subscribeVisibleLogicalRangeChange(r => r && ddc.timeScale().setVisibleLogicalRange(r));
+  charts = [eq, ddc];
+  document.querySelectorAll('[data-scale]').forEach(b => b.onclick = () => {
+    document.querySelectorAll('[data-scale]').forEach(x => x.classList.toggle('on', x === b));
+    eq.applyOptions({ rightPriceScale: { mode: Number(b.dataset.scale) } });
+  });
+}
+
+function heatColor(v) {
+  if (v == null) return 'transparent';
+  const t = Math.min(Math.abs(v) / 10, 1) * 70 + 8;
+  return `color-mix(in srgb, ${v >= 0 ? 'var(--ok)' : 'var(--pe)'} ${t.toFixed(0)}%, var(--surface))`;
+}
+
+function heatmap(rows) {
+  const years = {};
+  rows.forEach(r => { (years[r.year] ||= {})[r.month] = r.pct; });
+  let html = `<thead><tr><th>Year</th>${MONTHS.map(m => `<th>${m}</th>`).join('')}<th>Year</th></tr></thead><tbody>`;
+  Object.keys(years).sort().forEach(y => {
+    const m = years[y];
+    const total = (Object.values(m).reduce((a, v) => a * (1 + v / 100), 1) - 1) * 100;
+    html += `<tr><td>${y}</td>` + MONTHS.map((_, i) => {
+      const v = m[i + 1];
+      const strong = v != null && Math.abs(v) >= 6;
+      return `<td class="${strong ? 'strong' : ''}" style="background:${heatColor(v)}" title="${MONTHS[i]} ${y}: ${v == null ? 'no data' : pct(v)}">${v == null ? '' : pct(v)}</td>`;
+    }).join('') + `<td class="yr ${cls(total)}">${pct(total)}</td></tr>`;
+  });
+  $('heat').innerHTML = html + '</tbody>';
+}
+
+function now(res) {
+  const L = res.latest;
+  $('nowMeta').textContent = `as of ${L.date}`;
+  $('rankDate').textContent = `· ${L.date} close · top ${L.ranking.length}`;
+  const pend = res.months.at(-1)?.pending ? res.months.at(-1) : null;
+  $('nowNote').innerHTML = pend
+    ? `<b>${esc(L.date)} is a month end — orders for the next open:</b> sell ${pend.planned_sells.map(s => `<span class="pill sell">${esc(s.symbol)}</span>`).join('') || 'nothing'} · buy ${pend.planned_buys.map(b => `<span class="pill buy">${esc(b.symbol)} #${b.rank}</span>`).join('') || 'nothing'}`
+    : `${esc(L.date)} is not a month end, so this ranking is a preview — nothing changes until the month's last trading day.`;
+  const h = res.holdings;
+  $('holdings').innerHTML = `<thead><tr><th>Stock</th><th class="l">Bought (IST)</th><th>Entry ₹</th><th>Qty</th><th>Last close ₹</th><th>Value</th><th>P&amp;L</th><th>Entry rank</th></tr></thead><tbody>` +
+    (h.length ? h.map(x => `<tr><td><b>${esc(x.symbol)}</b></td><td class="l">${at(x.entry_date, x.entry_time)}</td><td>${inr(x.entry, 2)}</td><td>${x.qty}</td><td>${inr(x.close, 2)}</td><td>${inr(x.value)}</td><td class="${cls(x.pnl)}">${inr(x.pnl)} <span class="flag">${pct(x.pnl_pct)}</span></td><td>#${x.entry_rank}</td></tr>`).join('')
+      : `<tr><td colspan="8" class="muted">No holdings</td></tr>`) + `<tr><td colspan="5" class="muted">Cash</td><td>${inr(res.cash)}</td><td colspan="2"></td></tr></tbody>`;
+  $('ranking').innerHTML = `<thead><tr><th>Rank</th><th class="l">Stock</th><th>Score</th><th>6M return</th><th>12M return</th><th>Volatility</th><th>Close ₹</th><th>${res.settings.sma_days}-day avg ₹</th><th>Status</th></tr></thead><tbody>` +
+    L.ranking.map(r => `<tr><td>#${r.rank}</td><td class="l"><b>${esc(r.symbol)}</b></td><td>${r.score.toFixed(2)}</td><td class="${cls(r.r6)}">${pct(r.r6)}</td><td class="${cls(r.r12)}">${pct(r.r12)}</td><td>${r.vol.toFixed(1)}%</td><td>${inr(r.close, 2)}</td><td>${inr(r.sma, 2)}</td>` +
+      `<td>${r.held ? '<span class="pill buy">Held</span>' : ''}${r.above_sma ? '' : '<span class="pill sell">Below average</span>'}</td></tr>`).join('') + '</tbody>';
+}
+
+function monthsTable(months) {
+  const rows = [...months].reverse();
+  $('months').innerHTML = `<thead><tr><th>Month end</th><th>Value</th><th>Filled (IST)</th><th class="l">Sold</th><th class="l">Bought</th><th class="l">Kept</th></tr></thead><tbody>` +
+    rows.map(m => {
+      const sold = (m.sold || m.planned_sells.map(s => ({...s, planned: true}))).map(s => `<span class="pill sell" title="${esc(s.reason)}">${esc(s.symbol)}${s.rank ? ` #${s.rank}` : ''}</span><span class="flag">${esc(s.reason)}${s.pnl != null ? ` · ${inr(s.pnl)}` : ''}${s.at ? ` · ${esc(s.at)}` : ''}</span>`).join('<br>');
+      const bought = (m.bought || m.planned_buys).map(b => b.skipped ? `<span class="pill">${esc(b.symbol)}</span><span class="flag">skipped: ${esc(b.skipped)}</span>` : `<span class="pill buy">${esc(b.symbol)} #${b.rank}</span>${b.qty ? `<span class="flag">${b.qty} × ${inr(b.price, 2)} · ${esc(b.at || '')}</span>` : ''}`).join('<br>');
+      return `<tr><td>${m.date}</td><td>${inr(m.value)}</td><td>${m.executed ? at(...m.executed.split(' ')) : (m.pending ? '<span class="flag">next open</span>' : '—')}</td><td class="wrap">${sold || '<span class="muted">—</span>'}</td><td class="wrap">${bought || '<span class="muted">—</span>'}</td><td class="wrap">${m.kept.map(s => `<span class="pill">${esc(s)}</span>`).join('') || '<span class="muted">—</span>'}</td></tr>`;
+    }).join('') + '</tbody>';
+}
+
+function tradesTable(trades) {
+  const rows = [...trades].reverse();
+  $('trades').innerHTML = `<thead><tr><th>Stock</th><th>Bought (IST)</th><th>Sold (IST)</th><th>Entry ₹</th><th>Exit ₹</th><th>Qty</th><th>P&amp;L</th><th>Return</th><th>Days</th><th>Rank in → out</th><th>Why sold</th></tr></thead><tbody>` +
+    (rows.length ? rows.map(t => `<tr><td><b>${esc(t.symbol)}</b></td><td>${at(t.entry_date, t.entry_time)}</td><td>${at(t.exit_date, t.exit_time)}</td><td>${inr(t.entry, 2)}</td><td>${inr(t.exit, 2)}</td><td>${t.qty}</td><td class="${cls(t.pnl)}">${inr(t.pnl)}</td><td class="${cls(t.pnl_pct)}">${pct(t.pnl_pct)}</td><td>${t.days}</td><td>#${t.entry_rank} → ${t.exit_rank ? '#' + t.exit_rank : 'out'}</td><td style="text-align:left">${esc(t.reason)}</td></tr>`).join('')
+      : `<tr><td colspan="11" class="muted">No closed trades</td></tr>`) + '</tbody>';
+}
+
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => result && drawCharts(result));
+(async () => {
+  const j = await appFetch('/api/momentum/job').then(r => r.json()).catch(() => null);
+  if (j) showJob(j);
+  if (j?.status === 'running') timer = setInterval(poll, 1500);
+  await loadResult();
+})();
+</script>
+</body>
+</html>

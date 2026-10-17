@@ -102,3 +102,27 @@ class BacktestRequest(Input):
     def settings(self):
         changes = self.model_dump(exclude={"start", "end", "preset"}, exclude_none=True)
         return replace(vwap.Settings(start=self.start, end=self.end), **(vwap.PRESETS[self.preset] | changes))
+
+
+class MomentumRequest(Input):
+    start: date
+    end: date
+    capital: float = Field(default=1_000_000, ge=10_000, le=1e11)
+    slots: int = Field(default=1, strict=True, ge=1, le=50)
+    universe: int = Field(default=500, strict=True, ge=20, le=2000)
+    exit_rank: int = Field(default=20, strict=True, ge=1, le=2000)
+    sma_days: int = Field(default=100, strict=True, ge=10, le=250)
+    cost_pct: float = Field(default=0.1, ge=0, le=5)
+    refresh_all: StrictBool = False
+
+    @model_validator(mode="after")
+    def valid_range(self):
+        if self.start >= self.end:
+            raise ValueError("From must be before To")
+        if self.start < date(2001, 1, 1):
+            raise ValueError("From must be 2001 or later")
+        return self
+
+    def settings(self):
+        from . import momentum
+        return momentum.Settings(**self.model_dump(exclude={"refresh_all"}))
