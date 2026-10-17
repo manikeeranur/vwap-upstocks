@@ -99,6 +99,17 @@
   .summary div { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
   .summary b { display: block; font-size: 18px; }
   tr.notrade td { color: var(--muted); }
+  /* Monthly net P&L heatmap above the trades */
+  .monthly { margin-top:16px; border:1px solid var(--border); border-radius:10px; padding:14px 16px; background:var(--card); }
+  .monthly h3 { margin:0 0 2px; font-size:13px; font-weight:600; } .monthly .small { margin:0 0 6px; }
+  table.heat { margin-top:6px; }
+  table.heat th { text-align:center; padding:8px 6px; }
+  table.heat td { text-align:center; padding:7px 6px; font-size:11.5px; min-width:64px; border:2px solid var(--card); line-height:1.3; }
+  table.heat td:first-child, table.heat th:first-child { text-align:left; font-weight:600; }
+  table.heat td.yr { font-weight:700; border-left:2px solid var(--border); }
+  table.heat td small { display:block; font-size:9.5px; opacity:.75; }
+  table.heat td.strong { color:#fff; }
+  @media (prefers-color-scheme: dark) { table.heat td.strong { color:#0b0b0b; } }
   .why { white-space: normal; min-width: 260px; font-size: 12px; color: var(--muted); text-align: left !important; }
 </style>
 </head>
@@ -180,6 +191,7 @@
     </div>
     <div class="bar" id="bar" hidden><div></div></div>
     <div id="summary"></div>
+    <div class="monthly" id="monthly" hidden></div>
     <div class="tblwrap" id="tblwrap" hidden><table class="rt" id="tbl">
       <thead><tr id="thead"></tr></thead>
       <tbody id="rows"></tbody>
@@ -331,6 +343,7 @@ function render() {
     <div><span class="lbl">Lot P&amp;L (${qty}×)</span><b class="${lotTotal >= 0 ? "c-up" : "c-down"}">${lotTotal >= 0 ? "+" : "−"}₹${fmtFull(lotTotal)}</b><span class="sub">before charges</span></div>
     <div class="netcell ${net >= 0 ? "up" : "down"}"><span class="lbl">Net P&amp;L · after charges</span><b class="${nc}">${net >= 0 ? "+" : "−"}₹${fmtFull(net)}</b><span class="sub">Lot P&amp;L − charges</span></div>
   </div>` : "";
+  monthlyTable(trades, qty);
   $("failed").hidden = !failed.length;
   $("failed").innerHTML = failed.length ? `⚠ ${failed.length} day${failed.length === 1 ? "" : "s"} could not be loaded from Upstox — press Run again to retry (already-loaded days come from the cache, so it's quick):<br>${failed.map(d => `${d.date}: ${d.note.replace(/^error: /, "")}`).join("<br>")}` : "";
   $("notradeBox").hidden = !noTrade.length;
@@ -338,6 +351,39 @@ function render() {
   $("notrade").innerHTML = noTrade.map(d => `${d.date}: ${d.note}`).join("<br>");
 }
 const fmtStrike = k => Number(k).toFixed(0);
+
+// Net P&L per calendar month (lot P&L − charges, the same numbers as the Net P&L total).
+function monthlyTable(trades, qty) {
+  const box = $("monthly");
+  box.hidden = !trades.length;
+  if (!trades.length) return;
+  const cell = {};
+  trades.forEach(t => {
+    const key = t.date.slice(0, 7), net = t.pnl * qty - charges(t.entry, t.entry + t.pnl, qty);
+    const c = cell[key] ||= { net: 0, n: 0 };
+    c.net += net; c.n += 1;
+  });
+  const years = [...new Set(Object.keys(cell).map(k => k.slice(0, 4)))].sort();
+  const from = $("start").value.slice(0, 7), to = $("end").value.slice(0, 7);
+  const biggest = Math.max(...Object.values(cell).map(c => Math.abs(c.net)), 1);
+  const color = v => `color-mix(in srgb, ${v >= 0 ? "var(--ok)" : "var(--pe)"} ${(Math.abs(v) / biggest * 70 + 8).toFixed(0)}%, var(--surface))`;
+  const names = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  let grand = 0, rows = "";
+  years.forEach(y => {
+    let total = 0, n = 0;
+    const tds = names.map((m, i) => {
+      const key = `${y}-${String(i + 1).padStart(2, "0")}`, c = cell[key];
+      if (!c) return `<td title="${m} ${y}">${key >= from && key <= to ? '<span class="muted">—</span>' : ""}</td>`;
+      total += c.net; n += c.n;
+      const strong = Math.abs(c.net) / biggest > 0.55;
+      return `<td class="${strong ? "strong" : ""}" style="background:${color(c.net)}" title="${m} ${y}: ${inr(c.net)} net · ${c.n} trade${c.n === 1 ? "" : "s"}">${fmtLot(c.net)}<small>${c.n} trade${c.n === 1 ? "" : "s"}</small></td>`;
+    }).join("");
+    grand += total;
+    rows += `<tr><td>${y}</td>${tds}<td class="yr ${total >= 0 ? "c-up" : "c-down"}">${fmtLot(total)}<small class="muted">${n} trades</small></td></tr>`;
+  });
+  box.innerHTML = `<h3>Monthly net P&amp;L</h3><p class="small">After charges · ${$("lots").value} lot × ${$("lotsize").value} · total ${inr(grand)} · — = no trade that month</p>
+    <div class="scroll"><table class="heat"><thead><tr><th>Year</th>${names.map(m => `<th>${m}</th>`).join("")}<th>Year</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
 
 async function poll() {
   if (polling || !job) return;
