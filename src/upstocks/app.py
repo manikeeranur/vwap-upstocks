@@ -56,7 +56,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
             quotes = QuoteService(trading_service)
             app.state.quotes = quotes
             app.state.backtests = backtests
-            momentum_service = MomentumService(settings.cache_dir, settings.database_path.parent / "momentum_last.json")
+            momentum_service = MomentumService(settings.cache_dir, settings.database_path.parent / "momentum_runs")
             app.state.momentum = momentum_service
             if settings.scanner_enabled:
                 trading_service.start()

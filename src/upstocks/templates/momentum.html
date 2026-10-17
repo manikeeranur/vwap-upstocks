@@ -49,6 +49,9 @@
 
   <div class="card">
     <div class="card-title"><h2>Backtest configuration</h2><span>NSE EQ · daily · Upstox</span></div>
+    <label id="savedRunsLabel" hidden style="margin-bottom:16px">Saved runs
+      <select id="savedRuns" aria-label="Saved momentum runs" style="max-width:100%;width:100%"></select>
+    </label>
     <div class="grid">
       <label>From <input type="date" id="start" value="{{ start }}" min="2001-01-01"></label>
       <label>To <input type="date" id="end" value="{{ end }}"></label>
@@ -110,7 +113,7 @@
       </section>
 
       <section class="card" aria-labelledby="tr-h">
-        <div class="card-title"><h2 id="tr-h">Closed trades</h2><a class="btn ghost" href="/api/momentum/trades.csv">Download CSV</a></div>
+        <div class="card-title"><h2 id="tr-h">Closed trades</h2><a class="btn ghost" id="tradesCsv" href="/api/momentum/trades.csv">Download CSV</a></div>
         <div class="scroll tall"><table id="trades"></table></div>
       </section>
     </div>
@@ -157,7 +160,7 @@ async function poll() {
   showJob(j);
   if (j.status !== 'running') {
     clearInterval(timer); timer = null;
-    if (j.status === 'done') await loadResult();
+    if (j.status === 'done') { await loadRuns(); await loadResult(j.run_id); }
   }
 }
 
@@ -171,12 +174,26 @@ async function run() {
 }
 $('run').addEventListener('click', run);
 
-async function loadResult() {
-  const r = await appFetch('/api/momentum/result');
+async function loadRuns() {
+  const r = await appFetch('/api/momentum/runs').catch(() => null);
+  if (!r?.ok) return;
+  const { runs } = await r.json();
+  const select = $('savedRuns');
+  const when = s => s ? s.slice(0, 16).replace('T', ' ') : '';
+  select.replaceChildren(...runs.map(run => new Option(
+    `${when(run.finished)} · ${run.start} → ${run.through || run.end} · ${run.slots} slot${run.slots === 1 ? '' : 's'} · ${inr(run.capital)} · CAGR ${pct(run.cagr)} · max DD ${pct(run.max_dd)}`, run.id)));
+  $('savedRunsLabel').hidden = !runs.length;
+}
+
+async function loadResult(id) {
+  const q = id ? `?id=${encodeURIComponent(id)}` : '';
+  const r = await appFetch(`/api/momentum/result${q}`);
   if (!r.ok) return;
   result = await r.json();
+  if (result.id) { $('savedRuns').value = result.id; $('tradesCsv').href = `/api/momentum/trades.csv?id=${encodeURIComponent(result.id)}`; }
   render(result);
 }
+$('savedRuns').addEventListener('change', e => loadResult(e.target.value));
 
 function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
 
@@ -309,9 +326,9 @@ function monthsTable(months) {
 
 function tradesTable(trades) {
   const rows = [...trades].reverse();
-  $('trades').innerHTML = `<thead><tr><th>Stock</th><th>Bought (IST)</th><th>Sold (IST)</th><th>Entry ₹</th><th>Exit ₹</th><th>Qty</th><th>P&amp;L</th><th>Return</th><th>Days</th><th>Rank in → out</th><th>Why sold</th></tr></thead><tbody>` +
-    (rows.length ? rows.map(t => `<tr><td><b>${esc(t.symbol)}</b></td><td>${at(t.entry_date, t.entry_time)}</td><td>${at(t.exit_date, t.exit_time)}</td><td>${inr(t.entry, 2)}</td><td>${inr(t.exit, 2)}</td><td>${t.qty}</td><td class="${cls(t.pnl)}">${inr(t.pnl)}</td><td class="${cls(t.pnl_pct)}">${pct(t.pnl_pct)}</td><td>${t.days}</td><td>#${t.entry_rank} → ${t.exit_rank ? '#' + t.exit_rank : 'out'}</td><td style="text-align:left">${esc(t.reason)}</td></tr>`).join('')
-      : `<tr><td colspan="11" class="muted">No closed trades</td></tr>`) + '</tbody>';
+  $('trades').innerHTML = `<thead><tr><th>Stock</th><th>Bought (IST)</th><th>Sold (IST)</th><th>Entry ₹</th><th>Exit ₹</th><th>Qty</th><th>P&amp;L</th><th>Capital after</th><th>Return</th><th>Days</th><th>Rank in → out</th><th>Why sold</th></tr></thead><tbody>` +
+    (rows.length ? rows.map(t => `<tr><td><b>${esc(t.symbol)}</b></td><td>${at(t.entry_date, t.entry_time)}</td><td>${at(t.exit_date, t.exit_time)}</td><td>${inr(t.entry, 2)}</td><td>${inr(t.exit, 2)}</td><td>${t.qty}</td><td class="${cls(t.pnl)}">${inr(t.pnl)}</td><td><b>${inr(t.capital_after)}</b></td><td class="${cls(t.pnl_pct)}">${pct(t.pnl_pct)}</td><td>${t.days}</td><td>#${t.entry_rank} → ${t.exit_rank ? '#' + t.exit_rank : 'out'}</td><td style="text-align:left">${esc(t.reason)}</td></tr>`).join('')
+      : `<tr><td colspan="12" class="muted">No closed trades</td></tr>`) + '</tbody>';
 }
 
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => result && drawCharts(result));
@@ -319,6 +336,7 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => resu
   const j = await appFetch('/api/momentum/job').then(r => r.json()).catch(() => null);
   if (j) showJob(j);
   if (j?.status === 'running') timer = setInterval(poll, 1500);
+  await loadRuns();
   await loadResult();
 })();
 </script>

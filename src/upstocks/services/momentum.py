@@ -17,7 +17,9 @@ import gzip
 import json
 import logging
 from pathlib import Path
+import re
 import time
+import uuid
 
 import httpx
 import numpy as np
@@ -30,6 +32,8 @@ log = logging.getLogger(__name__)
 INSTRUMENTS_URL = "https://assets.upstox.com/market-quote/instruments/exchange/NSE.json.gz"
 BENCHMARK = "NSE_INDEX|Nifty 50"
 ACTIVE, STALE_DAYS = 1000, 45
+MAX_RUNS = 50
+RUN_ID = re.compile(r"^[0-9a-f]{12}$")
 # While the market is open the live scanner shares the Upstox budget: bulk
 # downloads then use at most this many requests per window.
 MARKET_CAPS = ((60.0, 200), (1800.0, 900))
@@ -163,17 +167,58 @@ def _recent_turnover(z: dict) -> float:
 
 
 class MomentumService:
-    def __init__(self, cache_dir: Path, result_path: Path):
+    def __init__(self, cache_dir: Path, runs_dir: Path):
+        """Each finished run is saved as `<runs_dir>/<id>.json`, listed newest first in `index.json`."""
         self.store = PriceStore(cache_dir)
-        self.result_path = result_path
+        self.runs_dir = runs_dir
         self.task: asyncio.Task | None = None
         self.job = {"status": "idle"}
-        self.result = None
-        if result_path.exists():
+        legacy = runs_dir.parent / "momentum_last.json"  # single result kept before saved runs
+        if legacy.exists() and not (runs_dir / "index.json").exists():
             try:
-                self.result = json.loads(result_path.read_text())
+                self._save_run(json.loads(legacy.read_text()))
+                legacy.unlink()
             except (OSError, ValueError):
                 log.warning("Ignoring unreadable momentum result")
+
+    def runs(self) -> list[dict]:
+        try:
+            return json.loads((self.runs_dir / "index.json").read_text())
+        except (OSError, ValueError):
+            return []
+
+    def run(self, run_id: str | None = None) -> dict | None:
+        """A saved run by id, or the newest one."""
+        if run_id is None:
+            runs = self.runs()
+            if not runs:
+                return None
+            run_id = runs[0]["id"]
+        if not RUN_ID.match(run_id):
+            return None
+        try:
+            return json.loads((self.runs_dir / f"{run_id}.json").read_text())
+        except (OSError, ValueError):
+            return None
+
+    def _write(self, path: Path, value):
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(value))
+        tmp.replace(path)
+
+    def _save_run(self, result: dict) -> str:
+        self.runs_dir.mkdir(parents=True, exist_ok=True)
+        run_id = result.setdefault("id", uuid.uuid4().hex[:12])
+        self._write(self.runs_dir / f"{run_id}.json", result)
+        st, s = result["settings"], result["stats"]
+        entry = {"id": run_id, "finished": result.get("finished"), "start": st["start"], "end": st["end"],
+                 "through": (result.get("data") or {}).get("through"), "slots": st["slots"], "capital": st["capital"],
+                 "cagr": s.get("cagr"), "max_dd": s.get("max_dd"), "final": s.get("final")}
+        runs = [entry] + [r for r in self.runs() if r["id"] != run_id]
+        for old in runs[MAX_RUNS:]:
+            (self.runs_dir / f"{old['id']}.json").unlink(missing_ok=True)
+        self._write(self.runs_dir / "index.json", runs[:MAX_RUNS])
+        return run_id
 
     def snapshot(self) -> dict:
         job = dict(self.job)
@@ -235,21 +280,14 @@ class MomentumService:
             result["data"] = {"stocks": len(instruments), "downloaded": len(todo), "failed": len(self.job["failed"]),
                               "through": result["equity"][-1][0] if result["equity"] else None}
             result["finished"] = datetime.now(upstox.IST).isoformat(timespec="seconds")
-            self.result = result
-            await asyncio.to_thread(self._persist, result)
-            self.job.update(status="done", phase="Finished")
+            run_id = await asyncio.to_thread(self._save_run, result)
+            self.job.update(status="done", phase="Finished", run_id=run_id)
         except asyncio.CancelledError:
             self.job.update(status="error", error="Interrupted by application shutdown. Downloaded prices are kept.")
             raise
         except Exception as exc:
             log.exception("Momentum backtest failed")
             self.job.update(status="error", error=redact(str(exc)))
-
-    def _persist(self, result):
-        self.result_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.result_path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(result))
-        tmp.replace(self.result_path)
 
     @staticmethod
     def _compute(cached, symbols, st, need_from, end):

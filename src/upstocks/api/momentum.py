@@ -1,7 +1,8 @@
+import asyncio
 import csv
 import io
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 
 from .. import upstox
@@ -34,21 +35,28 @@ async def momentum_job(request: Request):
     return request.app.state.momentum.snapshot()
 
 
-@router.get("/api/momentum/result")
-async def momentum_result(request: Request):
-    result = request.app.state.momentum.result
+async def _saved(request, run_id):
+    result = await asyncio.to_thread(request.app.state.momentum.run, run_id)
     if result is None:
-        raise HTTPException(404, "No momentum backtest yet")
+        raise HTTPException(404, "No such momentum run" if run_id else "No momentum backtest yet")
     return result
 
 
+@router.get("/api/momentum/runs")
+async def momentum_runs(request: Request):
+    return {"runs": await asyncio.to_thread(request.app.state.momentum.runs)}
+
+
+@router.get("/api/momentum/result")
+async def momentum_result(request: Request, id: str | None = Query(None, max_length=12)):
+    return await _saved(request, id)
+
+
 @router.get("/api/momentum/trades.csv")
-async def momentum_trades(request: Request):
-    result = request.app.state.momentum.result
-    if result is None:
-        raise HTTPException(404, "No momentum backtest yet")
+async def momentum_trades(request: Request, id: str | None = Query(None, max_length=12)):
+    result = await _saved(request, id)
     buf = io.StringIO()
-    cols = ["symbol", "entry_date", "entry_time", "entry", "exit_date", "exit_time", "exit", "qty", "pnl", "pnl_pct", "days", "entry_rank", "exit_rank", "reason"]
+    cols = ["symbol", "entry_date", "entry_time", "entry", "exit_date", "exit_time", "exit", "qty", "pnl", "capital_after", "pnl_pct", "days", "entry_rank", "exit_rank", "reason"]
     w = csv.DictWriter(buf, fieldnames=cols, extrasaction="ignore")
     w.writeheader()
     w.writerows(result["trades"])

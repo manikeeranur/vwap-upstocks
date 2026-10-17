@@ -179,9 +179,13 @@ def run(dates: list[date], symbols: list[str], open_: np.ndarray, close: np.ndar
                 cash += gross - fee
                 costs += fee
                 pnl = gross - fee - p["cost_basis"]
+                # Portfolio right after this sale: cash + other holdings at that day's open (else last close).
+                k = min(j, hi)
+                capital = cash + sum(q["qty"] * (open_[k, c] if np.isfinite(open_[k, c]) else last_close[k, c])
+                                     for c, q in pos.items() if np.isfinite(last_close[k, c]))
                 trades.append({"symbol": symbols[col], "entry_date": p["date"].isoformat(), "entry_time": OPEN_TIME, "entry": _r(p["price"]),
                                "exit_date": when.isoformat(), "exit_time": at, "exit": _r(px), "qty": p["qty"], "pnl": _r(pnl),
-                               "pnl_pct": _r(pnl / p["cost_basis"] * 100), "days": (when - p["date"]).days,
+                               "capital_after": _r(capital), "pnl_pct": _r(pnl / p["cost_basis"] * 100), "days": (when - p["date"]).days,
                                "entry_rank": p["rank"], "exit_rank": s["rank"], "reason": s["reason"]})
                 sold.append({"symbol": symbols[col], "rank": s["rank"], "reason": s["reason"], "price": _r(px), "at": f"{when} {at}",
                              "qty": p["qty"], "pnl": _r(pnl)})

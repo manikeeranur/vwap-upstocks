@@ -73,3 +73,39 @@ def test_last_weekday_of_month():
     assert momentum.last_weekday_of_month(date(2026, 10, 30))  # Friday; 31st is a Saturday
     assert not momentum.last_weekday_of_month(date(2026, 10, 16))
 
+
+
+def _result(n):
+    return {"finished": f"2026-10-17T10:{n:02d}:00+05:30", "settings": {"start": "2018-01-01", "end": "2026-10-17", "slots": 1, "capital": 1e6},
+            "stats": {"cagr": float(n), "max_dd": -10.0, "final": 2e6}, "data": {"through": "2026-10-16"}}
+
+
+def test_saved_runs_are_listed_newest_first_and_capped(tmp_path):
+    from upstocks.services import momentum as service
+    svc = service.MomentumService(tmp_path / "cache", tmp_path / "runs")
+    assert svc.runs() == [] and svc.run() is None
+    ids = [svc._save_run(_result(n)) for n in range(service.MAX_RUNS + 3)]
+    runs = svc.runs()
+    assert len(runs) == service.MAX_RUNS and runs[0]["id"] == ids[-1] and runs[0]["cagr"] == service.MAX_RUNS + 2
+    assert svc.run()["id"] == ids[-1] and svc.run(ids[5])["stats"]["cagr"] == 5
+    assert svc.run(ids[0]) is None and not (tmp_path / "runs" / f"{ids[0]}.json").exists()  # pruned
+    assert svc.run("../index") is None
+
+
+def test_the_single_saved_result_becomes_the_first_saved_run(tmp_path):
+    import json
+    from upstocks.services import momentum as service
+    (tmp_path / "momentum_last.json").write_text(json.dumps(_result(7)))
+    svc = service.MomentumService(tmp_path / "cache", tmp_path / "momentum_runs")
+    assert [r["cagr"] for r in svc.runs()] == [7.0] and not (tmp_path / "momentum_last.json").exists()
+
+
+def test_capital_after_each_trade_with_one_slot_adds_up():
+    dates, symbols, open_, close, volume = _market()
+    st = momentum.Settings(start=dates[300], end=dates[-1], capital=100_000, slots=1, universe=6, exit_rank=1)
+    trades = momentum.run(dates, symbols, open_, close, volume, st)["trades"]
+    assert len(trades) >= 2
+    prev = 100_000
+    for t in trades:
+        assert abs(t["capital_after"] - (prev + t["pnl"])) < 0.05
+        prev = t["capital_after"]
