@@ -1,5 +1,6 @@
 import asyncio
 import csv
+from datetime import date, timedelta
 import io
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -63,3 +64,26 @@ async def momentum_trades(request: Request, id: str | None = Query(None, max_len
     st = result["settings"]
     return StreamingResponse(iter([buf.getvalue()]), media_type="text/csv",
                              headers={"Content-Disposition": f'attachment; filename="momentum_trades_{st["start"]}_to_{st["end"]}.csv"'})
+
+
+@router.get("/api/momentum/chart")
+async def momentum_chart(request: Request, symbol: str = Query(..., max_length=40),
+                         entry: date = Query(...), exit: date | None = Query(None), day: date | None = Query(None)):
+    """Candles for one trade: daily from before the entry to after the exit,
+    or with `day`, that session's 1-minute candles (Upstox has them from 2022)."""
+    store = request.app.state.momentum.store
+    keys = {x["symbol"]: x["key"] for x in await store.instruments()}
+    key = keys.get(symbol)
+    if key is None:
+        raise HTTPException(404, f"Unknown NSE stock {symbol}")
+    yesterday = upstox.today_ist() - timedelta(days=1)
+    if day is not None:
+        if day < date(2022, 1, 1):
+            raise HTTPException(404, "Upstox has 1-minute candles only from January 2022")
+        rows = await upstox.candles(key, "1m", day, day, False)
+        return {"symbol": symbol, "interval": "1m", "candles": [r[:6] for r in rows if "09:15" <= r[0][11:16] <= "15:29"]}
+    start = entry - timedelta(days=400)  # room for the moving average before the entry
+    end = min((exit or yesterday) + timedelta(days=60), yesterday)
+    await store.limiter.wait()
+    rows = await upstox.daily_history(key, start, end)
+    return {"symbol": symbol, "interval": "1d", "candles": [[r[0][:10], *r[1:6]] for r in rows]}

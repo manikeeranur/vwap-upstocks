@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>upstocks — Momentum rotation</title>
+{% from "_icons.html" import ui_icon %}
 {% include "_style.html" %}
 <style>
   :root { --s1:#2a78d6; --s2:#eb6834; }
@@ -37,6 +38,26 @@
   .l { text-align:left !important; }
   table.heat td.strong { color:#fff; }
   @media (prefers-color-scheme: dark) { table.heat td.strong { color:#0b0b0b; } }
+  .cbtn { cursor:pointer; border:1px solid var(--border); background:var(--card); color:var(--text); border-radius:6px; padding:4px 7px; display:inline-flex; align-items:center; justify-content:center; }
+  .cbtn svg { width:16px; height:16px; } .cbtn:hover { border-color:var(--accent); color:var(--accent); }
+  .modal { position:fixed; inset:0; z-index:100; display:flex; background:var(--card); }
+  .mbox { width:100vw; height:100vh; height:100dvh; display:flex; flex-direction:column; overflow:hidden; background:var(--card); }
+  .mhead { display:flex; flex-wrap:wrap; align-items:center; gap:8px 14px; padding:12px 16px; border-bottom:1px solid var(--border); font-size:13px; }
+  .mhead .ttl { font-weight:700; font-size:15px; }
+  .seg2 { display:flex; border:1px solid var(--border); border-radius:6px; overflow:hidden; }
+  .seg2 button { border:0; background:var(--surface); color:var(--muted); padding:5px 10px; font:inherit; font-weight:600; font-size:12px; }
+  .seg2 button.on { background:var(--accent); color:var(--accent-ink); } .seg2 button:disabled { opacity:.4; }
+  .clegend { display:flex; flex-wrap:wrap; gap:6px 16px; padding:8px 16px; font-size:12px; color:var(--muted); border-bottom:1px solid var(--border); }
+  .clegend i { display:inline-block; width:16px; border-top:2px solid; vertical-align:middle; margin-right:6px; }
+  #tchart { flex:1 1 0; min-height:0; position:relative; overflow:hidden; }
+  #tchart table { margin:0 !important; width:auto !important; font-size:inherit; border-collapse:separate; }
+  #tchart td, #tchart th { padding:0 !important; border:0 !important; background:none !important; }
+  .ohlc { position:absolute; top:6px; left:8px; z-index:4; pointer-events:none; font-size:12px; background:color-mix(in srgb,var(--card) 85%,transparent); padding:2px 6px; border-radius:4px; white-space:nowrap; }
+  .ohlc span { margin-right:10px; } .ohlc b { font-weight:500; margin-left:2px; }
+  .pbox { position:absolute; pointer-events:none; z-index:3; border:1px solid; }
+  .pbox.win { background:#16a34a1f; border-color:#16a34a99; } .pbox.loss { background:#e11d481f; border-color:#e11d4899; }
+  .plbl { position:absolute; pointer-events:none; z-index:4; font:700 12px var(--font); color:#fff; padding:2px 7px; border-radius:3px; white-space:nowrap; }
+  .plbl.win { background:#16a34a; } .plbl.loss { background:#e11d48; }
   .seg.mini { min-height:32px; display:inline-flex; } .seg.mini button { padding:3px 10px; }
 </style>
 </head>
@@ -125,6 +146,21 @@
     </div>
   </div>
 </main>
+<div class="modal" id="cmodal" hidden role="dialog" aria-modal="true" aria-labelledby="cttl">
+  <div class="mbox">
+    <div class="mhead">
+      <span class="ttl" id="cttl"></span>
+      <span id="cinfo" class="muted"></span>
+      <span style="flex:1"></span>
+      <div class="seg2" id="cview" role="group" aria-label="Chart view">
+        <button type="button" data-v="1d" class="on">Daily</button><button type="button" data-v="entry">Entry day · 1m</button><button type="button" data-v="exit">Exit day · 1m</button>
+      </div>
+      <button class="btn ghost" id="cclose" type="button" style="min-height:30px;padding:5px 12px">Close</button>
+    </div>
+    <div class="clegend" id="clegend"></div>
+    <div id="tchart"></div>
+  </div>
+</div>
 <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
 <script>
 const $ = id => document.getElementById(id);
@@ -313,9 +349,9 @@ function now(res) {
     ? `<b>${esc(L.date)} is a month end — orders for the next open:</b> sell ${pend.planned_sells.map(s => `<span class="pill sell">${esc(s.symbol)}</span>`).join('') || 'nothing'} · buy ${pend.planned_buys.map(b => `<span class="pill buy">${esc(b.symbol)} #${b.rank}</span>`).join('') || 'nothing'}`
     : `${esc(L.date)} is not a month end, so this ranking is a preview — nothing changes until the month's last trading day.`;
   const h = res.holdings;
-  $('holdings').innerHTML = `<thead><tr><th>Stock</th><th class="l">Bought (IST)</th><th>Entry ₹</th><th>Qty</th><th>Last close ₹</th><th>Value</th><th>P&amp;L</th><th>Entry rank</th></tr></thead><tbody>` +
-    (h.length ? h.map(x => `<tr><td><b>${esc(x.symbol)}</b></td><td class="l">${at(x.entry_date, x.entry_time)}</td><td>${inr(x.entry, 2)}</td><td>${x.qty}</td><td>${inr(x.close, 2)}</td><td>${inr(x.value)}</td><td class="${cls(x.pnl)}">${inr(x.pnl)} <span class="flag">${pct(x.pnl_pct)}</span></td><td>#${x.entry_rank}</td></tr>`).join('')
-      : `<tr><td colspan="8" class="muted">No holdings</td></tr>`) + `<tr><td colspan="5" class="muted">Cash</td><td>${inr(res.cash)}</td><td colspan="2"></td></tr></tbody>`;
+  $('holdings').innerHTML = `<thead><tr><th><span class="sr-only">Chart</span></th><th class="l">Stock</th><th class="l">Bought (IST)</th><th>Entry ₹</th><th>Qty</th><th>Last close ₹</th><th>Value</th><th>P&amp;L</th><th>Entry rank</th></tr></thead><tbody>` +
+    (h.length ? h.map((x, k) => `<tr><td><button class="cbtn" type="button" data-hold="${k}" title="Open chart" aria-label="Open ${esc(x.symbol)} chart">{{ ui_icon("chart") }}</button></td><td class="l"><b>${esc(x.symbol)}</b></td><td class="l">${at(x.entry_date, x.entry_time)}</td><td>${inr(x.entry, 2)}</td><td>${x.qty}</td><td>${inr(x.close, 2)}</td><td>${inr(x.value)}</td><td class="${cls(x.pnl)}">${inr(x.pnl)} <span class="flag">${pct(x.pnl_pct)}</span></td><td>#${x.entry_rank}</td></tr>`).join('')
+      : `<tr><td colspan="9" class="muted">No holdings</td></tr>`) + `<tr><td></td><td colspan="5" class="muted l">Cash</td><td>${inr(res.cash)}</td><td colspan="2"></td></tr></tbody>`;
   $('ranking').innerHTML = `<thead><tr><th>Rank</th><th class="l">Stock</th><th>Score</th><th>6M return</th><th>12M return</th><th>12-1 return</th><th>Volatility</th><th>Close ₹</th><th>${res.settings.sma_days}-day avg ₹</th><th>Status</th></tr></thead><tbody>` +
     L.ranking.map(r => `<tr><td>#${r.rank}</td><td class="l"><b>${esc(r.symbol)}</b></td><td>${r.score.toFixed(2)}</td><td class="${cls(r.r6)}">${pct(r.r6)}</td><td class="${cls(r.r12)}">${pct(r.r12)}</td><td class="${cls(r.r12_1)}">${pct(r.r12_1)}</td><td>${r.vol.toFixed(1)}%</td><td>${inr(r.close, 2)}</td><td>${inr(r.sma, 2)}</td>` +
       `<td>${r.held ? '<span class="pill buy">Held</span>' : ''}${r.above_sma ? '' : '<span class="pill sell">Below average</span>'}</td></tr>`).join('') + '</tbody>';
@@ -331,14 +367,172 @@ function monthsTable(months) {
     }).join('') + '</tbody>';
 }
 
+let tradeRows = [];
 function tradesTable(trades) {
-  const rows = [...trades].reverse();
-  $('trades').innerHTML = `<thead><tr><th>Stock</th><th>Bought (IST)</th><th>Sold (IST)</th><th>Entry ₹</th><th>Exit ₹</th><th>Qty</th><th>P&amp;L</th><th>Capital after</th><th>Return</th><th>Days</th><th>Rank in → out</th><th>Why sold</th></tr></thead><tbody>` +
-    (rows.length ? rows.map(t => `<tr><td><b>${esc(t.symbol)}</b></td><td>${at(t.entry_date, t.entry_time)}</td><td>${at(t.exit_date, t.exit_time)}</td><td>${inr(t.entry, 2)}</td><td>${inr(t.exit, 2)}</td><td>${t.qty}</td><td class="${cls(t.pnl)}">${inr(t.pnl)}</td><td><b>${inr(t.capital_after)}</b></td><td class="${cls(t.pnl_pct)}">${pct(t.pnl_pct)}</td><td>${t.days}</td><td>#${t.entry_rank} → ${t.exit_rank ? '#' + t.exit_rank : 'out'}</td><td style="text-align:left">${esc(t.reason)}</td></tr>`).join('')
-      : `<tr><td colspan="12" class="muted">No closed trades</td></tr>`) + '</tbody>';
+  const rows = tradeRows = [...trades].reverse();
+  $('trades').innerHTML = `<thead><tr><th><span class="sr-only">Chart</span></th><th class="l">Stock</th><th>Bought (IST)</th><th>Sold (IST)</th><th>Entry ₹</th><th>Exit ₹</th><th>Qty</th><th>P&amp;L</th><th>Capital after</th><th>Return</th><th>Days</th><th>Rank in → out</th><th>Why sold</th></tr></thead><tbody>` +
+    (rows.length ? rows.map((t, k) => `<tr><td><button class="cbtn" type="button" data-trade="${k}" title="Open chart" aria-label="Open ${esc(t.symbol)} chart">{{ ui_icon("chart") }}</button></td><td class="l"><b>${esc(t.symbol)}</b></td><td>${at(t.entry_date, t.entry_time)}</td><td>${at(t.exit_date, t.exit_time)}</td><td>${inr(t.entry, 2)}</td><td>${inr(t.exit, 2)}</td><td>${t.qty}</td><td class="${cls(t.pnl)}">${inr(t.pnl)}</td><td><b>${inr(t.capital_after)}</b></td><td class="${cls(t.pnl_pct)}">${pct(t.pnl_pct)}</td><td>${t.days}</td><td>#${t.entry_rank} → ${t.exit_rank ? '#' + t.exit_rank : 'out'}</td><td style="text-align:left">${esc(t.reason)}</td></tr>`).join('')
+      : `<tr><td colspan="13" class="muted">No closed trades</td></tr>`) + '</tbody>';
 }
 
-matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => result && drawCharts(result));
+// ── Full-screen trade chart ──────────────────────────────────────────────
+let ctrade = null, cview = '1d', cdata = {}, tchart = null;
+const UP = '#16a34a', DOWN = '#e11d48', BUY = '#2563eb';
+const MINUTE_FROM = '2022-01-01';
+const fmt2 = n => Number(n).toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+const istTs = (d, hhmm) => Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10), +hhmm.slice(0, 2), +hhmm.slice(3, 5)) / 1000;
+const hhmm = ts => new Date(ts * 1000).toISOString().slice(11, 16);
+
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-trade],[data-hold]');
+  if (!b) return;
+  if (b.dataset.trade != null) openTradeChart(tradeRows[+b.dataset.trade]);
+  else { const h = result.holdings[+b.dataset.hold]; openTradeChart({ ...h, holding: true, exit: h.close, exit_date: null }); }
+});
+
+function openTradeChart(t) {
+  ctrade = t; cdata = {}; cview = '1d';
+  $('cttl').textContent = t.symbol;
+  const sold = t.holding ? `holding · last close ₹${fmt2(t.close)}` : `sold ${t.exit_date} ${t.exit_time} @ ₹${fmt2(t.exit)}`;
+  $('cinfo').textContent = `bought ${t.entry_date} ${t.entry_time} IST @ ₹${fmt2(t.entry)} → ${sold} · ${t.qty} shares · P&L ${inr(t.pnl)} (${pct(t.pnl_pct)})`;
+  const old = d => d && d < MINUTE_FROM;
+  document.querySelectorAll('#cview button').forEach(b => {
+    b.classList.toggle('on', b.dataset.v === '1d');
+    const day = b.dataset.v === 'entry' ? t.entry_date : b.dataset.v === 'exit' ? t.exit_date : 'x';
+    b.disabled = !day || old(day);
+    b.title = !day ? 'Still held — no exit yet' : old(day) ? 'Upstox has 1-minute candles only from January 2022' : '';
+  });
+  $('cmodal').hidden = false;
+  document.body.style.overflow = 'hidden';
+  $('cclose').focus();
+  loadView();
+}
+
+function closeTradeChart() {
+  $('cmodal').hidden = true;
+  document.body.style.overflow = '';
+  if (tchart) { tchart.remove(); tchart = null; }
+}
+$('cclose').addEventListener('click', closeTradeChart);
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('cmodal').hidden) closeTradeChart(); });
+document.querySelectorAll('#cview button').forEach(b => b.addEventListener('click', () => {
+  if (b.disabled) return;
+  cview = b.dataset.v;
+  document.querySelectorAll('#cview button').forEach(x => x.classList.toggle('on', x === b));
+  loadView();
+}));
+
+async function loadView() {
+  const t = ctrade, view = cview;
+  if (!cdata[view]) {
+    if (tchart) { tchart.remove(); tchart = null; }
+    $('tchart').innerHTML = '<p class="muted" style="padding:16px">Loading candles from Upstox…</p>';
+    const q = new URLSearchParams({ symbol: t.symbol, entry: t.entry_date });
+    if (t.exit_date) q.set('exit', t.exit_date);
+    if (view !== '1d') q.set('day', view === 'entry' ? t.entry_date : t.exit_date);
+    const r = await appFetch(`/api/momentum/chart?${q}`).catch(e => null);
+    const body = r ? await r.json().catch(() => ({})) : { detail: 'Network error' };
+    if (ctrade !== t || cview !== view) return;
+    if (!r?.ok) { $('tchart').innerHTML = `<p class="err" style="padding:16px">${esc(body.detail || 'Unable to load candles')}</p>`; return; }
+    cdata[view] = body.candles;
+  }
+  drawTradeChart();
+}
+
+function drawTradeChart() {
+  const t = ctrade, view = cview, rows = cdata[view], el = $('tchart');
+  if (tchart) { tchart.remove(); tchart = null; }
+  el.innerHTML = '';
+  if (!rows?.length) { el.innerHTML = '<p class="muted" style="padding:16px">No candles for this period.</p>'; return; }
+  const daily = view === '1d';
+  const time = r => daily ? r[0] : istTs(r[0].slice(0, 10), r[0].slice(11, 16));
+  const box = el.getBoundingClientRect();
+  tchart = LightweightCharts.createChart(el, {
+    width: Math.floor(box.width), height: Math.floor(box.height),
+    layout: { background: { color: css('--card') }, textColor: css('--muted'), fontFamily: css('--font'), fontSize: 12 },
+    grid: { vertLines: { color: css('--surface') }, horzLines: { color: css('--surface') } },
+    rightPriceScale: { borderColor: css('--border'), scaleMargins: { top: 0.06, bottom: 0.18 } },
+    timeScale: { borderColor: css('--border'), timeVisible: !daily, secondsVisible: false,
+                 ...(daily ? {} : { tickMarkFormatter: ts => hhmm(ts) }) },
+    localization: { ...(daily ? {} : { timeFormatter: ts => hhmm(ts) }), priceFormatter: p => p < 0 ? '' : fmt2(p) },  // no labels in the volume band below 0
+    crosshair: { mode: 0 },
+  });
+  const root = el.firstElementChild;
+  if (root) Object.assign(root.style, { position: 'absolute', top: '0', left: '0' });
+  const exitPx = t.holding ? t.close : t.exit;
+  const candles = tchart.addCandlestickSeries({ upColor: UP, downColor: DOWN, borderVisible: false, wickUpColor: UP, wickDownColor: DOWN });
+  candles.setData(rows.map(r => ({ time: time(r), open: r[1], high: r[2], low: r[3], close: r[4] })));
+  const vol = tchart.addHistogramSeries({ priceScaleId: 'vol', priceFormat: { type: 'volume' }, priceLineVisible: false, lastValueVisible: false });
+  tchart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.86, bottom: 0 } });
+  vol.setData(rows.map(r => ({ time: time(r), value: r[5], color: r[4] >= r[1] ? UP + '55' : DOWN + '55' })));
+  const legend = [];
+  let sma = null;
+  if (daily) {
+    const n = result.settings.sma_days || 100, pts = [];
+    let sum = 0;
+    rows.forEach((r, i) => { sum += r[4]; if (i >= n) sum -= rows[i - n][4]; if (i >= n - 1) pts.push({ time: r[0], value: +(sum / n).toFixed(2) }); });
+    sma = tchart.addLineSeries({ color: '#f59e0b', lineWidth: 2, priceLineVisible: false, lastValueVisible: false });
+    sma.setData(pts);
+    legend.push(`<span><i style="border-color:#f59e0b"></i>${n}-day average (sell if it closes below)</span>`);
+  }
+  candles.createPriceLine({ price: t.entry, color: BUY, lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'Entry' });
+  candles.createPriceLine({ price: exitPx, color: t.pnl >= 0 ? UP : DOWN, lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: t.holding ? 'Last close' : 'Exit' });
+  // Markers on the fill candle: the order fills at that candle's open (09:15:00).
+  const markers = [];
+  const showEntry = daily || view === 'entry', showExit = !t.holding && (daily || view === 'exit');
+  const at = (d, clock) => daily ? d : istTs(d, clock.slice(0, 5));
+  if (showEntry) markers.push({ time: at(t.entry_date, t.entry_time), position: 'belowBar', color: BUY, shape: 'arrowUp', text: `BUY ${t.entry_time} ₹${fmt2(t.entry)}` });
+  if (showExit) markers.push({ time: at(t.exit_date, t.exit_time), position: 'aboveBar', color: t.pnl >= 0 ? UP : DOWN, shape: 'arrowDown', text: `SELL ${t.exit_time} ₹${fmt2(t.exit)}` });
+  candles.setMarkers(markers.sort((a, b) => (a.time > b.time) - (a.time < b.time)));
+  legend.push(`<span><i style="border-color:${BUY};border-top-style:dashed"></i>Entry ₹${fmt2(t.entry)} · ${t.entry_date} ${t.entry_time} IST</span>`);
+  legend.push(t.holding ? `<span><i style="border-color:${t.pnl >= 0 ? UP : DOWN};border-top-style:dashed"></i>Last close ₹${fmt2(exitPx)} · still held</span>`
+                        : `<span><i style="border-color:${t.pnl >= 0 ? UP : DOWN};border-top-style:dashed"></i>Exit ₹${fmt2(exitPx)} · ${t.exit_date} ${t.exit_time} IST</span>`);
+  legend.push(`<span>${daily ? 'Daily candles · ▲ buy and ▼ sell fill at the marked candle\'s open' : `1-minute candles · ${view === 'entry' ? t.entry_date : t.exit_date} · the 09:15 candle's open is the fill`}</span>`);
+  $('clegend').innerHTML = legend.join('');
+  // Daily: start ~6 months before the entry so the run-up is visible.
+  if (daily) {
+    const iEntry = rows.findIndex(r => r[0] >= t.entry_date);
+    tchart.timeScale().setVisibleLogicalRange({ from: Math.max(0, iEntry - 120), to: rows.length + 3 });
+  } else tchart.timeScale().setVisibleLogicalRange({ from: -35, to: rows.length + 2 });  // room for the 09:15 label
+  // Hovered candle's OHLC.
+  const ohlc = document.createElement('div'); ohlc.className = 'ohlc'; el.appendChild(ohlc);
+  const byTime = new Map(rows.map((r, i) => [time(r), i]));
+  const showBar = tm => {
+    const i = byTime.get(tm); if (i == null) return;
+    const r = rows[i], col = r[4] >= r[1] ? UP : DOWN, prev = i ? rows[i - 1][4] : r[1], ch = r[4] - prev;
+    ohlc.innerHTML = `<span class="muted">${daily ? r[0] : r[0].slice(0, 10) + ' ' + r[0].slice(11, 19)}</span>`
+      + ['O', 'H', 'L', 'C'].map((k, j) => `<span>${k}<b style="color:${col}">${fmt2(r[j + 1])}</b></span>`).join('')
+      + `<span style="color:${ch >= 0 ? UP : DOWN}">${ch >= 0 ? '+' : ''}${fmt2(ch)} (${pct(ch / prev * 100, 2)})</span>`
+      + `<span>Vol<b>${Number(r[5]).toLocaleString('en-IN')}</b></span>`;
+  };
+  const lastT = time(rows.at(-1));
+  showBar(lastT);
+  tchart.subscribeCrosshairMove(p => showBar(p?.time != null ? p.time : lastT));
+  // Position box from the entry to the exit (or the last candle while held).
+  if (daily) {
+    const boxEl = document.createElement('div'), lbl = document.createElement('div');
+    const cls = t.pnl >= 0 ? 'win' : 'loss';
+    boxEl.className = `pbox ${cls}`; lbl.className = `plbl ${cls}`;
+    lbl.textContent = `${pct(t.pnl_pct)} · ${inr(t.pnl)}`;
+    el.append(boxEl, lbl);
+    const endT = t.holding ? lastT : t.exit_date;
+    const place = () => {
+      const ts = tchart.timeScale();
+      const x1 = ts.timeToCoordinate(t.entry_date), x2 = ts.timeToCoordinate(endT);
+      const y1 = candles.priceToCoordinate(t.entry), y2 = candles.priceToCoordinate(exitPx);
+      const ok = [x1, x2, y1, y2].every(v => v != null);
+      boxEl.hidden = lbl.hidden = !ok;
+      if (!ok) return;
+      Object.assign(boxEl.style, { left: `${Math.min(x1, x2)}px`, width: `${Math.max(2, Math.abs(x2 - x1))}px`, top: `${Math.min(y1, y2)}px`, height: `${Math.max(2, Math.abs(y2 - y1))}px` });
+      Object.assign(lbl.style, { left: `${Math.min(x1, x2) + 4}px`, top: `${Math.min(y1, y2) - 24}px` });
+    };
+    tchart.timeScale().subscribeVisibleLogicalRangeChange(() => requestAnimationFrame(place));
+    requestAnimationFrame(place);
+  }
+}
+addEventListener('resize', () => { if (!$('cmodal').hidden && cdata[cview]) drawTradeChart(); });
+
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { result && drawCharts(result); if (!$('cmodal').hidden && cdata[cview]) drawTradeChart(); });
 (async () => {
   const j = await appFetch('/api/momentum/job').then(r => r.json()).catch(() => null);
   if (j) showJob(j);
