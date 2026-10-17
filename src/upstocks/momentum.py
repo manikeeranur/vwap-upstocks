@@ -3,8 +3,10 @@
 Rules (one decision per month):
 - Universe each day: the `universe` stocks with the highest 6-month (126-day)
   median turnover (close × volume), among stocks with 1 year of history.
-- Month-end, after the close: score = mean of the cross-sectional z-scores of
-  6-month and 12-month return ÷ annualised 1-year volatility; rank 1 is best.
+- Month-end, after the close, score each stock (rank 1 is best) by either
+  risk-adjusted: mean of the cross-sectional z-scores of 6-month and 12-month
+  return ÷ annualised 1-year volatility, or
+  12-1: the raw return from 252 to 21 trading days ago (skips the latest month).
 - A holding is sold if its rank is worse than `exit_rank` (or it left the
   universe) or it closed below its `sma_days` average; the rest are kept.
 - Free slots are filled from the top of the ranking, skipping stocks already
@@ -22,6 +24,8 @@ import numpy as np
 import pandas as pd
 
 R6, R12, VOL_DAYS, TURNOVER_DAYS, HISTORY_DAYS = 126, 252, 252, 126, 252
+SKIP = 21  # 12-1 momentum leaves out the latest month
+SCORES = ("risk_adjusted", "12-1")
 # Fills use daily candles: the open price is set at 09:15:00 IST, the close at 15:30:00.
 OPEN_TIME, CLOSE_TIME = "09:15:00", "15:30:00"
 
@@ -35,6 +39,7 @@ class Settings:
     universe: int = 500
     exit_rank: int = 20
     sma_days: int = 100
+    score: str = "risk_adjusted"  # or "12-1": close 21 days ago ÷ close 252 days ago − 1
     cost_pct: float = 0.1
 
 
@@ -49,6 +54,7 @@ class Features:
     turnover: np.ndarray
     r6: np.ndarray
     r12: np.ndarray
+    r12_1: np.ndarray
     vol: np.ndarray
     sma: np.ndarray
     close: np.ndarray
@@ -69,7 +75,7 @@ def month_ends(dates: list[date]) -> list[int]:
 def features(close: np.ndarray, volume: np.ndarray, rows: list[int], sma_days: int) -> Features:
     """Rolling statistics per stock, sampled at `rows` (decision days)."""
     n = close.shape[1]
-    out = {k: np.full((len(rows), n), np.nan) for k in ("turnover", "r6", "r12", "vol", "sma", "close")}
+    out = {k: np.full((len(rows), n), np.nan) for k in ("turnover", "r6", "r12", "r12_1", "vol", "sma", "close")}
     eligible = np.zeros((len(rows), n), dtype=bool)
     for j in range(n):
         raw = pd.Series(close[:, j], dtype="float64")
@@ -80,6 +86,7 @@ def features(close: np.ndarray, volume: np.ndarray, rows: list[int], sma_days: i
         turnover = (raw * pd.Series(volume[:, j], dtype="float64")).rolling(TURNOVER_DAYS, min_periods=TURNOVER_DAYS // 2).median()
         returns = c.pct_change(fill_method=None)
         cols = {"turnover": turnover, "r6": c / c.shift(R6) - 1, "r12": c / c.shift(R12) - 1,
+                "r12_1": c.shift(SKIP) / c.shift(R12) - 1,
                 "vol": returns.rolling(VOL_DAYS, min_periods=VOL_DAYS * 3 // 4).std() * math.sqrt(252),
                 "sma": c.rolling(sma_days, min_periods=sma_days).mean(), "close": raw}
         for k, s in cols.items():
@@ -88,7 +95,7 @@ def features(close: np.ndarray, volume: np.ndarray, rows: list[int], sma_days: i
         eligible[:, j] = (np.asarray(rows) - first >= HISTORY_DAYS) & traded.to_numpy()[rows]
     f = Features(eligible=eligible, **out)
     f.eligible &= np.isfinite(f.turnover) & (f.turnover > 0) & np.isfinite(f.r6) & np.isfinite(f.r12) \
-        & np.isfinite(f.vol) & (f.vol > 0) & np.isfinite(f.sma)
+        & np.isfinite(f.vol) & (f.vol > 0) & np.isfinite(f.sma) & np.isfinite(f.r12_1)
     return f
 
 
@@ -97,17 +104,20 @@ def _z(x: np.ndarray) -> np.ndarray:
     return (x - x.mean()) / sd if sd > 0 else np.zeros_like(x)
 
 
-def rank_day(f: Features, k: int, universe: int) -> list[dict]:
+def rank_day(f: Features, k: int, universe: int, score_by: str = "risk_adjusted") -> list[dict]:
     """Universe for decision row k, best first: [{col, rank, score, ...}]."""
     cols = np.flatnonzero(f.eligible[k])
     if not len(cols):
         return []
     cols = cols[np.argsort(-f.turnover[k, cols], kind="stable")][:universe]
-    s6, s12 = f.r6[k, cols] / f.vol[k, cols], f.r12[k, cols] / f.vol[k, cols]
-    score = (_z(s6) + _z(s12)) / 2
+    if score_by == "12-1":
+        score = f.r12_1[k, cols]  # raw %, no volatility adjustment
+    else:
+        s6, s12 = f.r6[k, cols] / f.vol[k, cols], f.r12[k, cols] / f.vol[k, cols]
+        score = (_z(s6) + _z(s12)) / 2
     order = np.argsort(-score, kind="stable")
     return [{"col": int(cols[o]), "rank": r, "score": float(score[o]), "r6": float(f.r6[k, cols[o]]),
-             "r12": float(f.r12[k, cols[o]]), "vol": float(f.vol[k, cols[o]]), "close": float(f.close[k, cols[o]]),
+             "r12": float(f.r12[k, cols[o]]), "r12_1": float(f.r12_1[k, cols[o]]), "vol": float(f.vol[k, cols[o]]), "close": float(f.close[k, cols[o]]),
              "sma": float(f.sma[k, cols[o]]), "above_sma": bool(f.close[k, cols[o]] >= f.sma[k, cols[o]])}
             for r, o in enumerate(order, 1)]
 
@@ -208,7 +218,7 @@ def run(dates: list[date], symbols: list[str], open_: np.ndarray, close: np.ndar
         value = cash + sum(p["qty"] * last_close[i, c] for c, p in pos.items() if np.isfinite(last_close[i, c]))
         equity.append([dates[i].isoformat(), _r(value)])
         if i in decisions:
-            ranking = rank_day(f, decisions[i], st.universe)
+            ranking = rank_day(f, decisions[i], st.universe, st.score)
             sells, keep, buys = decide(ranking, list(pos), st.slots, st.exit_rank)
             rank_of = {r["col"]: r["rank"] for r in ranking}
             meta = {"date": dates[i].isoformat(), "universe": len(ranking), "value": _r(value),
@@ -231,9 +241,9 @@ def run(dates: list[date], symbols: list[str], open_: np.ndarray, close: np.ndar
     k_latest = sample.index(latest)
     held_cols = set(pos)
     latest_rank = [{"symbol": symbols[r["col"]], "rank": r["rank"], "score": _r(r["score"], 3), "r6": _r(r["r6"] * 100, 1),
-                    "r12": _r(r["r12"] * 100, 1), "vol": _r(r["vol"] * 100, 1), "close": _r(r["close"]),
+                    "r12": _r(r["r12"] * 100, 1), "r12_1": _r(r["r12_1"] * 100, 1), "vol": _r(r["vol"] * 100, 1), "close": _r(r["close"]),
                     "sma": _r(r["sma"]), "above_sma": r["above_sma"], "held": r["col"] in held_cols}
-                   for r in rank_day(f, k_latest, st.universe)[:50]]
+                   for r in rank_day(f, k_latest, st.universe, st.score)[:50]]
     bench = None
     if benchmark is not None:
         b = pd.Series(benchmark[lo:hi + 1]).ffill().to_numpy()

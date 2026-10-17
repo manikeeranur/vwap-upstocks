@@ -53,6 +53,12 @@
       <select id="savedRuns" aria-label="Saved momentum runs" style="max-width:100%;width:100%"></select>
     </label>
     <div class="grid">
+      <label style="grid-column:1/-1">Strategy
+        <select id="score">
+          <option value="risk_adjusted" selected>Risk-adjusted — 6M &amp; 12M return ÷ volatility, z-scored</option>
+          <option value="12-1">12-1 momentum — return from 12 months ago to 1 month ago</option>
+        </select>
+      </label>
       <label>From <input type="date" id="start" value="{{ start }}" min="2001-01-01"></label>
       <label>To <input type="date" id="end" value="{{ end }}"></label>
       <label>Capital ₹ <input type="number" id="capital" value="1000000" min="10000" step="10000"></label>
@@ -127,13 +133,14 @@ const inr = (n, d = 0) => n == null ? '—' : '₹' + Number(n).toLocaleString('
 const pct = (n, d = 1) => n == null ? '—' : `${n > 0 ? '+' : ''}${Number(n).toFixed(d)}%`;
 const at = (d, t) => d ? `${d} <span class="flag">${t || ''}</span>` : '—';
 const cls = n => n > 0 ? 'up' : n < 0 ? 'down' : '';
+const SCORE_NAMES = { 'risk_adjusted': 'Risk-adjusted', '12-1': '12-1 momentum' };
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 let timer = null, charts = [], result = null;
 
 function body() {
   const n = id => Number($(id).value);
   return { start: $('start').value, end: $('end').value, capital: n('capital'), slots: n('slots'), universe: n('universe'),
-           exit_rank: n('exit_rank'), sma_days: n('sma_days'), cost_pct: n('cost_pct'), refresh_all: $('refresh_all').checked };
+           exit_rank: n('exit_rank'), sma_days: n('sma_days'), cost_pct: n('cost_pct'), score: $('score').value, refresh_all: $('refresh_all').checked };
 }
 
 function showJob(j) {
@@ -181,7 +188,7 @@ async function loadRuns() {
   const select = $('savedRuns');
   const when = s => s ? s.slice(0, 16).replace('T', ' ') : '';
   select.replaceChildren(...runs.map(run => new Option(
-    `${when(run.finished)} · ${run.start} → ${run.through || run.end} · ${run.slots} slot${run.slots === 1 ? '' : 's'} · ${inr(run.capital)} · CAGR ${pct(run.cagr)} · max DD ${pct(run.max_dd)}`, run.id)));
+    `${when(run.finished)} · ${SCORE_NAMES[run.score || 'risk_adjusted']} · ${run.start} → ${run.through || run.end} · ${run.slots} slot${run.slots === 1 ? '' : 's'} · ${inr(run.capital)} · CAGR ${pct(run.cagr)} · max DD ${pct(run.max_dd)}`, run.id)));
   $('savedRunsLabel').hidden = !runs.length;
 }
 
@@ -201,7 +208,7 @@ function render(res) {
   $('results').hidden = false;
   const s = res.stats, st = res.settings;
   ['start','capital','universe','exit_rank','sma_days','cost_pct'].forEach(k => { if (st[k] != null) $(k).value = st[k]; });
-  $('perfMeta').textContent = `${st.start} → ${res.data?.through || st.end} · ${st.slots} slots · ${inr(st.capital)} start`;
+  $('perfMeta').textContent = `${SCORE_NAMES[st.score || 'risk_adjusted']} · ${st.start} → ${res.data?.through || st.end} · ${st.slots} slots · ${inr(st.capital)} start`;
   const k = (label, val, sub = '', c = '') => `<div><span>${label}</span><b class="${c}">${val}</b><small>${sub}</small></div>`;
   $('kpis').innerHTML = [
     k('Final value', inr(s.final), `${pct(s.total)} total`, cls(s.total)),
@@ -309,8 +316,8 @@ function now(res) {
   $('holdings').innerHTML = `<thead><tr><th>Stock</th><th class="l">Bought (IST)</th><th>Entry ₹</th><th>Qty</th><th>Last close ₹</th><th>Value</th><th>P&amp;L</th><th>Entry rank</th></tr></thead><tbody>` +
     (h.length ? h.map(x => `<tr><td><b>${esc(x.symbol)}</b></td><td class="l">${at(x.entry_date, x.entry_time)}</td><td>${inr(x.entry, 2)}</td><td>${x.qty}</td><td>${inr(x.close, 2)}</td><td>${inr(x.value)}</td><td class="${cls(x.pnl)}">${inr(x.pnl)} <span class="flag">${pct(x.pnl_pct)}</span></td><td>#${x.entry_rank}</td></tr>`).join('')
       : `<tr><td colspan="8" class="muted">No holdings</td></tr>`) + `<tr><td colspan="5" class="muted">Cash</td><td>${inr(res.cash)}</td><td colspan="2"></td></tr></tbody>`;
-  $('ranking').innerHTML = `<thead><tr><th>Rank</th><th class="l">Stock</th><th>Score</th><th>6M return</th><th>12M return</th><th>Volatility</th><th>Close ₹</th><th>${res.settings.sma_days}-day avg ₹</th><th>Status</th></tr></thead><tbody>` +
-    L.ranking.map(r => `<tr><td>#${r.rank}</td><td class="l"><b>${esc(r.symbol)}</b></td><td>${r.score.toFixed(2)}</td><td class="${cls(r.r6)}">${pct(r.r6)}</td><td class="${cls(r.r12)}">${pct(r.r12)}</td><td>${r.vol.toFixed(1)}%</td><td>${inr(r.close, 2)}</td><td>${inr(r.sma, 2)}</td>` +
+  $('ranking').innerHTML = `<thead><tr><th>Rank</th><th class="l">Stock</th><th>Score</th><th>6M return</th><th>12M return</th><th>12-1 return</th><th>Volatility</th><th>Close ₹</th><th>${res.settings.sma_days}-day avg ₹</th><th>Status</th></tr></thead><tbody>` +
+    L.ranking.map(r => `<tr><td>#${r.rank}</td><td class="l"><b>${esc(r.symbol)}</b></td><td>${r.score.toFixed(2)}</td><td class="${cls(r.r6)}">${pct(r.r6)}</td><td class="${cls(r.r12)}">${pct(r.r12)}</td><td class="${cls(r.r12_1)}">${pct(r.r12_1)}</td><td>${r.vol.toFixed(1)}%</td><td>${inr(r.close, 2)}</td><td>${inr(r.sma, 2)}</td>` +
       `<td>${r.held ? '<span class="pill buy">Held</span>' : ''}${r.above_sma ? '' : '<span class="pill sell">Below average</span>'}</td></tr>`).join('') + '</tbody>';
 }
 

@@ -212,7 +212,7 @@ class MomentumService:
         self._write(self.runs_dir / f"{run_id}.json", result)
         st, s = result["settings"], result["stats"]
         entry = {"id": run_id, "finished": result.get("finished"), "start": st["start"], "end": st["end"],
-                 "through": (result.get("data") or {}).get("through"), "slots": st["slots"], "capital": st["capital"],
+                 "through": (result.get("data") or {}).get("through"), "slots": st["slots"], "capital": st["capital"], "score": st.get("score", "risk_adjusted"),
                  "cagr": s.get("cagr"), "max_dd": s.get("max_dd"), "final": s.get("final")}
         runs = [entry] + [r for r in self.runs() if r["id"] != run_id]
         for old in runs[MAX_RUNS:]:

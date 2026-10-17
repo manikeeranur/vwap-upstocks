@@ -109,3 +109,29 @@ def test_capital_after_each_trade_with_one_slot_adds_up():
     for t in trades:
         assert abs(t["capital_after"] - (prev + t["pnl"])) < 0.05
         prev = t["capital_after"]
+
+
+def test_12_1_score_uses_the_price_a_month_ago_not_today():
+    n_days = 300
+    close = np.full((n_days, 2), 100.0)
+    t = n_days - 1
+    close[t - 252:, 0] = np.linspace(100, 180, n_days - (t - 252))  # rises to ₹180 …
+    close[t - 21, 0], close[t - 252, 0] = 180.0, 100.0
+    close[t - 20:, 0] = 170.0                                       # … then drifts back to ₹170 today
+    close[:, 1] = np.linspace(100, 150, n_days)                      # steady climber
+    volume = np.full((n_days, 2), 1e6)
+    f = momentum.features(close, volume, [t], sma_days=100)
+    assert abs(f.r12_1[0, 0] - 0.80) < 1e-9
+    ranked = momentum.rank_day(f, 0, universe=2, score_by="12-1")
+    assert [r["col"] for r in ranked] == [0, 1] and abs(ranked[0]["score"] - 0.80) < 1e-9
+
+
+def test_score_setting_changes_only_the_ranking_number():
+    dates, symbols, open_, close, volume = _market()
+    base = dict(start=dates[300], end=dates[-1], capital=100_000, slots=2, universe=6, exit_rank=3)
+    a = momentum.run(dates, symbols, open_, close, volume, momentum.Settings(**base))
+    b = momentum.run(dates, symbols, open_, close, volume, momentum.Settings(**base, score="12-1"))
+    rb = b["latest"]["ranking"]
+    assert all(abs(x["score"] - x["r12_1"] / 100) < 1e-3 for x in rb)  # score = raw 12-1 return
+    assert all(x["score"] >= y["score"] for x, y in zip(rb, rb[1:]))
+    assert a["settings"]["score"] == "risk_adjusted" and b["settings"]["score"] == "12-1"
