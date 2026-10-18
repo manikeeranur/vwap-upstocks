@@ -113,7 +113,7 @@ class MomentumRequest(Input):
     exit_rank: int = Field(default=20, strict=True, ge=1, le=2000)
     sma_days: int = Field(default=100, strict=True, ge=10, le=250)
     cost_pct: float = Field(default=0.1, ge=0, le=5)
-    score: Literal["risk_adjusted", "12-1"] = "risk_adjusted"
+    score: Literal["risk_adjusted", "12-1", "tuned"] = "risk_adjusted"
     refresh_all: StrictBool = False
 
     @model_validator(mode="after")

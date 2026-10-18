@@ -78,6 +78,7 @@
         <select id="score">
           <option value="risk_adjusted" selected>Risk-adjusted — 6M &amp; 12M return ÷ volatility, z-scored</option>
           <option value="12-1">12-1 momentum — return from 12 months ago to 1 month ago</option>
+          <option value="tuned">12-1 Tuned — 12-1 with 1 slot, sell rank 5, 150-day average, top 1,000</option>
         </select>
       </label>
       <label>From <input type="date" id="start" value="{{ start }}" min="2001-01-01"></label>
@@ -169,7 +170,15 @@ const inr = (n, d = 0) => n == null ? '—' : '₹' + Number(n).toLocaleString('
 const pct = (n, d = 1) => n == null ? '—' : `${n > 0 ? '+' : ''}${Number(n).toFixed(d)}%`;
 const at = (d, t) => d ? `${d} <span class="flag">${t || ''}</span>` : '—';
 const cls = n => n > 0 ? 'up' : n < 0 ? 'down' : '';
-const SCORE_NAMES = { 'risk_adjusted': 'Risk-adjusted', '12-1': '12-1 momentum' };
+const SCORE_NAMES = { 'risk_adjusted': 'Risk-adjusted', '12-1': '12-1 momentum', 'tuned': '12-1 Tuned' };
+// 12-1 Tuned fills its rule values; the other strategies use the standard ones.
+const RULES = { tuned: { slots: 1, exit_rank: 5, sma_days: 150, universe: 1000 }, standard: { slots: 1, exit_rank: 20, sma_days: 100, universe: 500 } };
+let lastScore = 'risk_adjusted';
+$('score').addEventListener('change', () => {
+  const now = $('score').value;
+  if (now === 'tuned' || lastScore === 'tuned') Object.entries(RULES[now === 'tuned' ? 'tuned' : 'standard']).forEach(([k, v]) => { $(k).value = v; });
+  lastScore = now;
+});
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 let timer = null, charts = [], result = null;
 
@@ -241,9 +250,10 @@ $('savedRuns').addEventListener('change', e => loadResult(e.target.value));
 function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
 
 function render(res) {
+  ['start','capital','universe','exit_rank','sma_days','cost_pct'].forEach(k => { if (res.settings[k] != null) $(k).value = res.settings[k]; });
+  $('score').value = lastScore = res.settings.score || 'risk_adjusted';  // keep the strategy in step with its rule values
   $('results').hidden = false;
   const s = res.stats, st = res.settings;
-  ['start','capital','universe','exit_rank','sma_days','cost_pct'].forEach(k => { if (st[k] != null) $(k).value = st[k]; });
   $('perfMeta').textContent = `${SCORE_NAMES[st.score || 'risk_adjusted']} · ${st.start} → ${res.data?.through || st.end} · ${st.slots} slots · ${inr(st.capital)} start`;
   const k = (label, val, sub = '', c = '') => `<div><span>${label}</span><b class="${c}">${val}</b><small>${sub}</small></div>`;
   $('kpis').innerHTML = [

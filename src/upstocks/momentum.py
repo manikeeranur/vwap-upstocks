@@ -25,7 +25,10 @@ import pandas as pd
 
 R6, R12, VOL_DAYS, TURNOVER_DAYS, HISTORY_DAYS = 126, 252, 252, 126, 252
 SKIP = 21  # 12-1 momentum leaves out the latest month
-SCORES = ("risk_adjusted", "12-1")
+SCORES = ("risk_adjusted", "12-1", "tuned")
+# "tuned" ranks like 12-1; the page fills these rule values for it (chosen 2026-10-18:
+# ₹50,000 from Nov 2019 → ₹1.75 crore in the backtest, worst drop −74%).
+TUNED = {"slots": 1, "exit_rank": 5, "sma_days": 150, "universe": 1000}
 # Fills use daily candles: the open price is set at 09:15:00 IST, the close at 15:30:00.
 OPEN_TIME, CLOSE_TIME = "09:15:00", "15:30:00"
 
@@ -39,7 +42,7 @@ class Settings:
     universe: int = 500
     exit_rank: int = 20
     sma_days: int = 100
-    score: str = "risk_adjusted"  # or "12-1": close 21 days ago ÷ close 252 days ago − 1
+    score: str = "risk_adjusted"  # or "12-1" / "tuned": close 21 days ago ÷ close 252 days ago − 1
     cost_pct: float = 0.1
 
 
@@ -110,7 +113,7 @@ def rank_day(f: Features, k: int, universe: int, score_by: str = "risk_adjusted"
     if not len(cols):
         return []
     cols = cols[np.argsort(-f.turnover[k, cols], kind="stable")][:universe]
-    if score_by == "12-1":
+    if score_by in ("12-1", "tuned"):
         score = f.r12_1[k, cols]  # raw %, no volatility adjustment
     else:
         s6, s12 = f.r6[k, cols] / f.vol[k, cols], f.r12[k, cols] / f.vol[k, cols]

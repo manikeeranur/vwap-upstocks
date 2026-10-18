@@ -129,9 +129,22 @@ def test_12_1_score_uses_the_price_a_month_ago_not_today():
 def test_score_setting_changes_only_the_ranking_number():
     dates, symbols, open_, close, volume = _market()
     base = dict(start=dates[300], end=dates[-1], capital=100_000, slots=2, universe=6, exit_rank=3)
-    a = momentum.run(dates, symbols, open_, close, volume, momentum.Settings(**base))
+    a = momentum.run(dates, symbols, open_, close, volume, momentum.Settings(**base, score="risk_adjusted"))
     b = momentum.run(dates, symbols, open_, close, volume, momentum.Settings(**base, score="12-1"))
     rb = b["latest"]["ranking"]
     assert all(abs(x["score"] - x["r12_1"] / 100) < 1e-3 for x in rb)  # score = raw 12-1 return
     assert all(x["score"] >= y["score"] for x, y in zip(rb, rb[1:]))
     assert a["settings"]["score"] == "risk_adjusted" and b["settings"]["score"] == "12-1"
+
+
+def test_defaults_stay_risk_adjusted():
+    st = momentum.Settings(start=date(2019, 11, 1), end=date(2026, 10, 17))
+    assert (st.score, st.slots, st.exit_rank, st.sma_days, st.universe, st.capital) == ("risk_adjusted", 1, 20, 100, 500, 1_000_000)
+
+
+def test_tuned_ranks_like_12_1():
+    dates, symbols, open_, close, volume = _market()
+    kw = dict(start=dates[300], end=dates[-1], capital=100_000, **{**momentum.TUNED, "universe": 6})
+    a = momentum.run(dates, symbols, open_, close, volume, momentum.Settings(**{**kw, "score": "12-1"}))
+    b = momentum.run(dates, symbols, open_, close, volume, momentum.Settings(**{**kw, "score": "tuned"}))
+    assert a["trades"] == b["trades"] and a["stats"] == b["stats"] and b["settings"]["score"] == "tuned"

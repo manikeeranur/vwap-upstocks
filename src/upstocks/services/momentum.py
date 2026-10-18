@@ -250,14 +250,18 @@ class MomentumService:
             cached = await asyncio.to_thread(lambda: {k: self.store.load(k) for k in keys})
             active = sorted((k for k, z in cached.items() if z is not None and len(z["d"])),
                             key=lambda k: -_recent_turnover(cached[k]))[:ACTIVE]
-            active = set(active) | {BENCHMARK}
+            # NIFTY's latest candle is the latest trading day Upstox has published; a stock whose
+            # data reaches it is current (weekends, holidays and early mornings need no download).
+            await self.store.refresh(BENCHMARK, need_from, fetch_end, cached[BENCHMARK])
+            cached[BENCHMARK] = await asyncio.to_thread(self.store.load, BENCHMARK)
+            latest = min(end.toordinal(), int(cached[BENCHMARK]["d"][-1]))
             todo = []
-            for k in keys:
+            for k in keys[1:]:
                 z = cached[k]
                 if z is None or int(z["frm"]) > need_from.toordinal():
                     todo.append(k)
-                elif int(z["thru"]) < end.toordinal() and (refresh_all or k in active
-                                                           or int(z["thru"]) < (end - timedelta(days=STALE_DAYS)).toordinal()):
+                elif max(int(z["thru"]), int(z["d"][-1]) if len(z["d"]) else 0) < latest and (
+                        refresh_all or k in active or int(z["thru"]) < latest - STALE_DAYS):
                     todo.append(k)
             self.job.update(phase="Downloading daily prices from Upstox" if todo else "Prices up to date",
                             done=0, total=len(todo), failed=[])
