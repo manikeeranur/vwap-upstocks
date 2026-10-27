@@ -67,7 +67,7 @@ def _profile_of(row):
     except ValueError:
         p = {}
     avatar = p.get("avatar") or ""
-    return {"name": p.get("name") or "", "email": p.get("email") or "",
+    return {"name": p.get("name") or "",
             "avatar": avatar if avatar.startswith("https://") else "", "user_id": row.get("broker_user") or ""}
 
 
