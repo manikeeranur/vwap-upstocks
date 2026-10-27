@@ -394,8 +394,8 @@ class Repository:
                              (api_secret_sealed, utc_now(), user_id, broker))
             _audit(conn, "broker", "Broker keys updated", {"user": user_id, "broker": broker}, component="application")
 
-    def save_broker_token(self, user_id, broker, token_sealed, issued, broker_user):
+    def save_broker_token(self, user_id, broker, token_sealed, issued, broker_user, profile=None):
         with self.db.connect(write=True) as conn:
-            conn.execute("UPDATE broker_accounts SET access_token=?,token_issued=?,broker_user=?,updated_at=? WHERE user_id=? AND broker=?",
-                         (token_sealed, issued, broker_user, utc_now(), user_id, broker))
+            conn.execute("UPDATE broker_accounts SET access_token=?,token_issued=?,broker_user=?,profile=?,updated_at=? WHERE user_id=? AND broker=?",
+                         (token_sealed, issued, broker_user, json.dumps(profile or {}), utc_now(), user_id, broker))
             _audit(conn, "broker", "Broker login saved", {"user": user_id, "broker": broker, "broker_user": broker_user}, component="application")

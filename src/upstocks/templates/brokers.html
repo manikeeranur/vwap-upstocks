@@ -23,6 +23,10 @@
   .urls code { display:block; padding:8px 10px; background:var(--surface); border:1px solid var(--border); border-radius:6px; overflow-wrap:anywhere; user-select:all; }
   .sec { margin-top:16px; } body .sec.card { padding:22px; }
   .sec h2 { font-size:14px; margin:0 0 10px; }
+  .profile { display:flex; align-items:center; gap:12px; padding:12px; margin-bottom:16px; border:1px solid var(--border); border-radius:10px; background:var(--surface); }
+  .profile b { display:block; font-size:14px; font-weight:600; }
+  .profile span:not(.avatar) { display:block; font-size:12px; color:var(--muted); overflow-wrap:anywhere; }
+  .avatar { width:44px; height:44px; flex:none; border-radius:50%; object-fit:cover; display:grid; place-items:center; background:var(--accent-soft); color:var(--accent); font-weight:600; font-size:15px; border:1px solid var(--border); }
   .saved-keys { display:grid; grid-template-columns:1fr 1fr auto; gap:12px; align-items:end; }
   .saved-keys span { display:block; font-size:11px; color:var(--muted); margin-bottom:4px; }
   .saved-keys b { font-size:13px; font-weight:500; }
@@ -68,11 +72,18 @@ async function api(path, body) {
   if (!r.ok) throw new Error(typeof j.detail === 'string' ? j.detail : Array.isArray(j.detail) ? 'Please check the values you entered.' : `Request failed (${r.status})`);
   return j;
 }
+const initials = n => (n || '?').split(/\s+/).filter(Boolean).slice(0,2).map(w => w[0]).join('').toUpperCase();
+function profileCard(p) {
+  if (!p || !(p.name || p.user_id)) return '';
+  const pic = p.avatar ? `<img class="avatar" src="${esc(p.avatar)}" alt="" referrerpolicy="no-referrer">` : `<span class="avatar">${esc(initials(p.name || p.user_id))}</span>`;
+  return `<div class="profile">${pic}<div><b>${esc(p.name || p.user_id)}</b>${p.email ? `<span>${esc(p.email)}</span>` : ''}${p.user_id ? `<span>Client ID · ${esc(p.user_id)}</span>` : ''}</div></div>`;
+}
 function render(s) {
   last = s;
   $('grid').innerHTML = Object.entries(s.brokers).map(([b,x]) => `
     <section class="card broker" aria-label="${NAMES[b]}">
       <div class="broker-head"><h2>${NAMES[b]}</h2><span class="status ${x.logged_in ? 'ok' : x.has_key ? 'bad' : ''}">${x.logged_in ? 'Logged in today' : x.has_key ? 'Not logged in' : 'Not set up'}</span></div>
+      ${profileCard(x.profile)}
       ${x.has_key && x.has_secret && !editing.has(b) ? `<div class="saved-keys"><div><span>API key</span><b>******</b></div><div><span>API secret</span><b>******</b></div><button class="btn ghost" type="button" data-edit="${b}">Change keys</button></div>` : `<form data-keys="${b}">
         <label>API key <input name="api_key" autocomplete="off" spellcheck="false" placeholder="${x.has_key ? '****** (saved)' : 'Paste your API key'}"></label>
         <label>API secret <input name="api_secret" type="password" autocomplete="new-password" placeholder="${x.has_secret ? '****** (saved)' : 'Paste your API secret'}"></label>

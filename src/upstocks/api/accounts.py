@@ -1,5 +1,6 @@
 """Sign-in, and each person's broker keys, daily broker logins and Telegram reminders."""
 import asyncio
+import json
 import logging
 import time
 
@@ -60,6 +61,16 @@ async def brokers_page(request: Request):
     return templates.TemplateResponse(request, "brokers.html", {"urls": _urls(request)})
 
 
+def _profile_of(row):
+    try:
+        p = json.loads(row.get("profile") or "{}")
+    except ValueError:
+        p = {}
+    avatar = p.get("avatar") or ""
+    return {"name": p.get("name") or "", "email": p.get("email") or "",
+            "avatar": avatar if avatar.startswith("https://") else "", "user_id": row.get("broker_user") or ""}
+
+
 def _status(request, user_id):
     repo, vault = request.app.state.repository, request.app.state.vault
     out = {}
@@ -72,7 +83,7 @@ def _status(request, user_id):
         out[b] = {"has_key": bool(key),
                   "has_secret": bool(creds.api_secret), "logged_in": creds.token_valid(),
                   "valid_until": until.isoformat(timespec="minutes") if until else None,
-                  "broker_user": row.get("broker_user") or ""}
+                  "broker_user": row.get("broker_user") or "", "profile": _profile_of(row)}
     user = repo.user(user_id) or {}
     return {"brokers": out, "telegram": bool(user.get("telegram_chat_id")), "username": user.get("username"),
             "urls": _urls(request), "telegram_bot": bool(request.app.state.settings.telegram_bot_token)}
@@ -98,10 +109,10 @@ def _creds(request, user_id, broker):
                                vault.open(row.get("access_token", "")), row.get("token_issued"))
 
 
-async def _save_token(request, user_id, broker, token, broker_user):
+async def _save_token(request, user_id, broker, token, profile):
     issued = brokers.now_iso()
     await asyncio.to_thread(request.app.state.repository.save_broker_token, user_id, broker,
-                            request.app.state.vault.seal(token), issued, broker_user)
+                            request.app.state.vault.seal(token), issued, profile["user_id"], profile)
     username = (await asyncio.to_thread(request.app.state.repository.user, user_id) or {}).get("username", user_id)
     await request.app.state.trading._activity(f"{username} · {brokers.LABELS[broker]}: logged in for today")
 
@@ -130,10 +141,10 @@ async def upstox_callback(request: Request, code: str = "", state: str = ""):
         return _done(False, "Upstox login expired or belongs to another person. Try again.")
     creds = await asyncio.to_thread(_creds, request, uid, "upstox")
     try:
-        token, upstox_user = await brokers.upstox_exchange_code(creds.api_key, creds.api_secret, code, _urls(request)["upstox_redirect"])
+        token, profile = await brokers.upstox_exchange_code(creds.api_key, creds.api_secret, code, _urls(request)["upstox_redirect"])
     except brokers.BrokerError as exc:
         return _done(False, redact(str(exc)))
-    await _save_token(request, uid, "upstox", token, upstox_user)
+    await _save_token(request, uid, "upstox", token, profile)
     return _done(True, "Upstox logged in for today")
 
 
@@ -144,10 +155,10 @@ async def kite_callback(request: Request, request_token: str = "", status: str =
         return _done(False, "Kite login expired, was cancelled or belongs to another person. Try again.")
     creds = await asyncio.to_thread(_creds, request, uid, "kite")
     try:
-        token, kite_user = await brokers.kite_exchange_token(creds.api_key, creds.api_secret, request_token)
+        token, profile = await brokers.kite_exchange_token(creds.api_key, creds.api_secret, request_token)
     except brokers.BrokerError as exc:
         return _done(False, redact(str(exc)))
-    await _save_token(request, uid, "kite", token, kite_user)
+    await _save_token(request, uid, "kite", token, profile)
     return _done(True, "Kite logged in for today")
 
 
@@ -184,14 +195,14 @@ async def upstox_notify(request: Request):
     if body.get("message_type") != "access_token" or not token or not waiting:
         return JSONResponse({"ok": False}, status_code=202)
     try:
-        upstox_user = await brokers.upstox_profile(token)
+        profile = await brokers.upstox_profile(token)
     except brokers.BrokerError:
         return JSONResponse({"ok": False}, status_code=202)
     for uid, _ in waiting:
         row = await asyncio.to_thread(request.app.state.repository.broker_account, uid, "upstox") or {}
-        if row.get("broker_user") and row["broker_user"] != upstox_user:
+        if row.get("broker_user") and row["broker_user"] != profile["user_id"]:
             continue   # this API key's token belongs to someone else
-        await _save_token(request, uid, "upstox", token, upstox_user)
+        await _save_token(request, uid, "upstox", token, profile)
         _pending_upstox[key] = [(u, t) for u, t in _pending_upstox.get(key, []) if u != uid]
         return {"ok": True}
     return JSONResponse({"ok": False}, status_code=202)

@@ -75,8 +75,12 @@ def upstox_login_url(api_key: str, redirect_uri: str, state: str) -> str:
         {"response_type": "code", "client_id": api_key, "redirect_uri": redirect_uri, "state": state})
 
 
-async def upstox_exchange_code(api_key: str, api_secret: str, code: str, redirect_uri: str) -> tuple[str, str]:
-    """Authorization code → (access_token, Upstox user id)."""
+def _profile(user_id="", name="", email="", avatar="") -> dict:
+    return {"user_id": user_id or "", "name": name or "", "email": email or "", "avatar": avatar or ""}
+
+
+async def upstox_exchange_code(api_key: str, api_secret: str, code: str, redirect_uri: str) -> tuple[str, dict]:
+    """Authorization code → (access_token, profile)."""
     async with httpx.AsyncClient(timeout=20) as c:
         r = await c.post(f"{UPSTOX_API}/v2/login/authorization/token", headers={"Accept": "application/json"},
                          data={"code": code, "client_id": api_key, "client_secret": api_secret,
@@ -85,7 +89,7 @@ async def upstox_exchange_code(api_key: str, api_secret: str, code: str, redirec
     if r.status_code != 200 or not body.get("access_token"):
         errs = body.get("errors") or [{}]
         raise BrokerError(f"Upstox login failed: {errs[0].get('message') or body}")
-    return body["access_token"], body.get("user_id", "")
+    return body["access_token"], _profile(body.get("user_id"), body.get("user_name"), body.get("email"))
 
 
 async def upstox_request_token(api_key: str, api_secret: str) -> dict:
@@ -101,13 +105,14 @@ async def upstox_request_token(api_key: str, api_secret: str) -> dict:
     return body.get("data") or {}
 
 
-async def upstox_profile(token: str) -> str:
+async def upstox_profile(token: str) -> dict:
     async with httpx.AsyncClient(timeout=20) as c:
         r = await c.get(f"{UPSTOX_API}/v2/user/profile", headers={"Accept": "application/json", "Authorization": f"Bearer {token}"})
     body = await _json(r, "Upstox")
     if r.status_code != 200:
         raise BrokerError("Upstox token was not accepted")
-    return (body.get("data") or {}).get("user_id", "")
+    d = body.get("data") or {}
+    return _profile(d.get("user_id"), d.get("user_name"), d.get("email"))
 
 
 # ── Kite ────────────────────────────────────────────────────────────────────
@@ -122,8 +127,8 @@ def _kite_headers(api_key: str, token: str = "") -> dict:
     return h
 
 
-async def kite_exchange_token(api_key: str, api_secret: str, request_token: str) -> tuple[str, str]:
-    """Request token → (access_token, Kite user id)."""
+async def kite_exchange_token(api_key: str, api_secret: str, request_token: str) -> tuple[str, dict]:
+    """Request token → (access_token, profile)."""
     checksum = hashlib.sha256(f"{api_key}{request_token}{api_secret}".encode()).hexdigest()
     async with httpx.AsyncClient(timeout=20) as c:
         r = await c.post(f"{KITE_API}/session/token", headers=_kite_headers(api_key),
@@ -131,7 +136,8 @@ async def kite_exchange_token(api_key: str, api_secret: str, request_token: str)
     body = await _json(r, "Kite")
     if r.status_code != 200 or body.get("status") != "success":
         raise BrokerError(f"Kite login failed: {body.get('message') or body}")
-    return body["data"]["access_token"], body["data"].get("user_id", "")
+    d = body["data"]
+    return d["access_token"], _profile(d.get("user_id"), d.get("user_name"), d.get("email"), d.get("avatar_url"))
 
 
 _kite_instruments: dict[str, tuple[float, dict]] = {}

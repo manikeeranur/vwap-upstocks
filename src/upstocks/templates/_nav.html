@@ -53,6 +53,19 @@
     if (!['GET','HEAD','OPTIONS'].includes((options.method || 'GET').toUpperCase())) headers.set('X-App-Token', dashboardToken);
     return fetch(url, {...options, headers});
   };
+  // Show the logged-in broker account (Kite first, then Upstox) in the header.
+  const headerAccount = document.querySelector('.header-account');
+  if (headerAccount) fetch('/api/brokers').then(r => r.ok ? r.json() : null).then(s => {
+    const p = s && ['kite','upstox'].map(b => s.brokers[b]?.profile).find(p => p && (p.name || p.user_id));
+    if (!p) return;
+    const name = p.name || p.user_id, letters = name.split(/\s+/).filter(Boolean).slice(0,2).map(w => w[0]).join('').toUpperCase();
+    const pic = document.createElement(p.avatar ? 'img' : 'span');
+    pic.className = 'header-avatar';
+    if (p.avatar) { pic.src = p.avatar; pic.alt = ''; pic.referrerPolicy = 'no-referrer'; } else pic.textContent = letters;
+    const label = document.createElement('span'); label.className = 'header-name'; label.textContent = name;
+    headerAccount.replaceChildren(pic); headerAccount.classList.add('has-profile'); headerAccount.title = [name, p.email].filter(Boolean).join(' · ');
+    headerAccount.after(label);
+  }).catch(() => {});
   const dateLabel = document.getElementById('workspace-date');
   const dateFormat = new Intl.DateTimeFormat('en-IN', {timeZone:'Asia/Kolkata',day:'2-digit',month:'short',year:'numeric'});
   const timeFormat = new Intl.DateTimeFormat('en-IN', {timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'});

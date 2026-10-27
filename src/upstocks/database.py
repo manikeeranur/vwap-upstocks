@@ -91,6 +91,10 @@ MIGRATIONS = [
         "INSERT INTO broker_strategy SELECT 1,'upstox',preset,live,lots FROM strategy_config",
         "INSERT INTO broker_orders SELECT trade_id,'1:upstox',side,preset,status,payload,created_at,updated_at FROM order_attempts",
     ),
+    (
+        # Broker account name, email and photo from the last login: {"user_id","name","email","avatar"}.
+        "ALTER TABLE broker_accounts ADD COLUMN profile TEXT NOT NULL DEFAULT '{}'",
+    ),
 ]
 
 
