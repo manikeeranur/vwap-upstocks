@@ -73,9 +73,9 @@ function render(s) {
   $('grid').innerHTML = Object.entries(s.brokers).map(([b,x]) => `
     <section class="card broker" aria-label="${NAMES[b]}">
       <div class="broker-head"><h2>${NAMES[b]}</h2><span class="status ${x.logged_in ? 'ok' : x.has_key ? 'bad' : ''}">${x.logged_in ? 'Logged in today' : x.has_key ? 'Not logged in' : 'Not set up'}</span></div>
-      ${x.has_key && x.has_secret && !editing.has(b) ? `<div class="saved-keys"><div><span>API key</span><b>•••••• saved</b></div><div><span>API secret</span><b>•••••• saved</b></div><button class="btn ghost" type="button" data-edit="${b}">Change keys</button></div>` : `<form data-keys="${b}">
-        <label>API key <input name="api_key" autocomplete="off" spellcheck="false" placeholder="${x.has_key ? '•••••• (saved)' : 'Paste your API key'}"></label>
-        <label>API secret <input name="api_secret" type="password" autocomplete="new-password" placeholder="${x.has_secret ? '•••••• (saved)' : 'Paste your API secret'}"></label>
+      ${x.has_key && x.has_secret && !editing.has(b) ? `<div class="saved-keys"><div><span>API key</span><b>******</b></div><div><span>API secret</span><b>******</b></div><button class="btn ghost" type="button" data-edit="${b}">Change keys</button></div>` : `<form data-keys="${b}">
+        <label>API key <input name="api_key" autocomplete="off" spellcheck="false" placeholder="${x.has_key ? '****** (saved)' : 'Paste your API key'}"></label>
+        <label>API secret <input name="api_secret" type="password" autocomplete="new-password" placeholder="${x.has_secret ? '****** (saved)' : 'Paste your API secret'}"></label>
         <div class="row" style="margin:0"><button class="btn ghost" type="submit">Save keys</button>${editing.has(b) ? `<button class="btn ghost" type="button" data-cancel="${b}">Cancel</button>` : ''}</div>
       </form>`}
       <p class="meta">${x.logged_in ? `Valid until ${when(x.valid_until)}${x.broker_user ? ` · ${esc(x.broker_user)}` : ''}` : 'Log in once each trading morning before 09:15.'}</p>
