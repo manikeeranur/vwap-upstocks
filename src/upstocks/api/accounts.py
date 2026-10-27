@@ -69,7 +69,7 @@ def _status(request, user_id):
                                     vault.open(row.get("access_token", "")), row.get("token_issued"))
         until = creds.valid_until()
         key = creds.api_key
-        out[b] = {"api_key": key, "has_key": bool(key),
+        out[b] = {"has_key": bool(key),
                   "has_secret": bool(creds.api_secret), "logged_in": creds.token_valid(),
                   "valid_until": until.isoformat(timespec="minutes") if until else None,
                   "broker_user": row.get("broker_user") or ""}
