@@ -23,6 +23,12 @@ class AppSettings:
     log_backups: int = 5
     sqlite_timeout: float = 10.0
     allowed_hosts: tuple[str, ...] = ("127.0.0.1", "localhost", "::1")
+    # Address people and brokers use to reach the app (broker redirect/notifier URLs, reminder links).
+    public_url: str = "http://127.0.0.1:3400"
+    telegram_bot_token: str = ""
+    # Single-person mode: every visitor is this person and the sign-in screen is skipped.
+    # Only for a private app (local, or behind nginx basic auth) — never when several people share it.
+    auto_login: str = ""
 
     def __post_init__(self):
         for name in ("database_path", "log_dir", "cache_dir", "legacy_dir"):
@@ -60,4 +66,7 @@ class AppSettings:
             log_max_bytes=int(os.getenv("UPSTOCKS_LOG_MAX_BYTES", cls.log_max_bytes)),
             log_backups=int(os.getenv("UPSTOCKS_LOG_BACKUPS", cls.log_backups)),
             allowed_hosts=tuple(h.strip().lower() for h in os.getenv("UPSTOCKS_ALLOWED_HOSTS", ",".join(cls.allowed_hosts)).split(",")),
+            public_url=os.getenv("UPSTOCKS_PUBLIC_URL", cls.public_url).rstrip("/"),
+            telegram_bot_token=os.getenv("UPSTOCKS_TELEGRAM_BOT_TOKEN", ""),
+            auto_login=os.getenv("UPSTOCKS_AUTO_LOGIN", "").strip(),
         )

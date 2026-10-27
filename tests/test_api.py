@@ -32,16 +32,17 @@ class ApiTests(unittest.TestCase):
                             {"preset": "frontend_live", "live": True},
                             {"preset": "frontend_live", "lots": -1},
                             {"preset": "frontend_live", "lots": 1.5},
-                            {"preset": "missing", "on": False}, {"live": True, "confirm": "LIVE"}, {}):
+                            {"preset": "missing", "on": False}, {"live": True, "confirm": "LIVE"}, {},
+                            {"preset": "frontend_live", "lots": 3}, {"preset": "frontend_live", "broker": "dhan", "lots": 3}):
                 self.assertEqual(client.post("/api/paper/config", json={"revision": 0, **payload}).status_code, 422)
-            response = client.post("/api/paper/config", json={"revision": 0, "preset": "frontend_live", "lots": 3})
+            response = client.post("/api/paper/config", json={"revision": 0, "preset": "frontend_live", "broker": "upstox", "lots": 3})
             self.assertEqual(response.status_code, 200)
-            self.assertEqual(response.json()["state"]["config"]["frontend_live"]["lots"], 3)
+            self.assertEqual(response.json()["state"]["accounts"]["1:upstox"]["lots"]["frontend_live"], 3)
             rid = response.headers["x-request-id"]
             with self.app.state.database.connect() as conn:
                 self.assertEqual(conn.execute("SELECT request_id FROM audit_events WHERE kind='config' ORDER BY id DESC LIMIT 1").fetchone()[0], rid)
         with TestClient(create_app(self.settings)) as client:
-            self.assertEqual(client.get("/api/paper").json()["state"]["config"]["frontend_live"]["lots"], 3)
+            self.assertEqual(client.get("/api/paper").json()["state"]["accounts"]["1:upstox"]["lots"]["frontend_live"], 3)
 
     def test_routes_headers_readiness_and_no_network(self):
         with TestClient(self.app) as client, patch("upstocks.upstox.expiries", new=AsyncMock(return_value=[])), patch("upstocks.upstox.account", new=AsyncMock(return_value={"profile": {"data": None, "error": "static IP required"}})):

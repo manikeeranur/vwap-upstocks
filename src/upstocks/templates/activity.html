@@ -125,7 +125,7 @@
       const warning = !response.ok || data.orders_needing_review > 0 || data.audit_failures > 0;
       $('health').classList.toggle('warn', warning); $('health').replaceChildren();
       const status = node('span', undefined); status.append(node('i', undefined, 'status-dot'), node('span', warning ? 'Needs attention' : 'System healthy')); $('health').append(status);
-      for (const text of [`Database ${data.database}`, `Scanner ${data.scanner}`, `${data.active_backtests} active backtests`, data.entries_paused ? 'Entries paused' : 'Entries available']) $('health').append(node('span', text));
+      for (const text of [`Database ${data.database}`, `Scanner ${data.scanner}`, `${data.active_backtests} active backtests`, `${data.people ?? 1} ${data.people === 1 ? 'person' : 'people'}`]) $('health').append(node('span', text));
       if (data.orders_needing_review) $('health').append(node('span', `${data.orders_needing_review} orders to review`));
       if (data.audit_failures) $('health').append(node('span', `${data.audit_failures} log write failures`));
     } catch { $('health').classList.add('warn'); $('health').textContent = 'System status unavailable'; }

@@ -11,15 +11,17 @@ import httpx
 import uvicorn
 
 from . import upstox
-from .api import market, momentum, operations, pages, research, trading
+from .accounts import Signer, Vault
+from .api import accounts, market, momentum, operations, pages, research, trading
 from .config import AppSettings
 from .database import Database, ProcessLock
 from .middleware import RequestLoggingMiddleware
 from .observability import SERVER_LOG_CONFIG, close_logging, configure_logging, redact
 from .repository import ConfigurationConflict, Repository
-from .security import DashboardGuard
+from .security import DashboardGuard, SessionAuth
 from .services.backtests import BacktestService
 from .services.momentum import MomentumService
+from .services.reminders import ReminderService
 from .services.trading import TradingService
 from .services.quotes import QuoteService
 
@@ -34,7 +36,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         lock = ProcessLock(settings.database_path)
         lock.acquire()
         handlers = []
-        trading_service = backtests = quotes = momentum_service = None
+        trading_service = backtests = quotes = momentum_service = reminders = None
         app.state.ready = False
         try:
             handlers = configure_logging(settings)
@@ -45,7 +47,12 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
             await asyncio.to_thread(repository.ensure_presets)
             await asyncio.to_thread(repository.recover)
             upstox.configure(settings.cache_dir)
-            trading_service = await asyncio.to_thread(TradingService, repository)
+            vault = await asyncio.to_thread(Vault, settings.database_path.parent / "secret.key")
+            app.state.vault = vault
+            app.state.signer = Signer(await asyncio.to_thread(repository.session_secret))
+            auto = settings.auto_login and await asyncio.to_thread(repository.user, username=settings.auto_login)
+            app.state.auto_user = auto["id"] if auto else None
+            trading_service = await asyncio.to_thread(TradingService, repository, vault)
             backtests = BacktestService(repository, settings.max_backtests)
             app.state.database = database
             app.state.repository = repository
@@ -58,8 +65,11 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
             app.state.backtests = backtests
             momentum_service = MomentumService(settings.cache_dir, settings.database_path.parent / "momentum_runs")
             app.state.momentum = momentum_service
+            reminders = ReminderService(app)
+            app.state.reminders = reminders
             if settings.scanner_enabled:
                 trading_service.start()
+                reminders.start()
             app.state.ready = True
             await asyncio.to_thread(repository.event, "startup", "Application started", details={"implementation": repository.implementation})
             log.info("Application started")
@@ -70,6 +80,8 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         finally:
             app.state.ready = False
             try:
+                if reminders:
+                    await reminders.stop()
                 if trading_service:
                     await trading_service.stop()
                 if quotes:
@@ -89,14 +101,15 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     app = FastAPI(title="Upstocks", version="0.2.0", lifespan=lifespan)
     app.state.settings = settings
     app.state.ready = False
+    app.add_middleware(SessionAuth)
     app.add_middleware(DashboardGuard, allowed_hosts=settings.allowed_hosts)
     app.add_middleware(RequestLoggingMiddleware)
-    for router in (pages.router, trading.router, market.router, research.router, momentum.router, operations.router):
+    for router in (accounts.router, pages.router, trading.router, market.router, research.router, momentum.router, operations.router):
         app.include_router(router)
 
     @app.exception_handler(ConfigurationConflict)
     async def configuration_conflict(request: Request, exc: ConfigurationConflict):
-        return JSONResponse({"detail": str(exc), "state": request.app.state.trading.snapshot()["state"]}, status_code=409)
+        return JSONResponse({"detail": str(exc), "state": request.app.state.trading.snapshot(getattr(request.state, "user_id", None))["state"]}, status_code=409)
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request: Request, exc: RequestValidationError):
@@ -142,7 +155,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         return JSONResponse({"status": "ok" if healthy else "degraded", **health,
                              "scanner": "running" if scanner and not scanner.done() else "disabled" if not settings.scanner_enabled else "stopped",
                              "active_backtests": len(request.app.state.backtests.tasks),
-                             "entries_paused": request.app.state.trading.state["entries_paused"],
+                             "people": len(request.app.state.trading.state["users"]),
                              "audit_failures": request.app.state.audit_failures}, status_code=200 if healthy else 503)
 
     return app

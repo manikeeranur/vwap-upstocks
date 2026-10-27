@@ -62,6 +62,35 @@ MIGRATIONS = [
         """CREATE TRIGGER evidence_no_delete BEFORE DELETE ON decision_evidence
             BEGIN SELECT RAISE(ABORT,'Decision evidence is append-only'); END""",
     ),
+    (
+        # Several people, each with their own login, broker keys/tokens, live switches and orders.
+        # User 1 inherits the single-user settings: each strategy's live/lots become its Upstox switch.
+        """CREATE TABLE users (
+            id INTEGER PRIMARY KEY, username TEXT NOT NULL UNIQUE COLLATE NOCASE, password_hash TEXT NOT NULL,
+            telegram_chat_id TEXT, entries_paused INTEGER NOT NULL DEFAULT 0 CHECK(entries_paused IN (0,1)),
+            created_at TEXT NOT NULL)""",
+        """CREATE TABLE broker_accounts (
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            broker TEXT NOT NULL CHECK(broker IN ('upstox','kite')),
+            api_key TEXT NOT NULL DEFAULT '', api_secret TEXT NOT NULL DEFAULT '',
+            access_token TEXT NOT NULL DEFAULT '', token_issued TEXT, broker_user TEXT,
+            updated_at TEXT NOT NULL, PRIMARY KEY(user_id, broker))""",
+        """CREATE TABLE broker_strategy (
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            broker TEXT NOT NULL CHECK(broker IN ('upstox','kite')), preset TEXT NOT NULL,
+            live INTEGER NOT NULL CHECK(live IN (0,1)), lots INTEGER NOT NULL CHECK(lots > 0),
+            PRIMARY KEY(user_id, broker, preset))""",
+        """CREATE TABLE broker_orders (
+            trade_id TEXT NOT NULL, account TEXT NOT NULL, side TEXT NOT NULL CHECK(side IN ('BUY','SELL')),
+            preset TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('pending','submitted','unknown')),
+            payload TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+            PRIMARY KEY(trade_id, account, side))""",
+        "CREATE INDEX broker_orders_status ON broker_orders(status, account)",
+        "INSERT INTO users(id,username,password_hash,created_at) VALUES (1,'mani','!',strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+        "UPDATE users SET entries_paused=(SELECT value='true' FROM settings WHERE key='entries_paused') WHERE id=1",
+        "INSERT INTO broker_strategy SELECT 1,'upstox',preset,live,lots FROM strategy_config",
+        "INSERT INTO broker_orders SELECT trade_id,'1:upstox',side,preset,status,payload,created_at,updated_at FROM order_attempts",
+    ),
 ]
 
 

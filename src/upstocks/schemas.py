@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, 
 from . import vwap
 
 Preset = Literal["frontend_live", "smc_live", "ema25_vwap", "ema_pullback", "smc_ema_combo", "smc_tuned", "harmonic"]
+Broker = Literal["upstox", "kite"]
 
 
 class Input(BaseModel):
@@ -17,6 +18,7 @@ class Input(BaseModel):
 class ConfigUpdate(Input):
     revision: int = Field(strict=True, ge=0)
     preset: Preset | None = None
+    broker: Broker | None = None
     on: StrictBool | None = None
     live: StrictBool | None = None
     lots: int | None = Field(default=None, strict=True, ge=1, le=10000)
@@ -28,6 +30,8 @@ class ConfigUpdate(Input):
     def valid_change(self):
         if self.preset is None and any(v is not None for v in (self.on, self.live, self.lots)):
             raise ValueError("preset is required for strategy changes")
+        if (self.live is not None or self.lots is not None) and self.broker is None:
+            raise ValueError("broker is required for live and lots")
         if (self.live is True or self.entries_paused is False) and self.confirm != "LIVE":
             raise ValueError("Enabling live orders or resuming entries needs confirm: LIVE")
         if all(v is None for v in (self.on, self.live, self.lots, self.lot_size, self.entries_paused)):
@@ -37,6 +41,26 @@ class ConfigUpdate(Input):
 
 class PresetRequest(Input):
     preset: Preset
+    broker: Broker | None = None
+
+
+class Login(Input):
+    username: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=1, max_length=256)
+
+
+class BrokerKeys(Input):
+    broker: Broker
+    api_key: str | None = Field(default=None, max_length=200, pattern=r"^[A-Za-z0-9_\-]*$")
+    api_secret: str | None = Field(default=None, max_length=200)
+
+
+class BrokerRequest(Input):
+    broker: Broker
+
+
+class TelegramSetting(Input):
+    chat_id: str = Field(default="", max_length=40, pattern=r"^-?[0-9]*$")
 
 
 class NoteUpdate(Input):

@@ -42,7 +42,7 @@ def _counts(conn, day):
         "events": ("SELECT COUNT(*) FROM audit_events WHERE created_at >= ? AND created_at < ?", (start, end)),
         "evidence": ("SELECT COUNT(*) FROM decision_evidence WHERE day=?", (str(day),)),
         "journal_trades": ("SELECT COUNT(*) FROM journal_trades WHERE day=?", (str(day),)),
-        "order_attempts": ("SELECT COUNT(*) FROM order_attempts WHERE substr(trade_id,instr(trade_id,'|')+1,10)=?", (str(day),)),
+        "order_attempts": ("SELECT COUNT(*) FROM broker_orders WHERE substr(trade_id,instr(trade_id,'|')+1,10)=?", (str(day),)),
         "backtest_days": ("SELECT COUNT(*) FROM backtest_days WHERE day=?", (str(day),)),
     }
     return {key: conn.execute(sql, args).fetchone()[0] for key, (sql, args) in queries.items()}
@@ -71,7 +71,7 @@ def build_session_export(database, day):
 
             jsonl("events.jsonl", "SELECT * FROM audit_events WHERE created_at>=? AND created_at<? ORDER BY id", (start, end), ("details",))
             jsonl("evidence.jsonl", "SELECT * FROM decision_evidence WHERE day=? ORDER BY id", (str(day),), ("payload",))
-            jsonl("orders.jsonl", "SELECT * FROM order_attempts WHERE substr(trade_id,instr(trade_id,'|')+1,10)=? ORDER BY created_at,trade_id,side", (str(day),), ("payload",))
+            jsonl("orders.jsonl", "SELECT * FROM broker_orders WHERE substr(trade_id,instr(trade_id,'|')+1,10)=? ORDER BY created_at,trade_id,account,side", (str(day),), ("payload",))
             jsonl("journal.jsonl", """SELECT t.day,t.preset,t.trade_id,t.payload,s.lots,s.lot_size,s.updated,n.text AS note
                   FROM journal_trades t JOIN journal_sessions s ON s.day=t.day AND s.preset=t.preset
                   LEFT JOIN notes n ON n.trade_id=t.trade_id WHERE t.day=? ORDER BY t.preset,t.position""", (str(day),), ("payload",))

@@ -10,4 +10,7 @@ class DashboardClient(TestClient):
     def __enter__(self):
         super().__enter__()
         self.headers["X-App-Token"] = self.app.state.dashboard_token
+        # Signed in as person 1 (created by the schema migration).
+        from upstocks.accounts import SESSION_COOKIE
+        self.cookies.set(SESSION_COOKIE, self.app.state.signer.session(1))
         return self

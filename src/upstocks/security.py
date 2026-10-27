@@ -1,8 +1,15 @@
-"""Local dashboard boundaries; CSRF protection is not multi-user authentication."""
+"""Dashboard boundaries: trusted hosts, CSRF token on commands, and per-person sign-in."""
 import hmac
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, RedirectResponse
+
+from .accounts import SESSION_COOKIE
+
+# Reachable without signing in. The Upstox notifier is Upstox's server posting a token (verified separately).
+PUBLIC_PATHS = frozenset({"/login", "/api/login", "/health/live", "/health/ready", "/broker/upstox/notify", "/favicon.ico"})
+# Server-to-server calls that can't carry the dashboard's command token.
+NO_CSRF_PATHS = frozenset({"/broker/upstox/notify"})
 
 
 class DashboardGuard:
@@ -25,7 +32,7 @@ class DashboardGuard:
             host.port  # validate the port as well
         except ValueError:
             return await reject(400, "Invalid dashboard host")
-        if scope["method"] not in {"GET", "HEAD", "OPTIONS"}:
+        if scope["method"] not in {"GET", "HEAD", "OPTIONS"} and scope.get("path") not in NO_CSRF_PATHS:
             expected = getattr(scope["app"].state, "dashboard_token", "")
             supplied = headers.get(b"x-app-token", "")
             if not expected or not hmac.compare_digest(supplied.encode(), expected.encode()):
@@ -59,4 +66,33 @@ class DashboardGuard:
                 return await original_receive()
 
             receive = replay
+        await self.app(scope, receive, send)
+
+
+class SessionAuth:
+    """Every page and API call belongs to a signed-in person (request.state.user_id)."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        signer = getattr(scope["app"].state, "signer", None)
+        cookie = ""
+        for k, v in scope.get("headers", []):
+            if k == b"cookie":
+                for part in v.decode("latin1").split(";"):
+                    name, _, value = part.strip().partition("=")
+                    if name == SESSION_COOKIE:
+                        cookie = value
+        user_id = signer.verify(cookie, "s") if signer else None
+        if user_id is None:
+            user_id = getattr(scope["app"].state, "auto_user", None)
+        scope.setdefault("state", {})["user_id"] = user_id
+        if user_id is None and scope["path"] not in PUBLIC_PATHS:
+            if scope["method"] == "GET" and not scope["path"].startswith("/api/"):
+                target = scope["path"] + ("?" + scope["query_string"].decode() if scope.get("query_string") else "")
+                return await RedirectResponse("/login?next=" + quote(target, safe=""), status_code=303)(scope, receive, send)
+            return await JSONResponse({"detail": "Sign in to continue."}, status_code=401)(scope, receive, send)
         await self.app(scope, receive, send)

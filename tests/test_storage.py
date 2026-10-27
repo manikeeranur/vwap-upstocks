@@ -28,7 +28,7 @@ class StorageTests(unittest.TestCase):
 
     def test_schema_idempotent_and_wal(self):
         self.db.initialize()
-        self.assertEqual(self.db.check(), {"integrity": "ok", "foreign_key_errors": 0, "schema_version": 2})
+        self.assertEqual(self.db.check(), {"integrity": "ok", "foreign_key_errors": 0, "schema_version": 3})
         with self.db.connect() as conn:
             self.assertEqual(conn.execute("PRAGMA journal_mode").fetchone()[0], "wal")
             self.assertEqual(conn.execute("PRAGMA foreign_keys").fetchone()[0], 1)
@@ -41,12 +41,12 @@ class StorageTests(unittest.TestCase):
             (self.root / name).write_text(json.dumps(data))
         raw = (self.root / "live_state.json").read_bytes()
         self.initialize()
-        self.repo.configure(PRESET, lots=4)
+        self.repo.configure(PRESET, user=1, broker="upstox", lots=4)
         self.initialize()
         loaded = self.repo.state()
         self.assertEqual(loaded["lot_size"], 65)
-        self.assertEqual(loaded["config"][PRESET]["lots"], 4)
-        self.assertEqual(loaded["orders"][TID]["buy"]["order_id"], "broker-id")
+        self.assertEqual(loaded["accounts"]["1:upstox"]["lots"][PRESET], 4)
+        self.assertEqual(loaded["orders"]["1:upstox"][TID]["buy"]["order_id"], "broker-id")
         self.assertEqual(loaded["log"], ["old activity"])
         self.assertEqual((self.root / "live_state.json").read_bytes(), raw)
         self.assertEqual(next((self.db.path.parent / "legacy").glob("live_state-*.json")).read_bytes(), raw)
@@ -70,13 +70,13 @@ class StorageTests(unittest.TestCase):
         self.initialize()
         payload = {"qty": 65, "status": "pending"}
         with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
-            reserved = list(pool.map(lambda _: self.repo.reserve_order(TID, PRESET, "BUY", payload), range(20)))
+            reserved = list(pool.map(lambda _: self.repo.reserve_order(TID, "1:upstox", PRESET, "BUY", payload), range(20)))
         self.assertEqual(sum(reserved), 1)
         self.repo.recover()
-        record = Repository(Database(self.db.path)).state()["orders"][TID]["buy"]
+        record = Repository(Database(self.db.path)).state()["orders"]["1:upstox"][TID]["buy"]
         self.assertEqual(record["status"], "unknown")
         self.assertIn("broker", record["error"])
-        self.assertFalse(self.repo.reserve_order(TID, PRESET, "BUY", payload))
+        self.assertFalse(self.repo.reserve_order(TID, "1:upstox", PRESET, "BUY", payload))
 
     def test_journal_rescan_keeps_notes_and_other_strategies(self):
         self.initialize()
@@ -114,9 +114,9 @@ class StorageTests(unittest.TestCase):
         # Hold a reader open, preventing the WAL from being checkpointed away.
         with self.db.connect() as reader:
             reader.execute("SELECT * FROM settings").fetchall()
-            self.repo.configure(PRESET, lots=7)
+            self.repo.configure(PRESET, user=1, broker="upstox", lots=7)
             target = self.db.backup(self.root / "backup.sqlite3")
-        self.assertEqual(Repository(Database(target)).state()["config"][PRESET]["lots"], 7)
+        self.assertEqual(Repository(Database(target)).state()["accounts"]["1:upstox"]["lots"][PRESET], 7)
         self.assertEqual(Database(target).check()["integrity"], "ok")
         with self.assertRaises(ValueError):
             self.db.backup(target)

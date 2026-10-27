@@ -11,6 +11,12 @@ from .database import Database, utc_now
 from .observability import clean, redact, request_id
 
 PRESETS = ("frontend_live", "smc_live", "ema25_vwap", "ema_pullback", "smc_tuned", "smc_ema_combo", "harmonic")
+BROKERS = ("upstox", "kite")
+
+
+def account_id(user_id, broker):
+    """Orders and switches belong to one person's account at one broker: '<user id>:<broker>'."""
+    return f"{user_id}:{broker}"
 
 
 def encode(value):
@@ -53,6 +59,15 @@ class Repository:
             token = secrets.token_urlsafe(32)
             conn.execute("INSERT INTO metadata VALUES ('dashboard_token',?)", (token,))
             return token
+
+    def session_secret(self):
+        with self.db.connect(write=True) as conn:
+            row = conn.execute("SELECT value FROM metadata WHERE key='session_secret'").fetchone()
+            if row:
+                return row[0]
+            secret = secrets.token_urlsafe(48)
+            conn.execute("INSERT INTO metadata VALUES ('session_secret',?)", (secret,))
+            return secret
 
     def event(self, kind, message, *, level="INFO", component="application", details=None):
         with self.db.connect(write=True) as conn:
@@ -101,6 +116,9 @@ class Repository:
                     raise ValueError(f"Invalid legacy config: {preset}")
                 conn.execute("INSERT INTO strategy_config VALUES (?,?,?,?)",
                              (preset, cfg.get("on", True), cfg.get("live", False), _positive(cfg.get("lots", 1), "lots")))
+                # The single-user live switch becomes person 1's Upstox switch.
+                conn.execute("INSERT OR REPLACE INTO broker_strategy VALUES (1,'upstox',?,?,?)",
+                             (preset, cfg.get("live", False), _positive(cfg.get("lots", 1), "lots")))
             orders = state.get("orders", {})
             if not isinstance(orders, dict):
                 raise ValueError("Invalid legacy orders")
@@ -117,6 +135,8 @@ class Repository:
                         payload.setdefault("error", "Legacy order outcome unknown. Check the broker before taking action.")
                     conn.execute("INSERT INTO order_attempts VALUES (?,?,?,?,?,?,?)",
                                  (tid, side.upper(), tid.split("|")[0], status, encode(payload), utc_now(), utc_now()))
+                    conn.execute("INSERT INTO broker_orders VALUES (?,?,?,?,?,?,?,?)",
+                                 (tid, "1:upstox", side.upper(), tid.split("|")[0], status, encode(payload), utc_now(), utc_now()))
             logs = state.get("log", [])
             if not isinstance(logs, list) or any(not isinstance(v, str) for v in logs):
                 raise ValueError("Invalid legacy activity log")
@@ -138,70 +158,91 @@ class Repository:
             _audit(conn, "migration", "Legacy migration completed", {"sources": list(sources), "orders": len(orders)})
 
     def ensure_presets(self):
-        """Give strategies added after the first start a settings row (paper on, live off, 1 lot);
-        existing rows are left as they are."""
+        """Give strategies (and people) added later a settings row: paper on; every broker switch off, 1 lot.
+        Existing rows are left as they are."""
         with self.db.connect(write=True) as conn:
             for preset in PRESETS:
                 conn.execute("INSERT OR IGNORE INTO strategy_config VALUES (?,1,0,1)", (preset,))
+            for (uid,) in conn.execute("SELECT id FROM users").fetchall():
+                for broker in BROKERS:
+                    for preset in PRESETS:
+                        conn.execute("INSERT OR IGNORE INTO broker_strategy VALUES (?,?,?,0,1)", (uid, broker, preset))
 
     def state(self):
+        """Global strategy settings plus every person's broker switches and orders."""
         with self.db.connect() as conn:
-            config = {r["preset"]: {"on": bool(r["enabled"]), "live": bool(r["live"]), "lots": r["lots"]}
-                      for r in conn.execute("SELECT * FROM strategy_config")}
-            settings = {r[0]: json.loads(r[1]) for r in conn.execute("SELECT key,value FROM settings WHERE key IN ('lot_size','config_revision','entries_paused')")}
+            config = {r["preset"]: {"on": bool(r["enabled"])} for r in conn.execute("SELECT * FROM strategy_config")}
+            settings = {r[0]: json.loads(r[1]) for r in conn.execute("SELECT key,value FROM settings WHERE key IN ('lot_size','config_revision')")}
+            users = {r["id"]: {"username": r["username"], "paused": bool(r["entries_paused"]), "telegram": bool(r["telegram_chat_id"])}
+                     for r in conn.execute("SELECT * FROM users")}
+            accounts = {}
+            for r in conn.execute("SELECT * FROM broker_strategy"):
+                acc = accounts.setdefault(account_id(r["user_id"], r["broker"]),
+                                          {"user": r["user_id"], "broker": r["broker"], "live": {}, "lots": {}})
+                acc["live"][r["preset"]], acc["lots"][r["preset"]] = bool(r["live"]), r["lots"]
             orders = {}
-            for r in conn.execute("SELECT * FROM order_attempts ORDER BY created_at"):
-                orders.setdefault(r["trade_id"], {})[r["side"].lower()] = json.loads(r["payload"])
+            for r in conn.execute("SELECT * FROM broker_orders ORDER BY created_at"):
+                orders.setdefault(r["account"], {}).setdefault(r["trade_id"], {})[r["side"].lower()] = json.loads(r["payload"])
             logs = [r[0] for r in conn.execute("SELECT message FROM audit_events WHERE kind='activity' ORDER BY id DESC LIMIT 300")]
-            return {"lot_size": settings["lot_size"], "config": config, "orders": orders, "log": logs[::-1],
-                    "revision": settings["config_revision"], "entries_paused": settings["entries_paused"]}
+            return {"lot_size": settings["lot_size"], "config": config, "users": users, "accounts": accounts,
+                    "orders": orders, "log": logs[::-1], "revision": settings["config_revision"]}
 
-    def configure(self, preset=None, *, on=None, live=None, lots=None, lot_size=None, entries_paused=None, revision=None):
+    def configure(self, preset=None, *, user=None, broker=None, on=None, live=None, lots=None, lot_size=None,
+                  entries_paused=None, revision=None):
+        """`on` and `lot_size` are shared; `live`/`lots` belong to one person's broker account; `entries_paused` to one person."""
         with self.db.connect(write=True) as conn:
             current = json.loads(conn.execute("SELECT value FROM settings WHERE key='config_revision'").fetchone()[0])
             if revision is not None and revision != current:
                 raise ConfigurationConflict("Settings changed in another tab. Review the refreshed settings and try again.")
             changes = {k: v for k, v in {"on": on, "live": live, "lots": lots, "lot_size": lot_size, "entries_paused": entries_paused}.items() if v is not None}
-            if preset:
-                for column, value in (("enabled", on), ("live", live), ("lots", lots)):
+            if preset and on is not None:
+                conn.execute("UPDATE strategy_config SET enabled=? WHERE preset=?", (on, preset))
+            if preset and (live is not None or lots is not None):
+                if user is None or broker not in BROKERS:
+                    raise ValueError("A person and broker are required for live settings")
+                for column, value in (("live", live), ("lots", lots)):
                     if value is not None:
-                        conn.execute(f"UPDATE strategy_config SET {column}=? WHERE preset=?", (value, preset))
+                        conn.execute(f"UPDATE broker_strategy SET {column}=? WHERE user_id=? AND broker=? AND preset=?",
+                                     (value, user, broker, preset))
             if lot_size is not None:
                 _setting(conn, "lot_size", lot_size)
             if entries_paused is not None:
-                _setting(conn, "entries_paused", entries_paused)
+                if user is None:
+                    raise ValueError("A person is required to pause entries")
+                conn.execute("UPDATE users SET entries_paused=? WHERE id=?", (entries_paused, user))
             _setting(conn, "config_revision", current + 1)
             _audit(conn, "config", "Entries paused" if entries_paused is True else "Entries resumed" if entries_paused is False else "Strategy settings updated",
-                   {"preset": preset, "revision": current + 1, **changes})
+                   {"preset": preset, "user": user, "broker": broker, "revision": current + 1, **changes})
             return current + 1
 
-    def reserve_order(self, tid, preset, side, payload, context=None):
+    def reserve_order(self, tid, account, preset, side, payload, context=None):
         with self.db.connect(write=True) as conn:
-            inserted = conn.execute("INSERT OR IGNORE INTO order_attempts VALUES (?,?,?,?,?,?,?)",
-                                    (tid, side, preset, "pending", encode(payload), utc_now(), utc_now())).rowcount
+            inserted = conn.execute("INSERT OR IGNORE INTO broker_orders VALUES (?,?,?,?,?,?,?,?)",
+                                    (tid, account, side, preset, "pending", encode(payload), utc_now(), utc_now())).rowcount
             if inserted:
-                _audit(conn, "order_reserved", f"{side} order reserved", {"trade_id": tid, "qty": payload["qty"]})
-                self._evidence(conn, tid.split("|", 3)[1], "ORDER_INTENT", {"trade_id": tid, "side": side, "order": payload, "context": context or {}})
+                _audit(conn, "order_reserved", f"{side} order reserved", {"trade_id": tid, "account": account, "qty": payload["qty"]})
+                self._evidence(conn, tid.split("|", 3)[1], "ORDER_INTENT",
+                               {"trade_id": tid, "account": account, "side": side, "order": payload, "context": context or {}})
             return bool(inserted)
 
-    def finish_order(self, tid, side, payload, message):
+    def finish_order(self, tid, account, side, payload, message):
         with self.db.connect(write=True) as conn:
-            conn.execute("UPDATE order_attempts SET status=?,payload=?,updated_at=? WHERE trade_id=? AND side=?",
-                         (payload["status"], encode(payload), utc_now(), tid, side))
+            conn.execute("UPDATE broker_orders SET status=?,payload=?,updated_at=? WHERE trade_id=? AND account=? AND side=?",
+                         (payload["status"], encode(payload), utc_now(), tid, account, side))
             _audit(conn, "activity", message, level="ERROR" if payload["status"] == "unknown" else "INFO")
-            self._evidence(conn, tid.split("|", 3)[1], "ORDER_RESULT", {"trade_id": tid, "side": side, "order": payload})
+            self._evidence(conn, tid.split("|", 3)[1], "ORDER_RESULT", {"trade_id": tid, "account": account, "side": side, "order": payload})
 
     def recover(self):
         with self.db.connect(write=True) as conn:
-            pending = conn.execute("SELECT * FROM order_attempts WHERE status='pending'").fetchall()
+            pending = conn.execute("SELECT * FROM broker_orders WHERE status='pending'").fetchall()
             for row in pending:
                 payload = json.loads(row["payload"])
                 payload.update(status="unknown", error="Order interrupted. Verify its status with the broker; it will not be retried automatically.")
-                conn.execute("UPDATE order_attempts SET status='unknown',payload=?,updated_at=? WHERE trade_id=? AND side=?",
-                             (encode(payload), utc_now(), row["trade_id"], row["side"]))
-                _audit(conn, "activity", f"Order needs reconciliation: {row['trade_id']} {row['side']}", level="WARNING")
+                conn.execute("UPDATE broker_orders SET status='unknown',payload=?,updated_at=? WHERE trade_id=? AND account=? AND side=?",
+                             (encode(payload), utc_now(), row["trade_id"], row["account"], row["side"]))
+                _audit(conn, "activity", f"Order needs reconciliation: {row['trade_id']} {row['account']} {row['side']}", level="WARNING")
                 self._evidence(conn, row['trade_id'].split('|', 3)[1], "ORDER_RECOVERY",
-                               {"trade_id": row['trade_id'], "side": row['side'], "order": payload})
+                               {"trade_id": row['trade_id'], "account": row["account"], "side": row['side'], "order": payload})
             jobs = conn.execute("UPDATE backtest_jobs SET status='error',error='Interrupted by application restart. Saved results are retained.',updated_at=? WHERE status='running'", (utc_now(),)).rowcount
             if pending or jobs:
                 _audit(conn, "recovery", "Interrupted operations recovered", {"orders": len(pending), "jobs": jobs})
@@ -298,5 +339,63 @@ class Repository:
     def health(self):
         with self.db.connect() as conn:
             version = conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0]
-            unknown = conn.execute("SELECT COUNT(*) FROM order_attempts WHERE status='unknown'").fetchone()[0]
+            unknown = conn.execute("SELECT COUNT(*) FROM broker_orders WHERE status='unknown'").fetchone()[0]
             return {"database": "ok", "schema_version": version, "orders_needing_review": unknown}
+
+    # ── People and their broker accounts ──
+    def user(self, user_id=None, username=None):
+        with self.db.connect() as conn:
+            row = conn.execute("SELECT * FROM users WHERE id=?" if user_id is not None else "SELECT * FROM users WHERE username=?",
+                               (user_id if user_id is not None else username,)).fetchone()
+            return dict(row) if row else None
+
+    def users(self):
+        with self.db.connect() as conn:
+            return [dict(r) for r in conn.execute("SELECT id,username,telegram_chat_id,entries_paused,created_at FROM users ORDER BY id")]
+
+    def add_user(self, username, password_hash):
+        with self.db.connect(write=True) as conn:
+            uid = conn.execute("INSERT INTO users(username,password_hash,created_at) VALUES (?,?,?)",
+                               (username, password_hash, utc_now())).lastrowid
+            for broker in BROKERS:
+                for preset in PRESETS:
+                    conn.execute("INSERT OR IGNORE INTO broker_strategy VALUES (?,?,?,0,1)", (uid, broker, preset))
+            _audit(conn, "user", "Person added", {"user": uid, "username": username}, component="application")
+            return uid
+
+    def set_password(self, user_id, password_hash):
+        with self.db.connect(write=True) as conn:
+            if not conn.execute("UPDATE users SET password_hash=? WHERE id=?", (password_hash, user_id)).rowcount:
+                raise ValueError("No such person")
+            _audit(conn, "user", "Password changed", {"user": user_id}, component="application")
+
+    def set_telegram(self, user_id, chat_id):
+        with self.db.connect(write=True) as conn:
+            conn.execute("UPDATE users SET telegram_chat_id=? WHERE id=?", (chat_id or None, user_id))
+
+    def broker_account(self, user_id, broker):
+        with self.db.connect() as conn:
+            row = conn.execute("SELECT * FROM broker_accounts WHERE user_id=? AND broker=?", (user_id, broker)).fetchone()
+            return dict(row) if row else None
+
+    def broker_accounts_by_key(self, broker, api_key):
+        with self.db.connect() as conn:
+            return [dict(r) for r in conn.execute("SELECT * FROM broker_accounts WHERE broker=? AND api_key=?", (broker, api_key))]
+
+    def save_broker_keys(self, user_id, broker, api_key=None, api_secret_sealed=None):
+        with self.db.connect(write=True) as conn:
+            conn.execute("INSERT OR IGNORE INTO broker_accounts(user_id,broker,updated_at) VALUES (?,?,?)", (user_id, broker, utc_now()))
+            if api_key is not None:
+                # A different app key invalidates the old login; saving the same key again keeps it.
+                conn.execute("UPDATE broker_accounts SET api_key=?,access_token='',token_issued=NULL,updated_at=? WHERE user_id=? AND broker=? AND api_key<>?",
+                             (api_key, utc_now(), user_id, broker, api_key))
+            if api_secret_sealed is not None:
+                conn.execute("UPDATE broker_accounts SET api_secret=?,updated_at=? WHERE user_id=? AND broker=?",
+                             (api_secret_sealed, utc_now(), user_id, broker))
+            _audit(conn, "broker", "Broker keys updated", {"user": user_id, "broker": broker}, component="application")
+
+    def save_broker_token(self, user_id, broker, token_sealed, issued, broker_user):
+        with self.db.connect(write=True) as conn:
+            conn.execute("UPDATE broker_accounts SET access_token=?,token_issued=?,broker_user=?,updated_at=? WHERE user_id=? AND broker=?",
+                         (token_sealed, issued, broker_user, utc_now(), user_id, broker))
+            _audit(conn, "broker", "Broker login saved", {"user": user_id, "broker": broker, "broker_user": broker_user}, component="application")

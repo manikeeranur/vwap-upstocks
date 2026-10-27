@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>upstocks — brokers</title>
+{% from "_icons.html" import ui_icon %}
+{% include "_style.html" %}
+<style>
+  .broker-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+  @media (max-width:900px) { .broker-grid { grid-template-columns:1fr; } }
+  body .broker { padding:22px; }
+  .broker-head { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:18px; }
+  .broker-head h2 { margin:0; font-size:16px; }
+  .status { font-size:11px; font-weight:500; border-radius:6px; padding:4px 8px; border:1px solid var(--border); color:var(--muted); white-space:nowrap; }
+  .status.ok { color:var(--ok); border-color:color-mix(in srgb,var(--ok) 35%,var(--border)); }
+  .status.bad { color:var(--pe); border-color:color-mix(in srgb,var(--pe) 35%,var(--border)); }
+  .broker form { display:grid; gap:12px; }
+  .broker input, .tg input { width:100%; border:1px solid var(--border); padding:8px; border-radius:6px; font-size:12px; }
+  .row { display:flex; flex-wrap:wrap; gap:10px; margin-top:16px; }
+  .meta { font-size:12px; color:var(--muted); margin:10px 0 0; line-height:1.7; }
+  .urls { display:grid; gap:8px; font-size:12px; }
+  .urls code { display:block; padding:8px 10px; background:var(--surface); border:1px solid var(--border); border-radius:6px; overflow-wrap:anywhere; user-select:all; }
+  .sec { margin-top:16px; } body .sec.card { padding:22px; }
+  .sec h2 { font-size:14px; margin:0 0 10px; }
+  .saved-keys { display:grid; grid-template-columns:1fr 1fr auto; gap:12px; align-items:end; }
+  .saved-keys span { display:block; font-size:11px; color:var(--muted); margin-bottom:4px; }
+  .saved-keys b { font-size:13px; font-weight:500; }
+  @media (max-width:520px) { .saved-keys { grid-template-columns:1fr; } }
+  .flash { margin-bottom:16px; padding:12px 16px; border-radius:8px; border:1px solid var(--border); background:var(--card); font-size:13px; }
+  .flash.ok { color:var(--ok); border-color:var(--ok); } .flash.bad { color:var(--pe); border-color:var(--pe); }
+  .tg { display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; } .tg label { flex:1; min-width:200px; }
+</style>
+</head>
+<body>
+{% set active = "brokers" %}{% include "_nav.html" %}
+<main id="main" tabindex="-1">
+  <header class="page-heading"><div><h1>My brokers</h1><p class="sub">Broker keys and today's login. Live orders go only to brokers logged in today.</p></div></header>
+  <div id="flash" role="status"></div>
+  <div class="broker-grid" id="grid"><div class="card broker">Loading…</div></div>
+
+  <section class="card sec">
+    <h2>Telegram morning reminder</h2>
+    <p class="meta" style="margin:0 0 12px">On weekdays at 08:30, 08:45, 09:00 and 09:10 you get one-tap login links if a broker with Live ON isn't logged in yet, and a final warning at 09:15. At 08:30 Upstox also sends an Approve request to your Upstox app. Find your chat ID by messaging <b>@userinfobot</b> on Telegram, and start a chat with this app's bot first.</p>
+    <form class="tg" id="tg"><label>Telegram chat ID <input name="chat_id" inputmode="numeric" pattern="-?[0-9]*" placeholder="e.g. 123456789"></label><button class="btn primary" type="submit">Save</button></form>
+    <p class="meta" id="tgState"></p>
+  </section>
+
+  <details class="card sec">
+    <summary>One-time setup in your broker's developer console</summary>
+    <div class="urls" style="margin-top:14px">
+      <span>Upstox app → Redirect URL</span><code>{{ urls.upstox_redirect }}</code>
+      <span>Upstox app → Notifier (postback) URL</span><code>{{ urls.upstox_notifier }}</code>
+      <span>Kite Connect app → Redirect URL</span><code>{{ urls.kite_redirect }}</code>
+    </div>
+    <p class="meta">Paste each app's API key and secret above. Orders must come from the static IP registered with each broker (the server's IP).</p>
+  </details>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const NAMES = {upstox:'Upstox', kite:'Kite (Zerodha)'};
+const editing = new Set(); let last = null;
+const when = iso => iso ? new Date(iso).toLocaleString('en-IN',{timeZone:'Asia/Kolkata',day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}) + ' IST' : '—';
+async function api(path, body) {
+  const r = await appFetch(path, body === undefined ? {} : {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(typeof j.detail === 'string' ? j.detail : Array.isArray(j.detail) ? 'Please check the values you entered.' : `Request failed (${r.status})`);
+  return j;
+}
+function render(s) {
+  last = s;
+  $('grid').innerHTML = Object.entries(s.brokers).map(([b,x]) => `
+    <section class="card broker" aria-label="${NAMES[b]}">
+      <div class="broker-head"><h2>${NAMES[b]}</h2><span class="status ${x.logged_in ? 'ok' : x.has_key ? 'bad' : ''}">${x.logged_in ? 'Logged in today' : x.has_key ? 'Not logged in' : 'Not set up'}</span></div>
+      ${x.has_key && x.has_secret && !editing.has(b) ? `<div class="saved-keys"><div><span>API key</span><b>${esc(x.api_key)}</b></div><div><span>API secret</span><b>•••••• saved</b></div><button class="btn ghost" type="button" data-edit="${b}">Change keys</button></div>` : `<form data-keys="${b}">
+        <label>API key <input name="api_key" autocomplete="off" spellcheck="false" placeholder="${x.has_key ? esc(x.api_key) + ' (saved)' : 'Paste your API key'}"></label>
+        <label>API secret <input name="api_secret" type="password" autocomplete="new-password" placeholder="${x.has_secret ? '•••••• (saved)' : 'Paste your API secret'}"></label>
+        <div class="row" style="margin:0"><button class="btn ghost" type="submit">Save keys</button>${editing.has(b) ? `<button class="btn ghost" type="button" data-cancel="${b}">Cancel</button>` : ''}</div>
+      </form>`}
+      <p class="meta">${x.logged_in ? `Valid until ${when(x.valid_until)}${x.broker_user ? ` · ${esc(x.broker_user)}` : ''}` : 'Log in once each trading morning before 09:15.'}</p>
+      <div class="row">
+        <a class="btn primary" href="/broker/${b}/login" ${x.has_key && x.has_secret ? '' : 'aria-disabled="true" style="pointer-events:none;opacity:.45"'}>${x.logged_in ? 'Log in again' : 'Log in to ' + NAMES[b]}</a>
+        ${b === 'upstox' ? `<button class="btn ghost" type="button" data-approve ${x.has_key && x.has_secret ? '' : 'disabled'}>Send approval to my Upstox app</button>` : ''}
+      </div>
+    </section>`).join('');
+  $('tgState').textContent = !s.telegram_bot ? 'Telegram bot is not configured on this server yet.' : s.telegram ? 'Reminders are on for your saved chat.' : 'No chat saved — reminders are off.';
+}
+async function load() { try { render(await api('/api/brokers')); } catch (e) { notifyUI(e.message, true); } }
+$('grid').addEventListener('submit', async e => {
+  e.preventDefault();
+  const f = e.target, body = {broker:f.dataset.keys};
+  if (f.api_key.value.trim()) body.api_key = f.api_key.value.trim();
+  if (f.api_secret.value) body.api_secret = f.api_secret.value;
+  if (!body.api_key && !body.api_secret) { notifyUI('Enter an API key or secret to save.', true); return; }
+  if (last?.brokers[body.broker]?.has_key && !await confirmUI({title:'Replace saved keys?', message:'The saved key or secret will be replaced. If the API key changes, today\'s login is cleared.', confirmText:'Replace', danger:true})) return;
+  try { editing.delete(body.broker); render(await api('/api/brokers/keys', body)); notifyUI('Keys saved. They stay saved — only the daily login expires.'); } catch (x) { notifyUI(x.message, true); }
+});
+$('grid').addEventListener('click', async e => {
+  const ed = e.target.closest('[data-edit],[data-cancel]');
+  if (ed) { ed.dataset.edit ? editing.add(ed.dataset.edit) : editing.delete(ed.dataset.cancel); render(last); return; }
+  const b = e.target.closest('[data-approve]'); if (!b) return;
+  b.disabled = true;
+  try { await api('/api/brokers/upstox/request', {}); notifyUI('Approval sent. Tap Approve in your Upstox app; this page updates once it arrives.'); setTimeout(load, 20000); }
+  catch (x) { notifyUI(x.message, true); } finally { b.disabled = false; }
+});
+$('tg').addEventListener('submit', async e => {
+  e.preventDefault();
+  try { render(await api('/api/brokers/telegram', {chat_id:e.target.chat_id.value.trim()})); notifyUI('Telegram setting saved.'); e.target.reset(); } catch (x) { notifyUI(x.message, true); }
+});
+const q = new URLSearchParams(location.search), msg = q.get('ok') || q.get('error') || (q.get('missing') ? `Add your ${NAMES[q.get('missing')] || ''} API key and secret first.` : '');
+if (msg) { $('flash').className = 'flash ' + (q.get('ok') ? 'ok' : 'bad'); $('flash').textContent = msg; history.replaceState(null, '', '/brokers'); }
+load();
+</script>
+</body>
+</html>

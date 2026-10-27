@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>upstocks — sign in</title>
+{% include "_style.html" %}
+<style>
+  body { display:grid; place-items:center; min-height:100vh; padding:16px; }
+  .login { width:100%; max-width:360px; padding:28px; }
+  .login h1 { font-size:20px; margin:0 0 4px; }
+  .login p { color:var(--muted); font-size:12px; margin:0 0 22px; }
+  .login form { display:grid; gap:14px; }
+  .login input { width:100%; }
+  .login .btn { width:100%; margin-top:6px; }
+  #err { min-height:18px; font-size:12px; margin:0; }
+</style>
+</head>
+<body>
+<main class="card login" id="main">
+  <h1>upstocks<span style="color:var(--accent)">.</span></h1>
+  <p>Sign in to your own trading workspace.</p>
+  <form id="f">
+    <label>Username <input name="username" autocomplete="username" required autofocus></label>
+    <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
+    <p id="err" class="err" role="alert"></p>
+    <button class="btn primary" type="submit">Sign in</button>
+  </form>
+</main>
+<script>
+const token = {{ request.app.state.dashboard_token | default('') | tojson }}, next = {{ next | tojson }};
+document.getElementById('f').addEventListener('submit', async e => {
+  e.preventDefault();
+  const f = e.target, button = f.querySelector('button'), err = document.getElementById('err');
+  button.disabled = true; err.textContent = '';
+  try {
+    const r = await fetch('/api/login', {method:'POST', headers:{'content-type':'application/json','X-App-Token':token},
+      body:JSON.stringify({username:f.username.value, password:f.password.value})});
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(typeof j.detail === 'string' ? j.detail : 'Sign-in failed. Please try again.');
+    location.href = next;
+  } catch (x) { err.textContent = x.message; button.disabled = false; f.password.select(); }
+});
+</script>
+</body>
+</html>

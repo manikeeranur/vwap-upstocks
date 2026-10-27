@@ -11,7 +11,7 @@ router = APIRouter()
 
 @router.get("/api/paper")
 async def paper_state(request: Request):
-    return request.app.state.trading.snapshot()
+    return request.app.state.trading.snapshot(request.state.user_id)
 
 
 @router.get("/api/paper/quotes")
@@ -21,8 +21,9 @@ async def paper_quotes(request: Request):
 
 @router.post("/api/paper/config")
 async def paper_config(body: ConfigUpdate, request: Request):
-    changes = body.model_dump(exclude={"preset", "confirm"}, exclude_none=True)
-    return {"state": await request.app.state.trading.configure(body.preset, **changes)}
+    changes = body.model_dump(exclude={"preset", "broker", "confirm"}, exclude_none=True)
+    await request.app.state.trading.configure(body.preset, user=request.state.user_id, broker=body.broker, **changes)
+    return {"state": request.app.state.trading.snapshot(request.state.user_id)["state"]}
 
 
 @router.get("/api/journal")
@@ -40,7 +41,7 @@ async def journal_note(body: NoteUpdate, request: Request):
 
 @router.post("/api/paper/squareoff")
 async def paper_squareoff(body: PresetRequest, request: Request):
-    return {"sold": await request.app.state.trading.square_off(body.preset)}
+    return {"sold": await request.app.state.trading.square_off(body.preset, user=request.state.user_id, broker=body.broker)}
 
 
 @router.post("/api/paper/scan")

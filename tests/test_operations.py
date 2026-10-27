@@ -63,12 +63,12 @@ class EvidenceTests(unittest.TestCase):
             self.assertEqual(conn.execute("SELECT message,level,component FROM audit_events").fetchone()[:], ('original', 'INFO', 'trading'))
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM decision_evidence").fetchone()[0], 0)
         state = Repository(old).state()
-        self.assertEqual((state['revision'], state['entries_paused']), (0, False))
+        self.assertEqual((state['revision'], state['users'][1]['paused']), (0, False))
 
     def test_compare_and_set_allows_only_one_concurrent_revision(self):
         def update(lots):
             try:
-                self.repo.configure(PRESET, lots=lots, revision=0)
+                self.repo.configure(PRESET, user=1, broker='upstox', lots=lots, revision=0)
                 return lots
             except ConfigurationConflict:
                 return None
@@ -76,14 +76,14 @@ class EvidenceTests(unittest.TestCase):
             results = list(pool.map(update, range(2, 10)))
         accepted = [r for r in results if r is not None]
         self.assertEqual(len(accepted), 1)
-        self.assertEqual(self.repo.state()['config'][PRESET]['lots'], accepted[0])
+        self.assertEqual(self.repo.state()['accounts']['1:upstox']['lots'][PRESET], accepted[0])
         self.assertEqual(self.repo.state()['revision'], 1)
 
     def test_evidence_is_immutable_and_atomic_with_order_intent(self):
         trade = {"entry": 301, "stop": 280, "instrument_key": "NSE_FO|123"}
-        self.repo.reserve_order(TID, PRESET, "BUY", {"qty": 65}, {"trade": trade})
+        self.repo.reserve_order(TID, "1:upstox", PRESET, "BUY", {"qty": 65}, {"trade": trade})
         trade['entry'] = 999
-        self.repo.finish_order(TID, "BUY", {"qty": 65, "status": "submitted", "order_id": "fake"}, "submitted")
+        self.repo.finish_order(TID, "1:upstox", "BUY", {"qty": 65, "status": "submitted", "order_id": "fake"}, "submitted")
         with self.db.connect() as conn:
             rows = conn.execute("SELECT stage,payload FROM decision_evidence ORDER BY id").fetchall()
             self.assertEqual([r['stage'] for r in rows], ['ORDER_INTENT', 'ORDER_RESULT'])
@@ -95,8 +95,8 @@ class EvidenceTests(unittest.TestCase):
                 conn.execute(sql)
         with patch.object(self.repo, '_evidence', side_effect=sqlite3.OperationalError('disk full')):
             with self.assertRaises(sqlite3.OperationalError):
-                self.repo.reserve_order(TID + '2', PRESET, 'BUY', {'qty': 65})
-        self.assertNotIn(TID + '2', self.repo.state()['orders'])
+                self.repo.reserve_order(TID + '2', '1:upstox', PRESET, 'BUY', {'qty': 65})
+        self.assertNotIn(TID + '2', self.repo.state()['orders'].get('1:upstox', {}))
 
     def test_export_reads_consistent_complete_snapshot_and_redacts(self):
         start, end = diagnostics.day_bounds(DAY)
@@ -108,7 +108,7 @@ class EvidenceTests(unittest.TestCase):
             conn.executemany("INSERT INTO audit_events(created_at,kind,message,details,level,component) VALUES (?,'test',?,?,'INFO','application')", rows)
         self.repo.save_scan({'day': str(DAY), 'results': {}, 'errors': {}}, {PRESET: {'lots': 1, 'lot_size': 65, 'updated': str(DAY), 'trades': [{'id': TID, 'pnl': 10}]}}, {'is_replay': True})
         self.repo.set_note(TID, 'a useful note')
-        self.repo.reserve_order(TID, PRESET, 'BUY', {'qty': 65})
+        self.repo.reserve_order(TID, '1:upstox', PRESET, 'BUY', {'qty': 65})
         self.repo.create_job('job', Settings(start=DAY, end=DAY), PRESET)
         self.repo.add_job_day('job', {'date': str(DAY), 'trades': []})
         self.repo.update_job('job', status='done', total=1)
@@ -174,15 +174,15 @@ class OperationsApiTests(unittest.TestCase):
             first = client.post('/api/paper/config', json={'revision': 0, 'entries_paused': True})
             self.assertEqual(first.status_code, 200)
             self.assertTrue(first.json()['state']['entries_paused'])
-            stale = client.post('/api/paper/config', json={'revision': 0, 'preset': PRESET, 'lots': 9})
+            stale = client.post('/api/paper/config', json={'revision': 0, 'preset': PRESET, 'broker': 'upstox', 'lots': 9})
             self.assertEqual(stale.status_code, 409)
             self.assertEqual(stale.json()['state']['revision'], 1)
-            self.assertEqual(stale.json()['state']['config'][PRESET]['lots'], 1)
+            self.assertEqual(stale.json()['state']['accounts']['1:upstox']['lots'][PRESET], 1)
             self.assertEqual(client.post('/api/paper/config', json={'revision': 1, 'entries_paused': False}).status_code, 422)
         with DashboardClient(create_app(self.settings)) as client:
             self.assertTrue(client.get('/api/paper').json()['state']['entries_paused'])
             self.assertEqual(client.post('/api/paper/config', json={'revision': 1, 'entries_paused': False, 'confirm': 'LIVE'}).status_code, 200)
-            self.assertFalse(any(c['live'] for c in client.get('/api/paper').json()['state']['config'].values()))
+            self.assertFalse(any(any(a['live'].values()) for a in client.get('/api/paper').json()['state']['accounts'].values()))
 
     def test_host_origin_token_and_body_guards(self):
         with TestClient(self.app, base_url='http://127.0.0.1') as client:
@@ -196,7 +196,9 @@ class OperationsApiTests(unittest.TestCase):
             self.assertEqual(client.post('/api/paper/config', content='{}', headers={'content-type': 'text/plain'}).status_code, 415)
             self.assertEqual(client.post('/api/paper/config', content=' ' * 1_048_577, headers={'content-type': 'application/json'}).status_code, 413)
             self.assertEqual(client.get('/paper').headers['x-frame-options'], 'DENY')
-            self.assertFalse(self.app.state.repository.state()['entries_paused'])
+            self.assertFalse(self.app.state.repository.state()['users'][1]['paused'])
+            from upstocks.accounts import SESSION_COOKIE
+            client.cookies.set(SESSION_COOKIE, self.app.state.signer.session(1))
             self.assertEqual(client.post('/api/paper/config', json=payload, headers={'origin': 'http://127.0.0.1'}).status_code, 200)
 
     def test_activity_export_and_request_correlation(self):
@@ -214,7 +216,7 @@ class OperationsApiTests(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.headers['content-type'], 'application/zip')
             with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
-                self.assertEqual(json.loads(archive.read('manifest.json'))['schema_version'], 2)
+                self.assertEqual(json.loads(archive.read('manifest.json'))['schema_version'], 3)
             self.assertEqual(client.get('/health/ready').json()['audit_failures'], 0)
 
     def test_exception_frames_exclude_source_and_local_secrets(self):
