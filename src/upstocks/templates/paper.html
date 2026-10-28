@@ -291,7 +291,9 @@ function render() {
   const errorCount = Object.keys(view.errors || {}).length;
   $('pnlCaption').textContent = errorCount ? `Incomplete scan · ${errorCount} ${errorCount === 1 ? 'error' : 'errors'}` : 'Simulated · before charges';
   if (!$('strats').contains(document.activeElement)) {
-    $('strats').innerHTML = PRESETS.map((p,index) => {
+    // Harmonic, then EMA pullback, then the rest; each card keeps its own icon (icons follow PRESETS order).
+    const FIRST = ['harmonic','ema_pullback'], shown = [...FIRST.filter(p => PRESETS.includes(p)), ...PRESETS.filter(p => !FIRST.includes(p))];
+    $('strats').innerHTML = shown.map(p => { const index = PRESETS.indexOf(p);
       const cfg = state.config[p], trades = view.results?.[p] || [], err = view.errors?.[p] || view.errors?.scan;
       const qty = paperLots(p) * state.lot_size, live = isLive(p), pts = trades.reduce((a,t) => a + t.pnl,0), open = trades.filter(t => t.open).length;
       const rows = trades.map((t,i) => { const st = t.open ? 'OPEN' : t.status, pc = t.pnl >= 0 ? 'up' : 'down';
