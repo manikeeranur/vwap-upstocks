@@ -242,11 +242,13 @@ async def kite_account(creds: Credentials) -> dict:
         out["profile"]["data"] = {**p, "broker": "ZERODHA", "is_active": True}
     if out["funds"]["data"]:
         def seg(x):
-            if not x:
+            if not x or not x.get("enabled", True):
                 return None
             a, u = x.get("available") or {}, x.get("utilised") or {}
-            return {"available_margin": x.get("net"), "used_margin": u.get("debits"), "payin_amount": a.get("intraday_payin"),
-                    "span_margin": u.get("span"), "exposure_margin": u.get("exposure"), "notional_cash": a.get("cash")}
+            # Kite's own figures; `cash` is usually 0 — the wallet balance is `live_balance`.
+            return {"fields": [("Available margin", x.get("net"), "up"), ("Cash balance", a.get("live_balance"), ""),
+                               ("Opening balance", a.get("opening_balance"), ""), ("Collateral (pledged)", a.get("collateral"), ""),
+                               ("Used margin", u.get("debits"), ""), ("Pay-in today", a.get("intraday_payin"), "")]}
         out["funds"]["data"] = {k: seg(out["funds"]["data"].get(k)) for k in ("equity", "commodity")}
     if out["positions"]["data"] is not None:
         out["positions"]["data"] = (out["positions"]["data"] or {}).get("net") or []

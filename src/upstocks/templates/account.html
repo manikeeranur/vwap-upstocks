@@ -95,6 +95,11 @@
     {% set f = a.funds.data %}
     {% if f %}
     {% for seg, label in [("equity", "Equity / F&O"), ("commodity", "Commodity")] %}{% set x = f[seg] %}{% if x %}
+    {% if x.fields is defined %}
+    <div class="kv" style="margin-bottom:10px">
+      {% for name, value, cls in x.fields %}<div><span>{{ label ~ " · " ~ name|lower if loop.first else name }}</span><b class="{{ cls }}">{{ money(value) }}</b></div>{% endfor %}
+    </div>
+    {% else %}
     <div class="kv" style="margin-bottom:10px">
       <div><span>{{ label }} · available</span><b class="up">{{ money(x.available_margin) }}</b></div>
       <div><span>Used margin</span><b>{{ money(x.used_margin) }}</b></div>
@@ -103,6 +108,7 @@
       <div><span>Exposure margin</span><b>{{ money(x.exposure_margin) }}</b></div>
       <div><span>Notional cash</span><b>{{ money(x.notional_cash) }}</b></div>
     </div>
+    {% endif %}
     {% endif %}{% endfor %}
     {% endif %}
   </section>
