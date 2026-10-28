@@ -26,6 +26,15 @@ class StorageTests(unittest.TestCase):
     def initialize(self):
         self.repo.migrate_legacy(self.root)
 
+    def test_journal_live_trades_carry_real_fill_prices(self):
+        tid, ctx = "harmonic|2026-10-28|10:01|NSE_FO|1", {"trade": {}}
+        for side, oid, price in (("BUY", "b1", 439.1), ("SELL", "s1", 543.8)):
+            self.assertTrue(self.repo.reserve_order(tid, "1:kite", "harmonic", side, {"status": "pending", "qty": 65}, ctx))
+            self.repo.finish_order(tid, "1:kite", side, {"status": "submitted", "order_id": oid, "qty": 65}, "sent")
+            self.repo.save_fill(tid, "1:kite", side, price, 60.5 if side == "BUY" else 67.58)
+        live = self.repo.journal("2026-10-28", "2026-10-28")["live"]
+        self.assertEqual(live, {tid: {"1:kite": {"qty": 65, "buy": 439.1, "sell": 543.8, "buy_charges": 60.5, "sell_charges": 67.58}}})
+
     def test_schema_idempotent_and_wal(self):
         self.db.initialize()
         self.assertEqual(self.db.check(), {"integrity": "ok", "foreign_key_errors": 0, "schema_version": 5})

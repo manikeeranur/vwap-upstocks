@@ -138,6 +138,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await self.trading.live_fills(1), {"1:kite": {"b1": 439.1}})
             await self.trading.live_fills(1)   # cached
         self.assertEqual(fills.await_count, 1)
+        self.assertEqual(self.trading.state["orders"]["1:kite"][f"harmonic|{today}|10:01|NSE_FO|1"]["buy"]["fill_price"], 439.1)
 
     def test_indmoney_token_lasts_24_hours(self):
         creds = brokers.Credentials("indmoney", "", "", "t", "2026-10-12T08:31:00+05:30")

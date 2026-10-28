@@ -449,3 +449,38 @@ async def order_fills(creds: Credentials) -> dict:
                 for o in await _ind("GET", "/order-book", creds.access_token) or []]
     return {str(oid): float(price) for oid, price, filled in rows if oid and price and (filled or 0) > 0}
 
+
+async def order_charges(creds: Credentials, order_ids: set) -> dict:
+    """{order id: total charges in ₹} for today's filled orders, as the broker works them out.
+    Kite: virtual contract note. Upstox: brokerage API per order. INDmoney gives only day totals, so none."""
+    want = {str(o) for o in order_ids}
+    if creds.broker == "kite":
+        async with httpx.AsyncClient(timeout=20) as c:
+            r = await c.get(f"{KITE_API}/orders", headers=_kite_headers(creds.api_key, creds.access_token))
+        body = await _json(r, "Kite")
+        if r.status_code != 200 or body.get("status") != "success":
+            raise BrokerError(f"Kite orders: {body.get('message') or r.status_code}")
+        orders = [o for o in body.get("data") or [] if str(o.get("order_id")) in want]
+        rows = await kite_charges(creds, orders)
+        done = [o for o in orders if o.get("status") == "COMPLETE" and (o.get("filled_quantity") or 0) > 0]
+        return {str(o["order_id"]): row["total"] for o, row in zip(done, rows)}
+    if creds.broker == "upstox":
+        headers = {"Accept": "application/json", "Authorization": f"Bearer {creds.access_token}"}
+        async with httpx.AsyncClient(timeout=20) as c:
+            r = await c.get(f"{UPSTOX_API}/v2/order/retrieve-all", headers=headers)
+            body = await _json(r, "Upstox")
+            if r.status_code != 200:
+                raise BrokerError(f"Upstox orders: {r.status_code}")
+            out = {}
+            for o in body.get("data") or []:
+                if str(o.get("order_id")) not in want or o.get("status") != "complete" or not o.get("filled_quantity"):
+                    continue
+                q = await c.get(f"{UPSTOX_API}/v2/charges/brokerage", headers=headers, params={
+                    "instrument_token": o["instrument_token"], "quantity": o["filled_quantity"], "product": o["product"],
+                    "transaction_type": o["transaction_type"], "price": o.get("average_price") or 0})
+                total = (((await _json(q, "Upstox")).get("data") or {}).get("charges") or {}).get("total")
+                if q.status_code == 200 and total is not None:
+                    out[str(o["order_id"])] = float(total)
+            return out
+    return {}
+

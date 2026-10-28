@@ -157,7 +157,44 @@ class TradingService:
                 continue
             self._fills_cache[account] = (time.monotonic(), fills)
             out[account] = fills
+            await self._store_fills(account, fills)
+            await self._store_charges(account, creds)
         return out
+
+    async def _store_charges(self, account, creds):
+        """Keep the broker's own charges for filled live orders (once per order)."""
+        missing = {str(o["order_id"]): (tid, side) for tid, sides in self.state["orders"].get(account, {}).items()
+                   for side, o in sides.items() if o.get("order_id") and o.get("fill_price") is not None and "charges" not in o}
+        if not missing:
+            return
+        try:
+            found = await brokers.order_charges(creds, set(missing))
+        except Exception:
+            log.warning("Broker charges unavailable", extra={"account": account})
+            return
+        for oid, total in found.items():
+            tid, side = missing[oid]
+            self.state["orders"][account][tid][side]["charges"] = round(total, 2)
+            await asyncio.to_thread(self.repository.save_fill, tid, account, side.upper(), None, round(total, 2))
+
+    async def _store_fills(self, account, fills):
+        """Keep each live order's real fill price, so P&L later (e.g. the calendar) uses what the broker filled."""
+        for tid, orders in list(self.state["orders"].get(account, {}).items()):
+            for side, order in list(orders.items()):
+                price = fills.get(str(order.get("order_id") or ""))
+                if price is not None and order.get("fill_price") != price:
+                    order["fill_price"] = price
+                    await asyncio.to_thread(self.repository.save_fill, tid, account, side.upper(), price)
+
+
+    async def record_fills(self):
+        """Fetch fills for anyone with today's live orders still missing a fill price."""
+        today = upstox.today_ist().isoformat()
+        users = {acc["user"] for account, acc in self.state["accounts"].items()
+                 if any(today in tid and o.get("order_id") and ("fill_price" not in o or "charges" not in o)
+                        for tid, sides in self.state["orders"].get(account, {}).items() for o in sides.values())}
+        for uid in users:
+            await self.live_fills(uid)
 
     def _any_live(self, preset):
         return any(acc["live"].get(preset) for acc in self.state["accounts"].values())
@@ -190,6 +227,11 @@ class TradingService:
                         trade["orders"] = ({acc: deepcopy(o[trade["id"]]) for acc, o in self.state["orders"].items() if trade["id"] in o}
                                            if is_today else {})
                     await self._peaks(day, trades)   # after orders, so it never delays them
+                    if is_today:
+                        try:
+                            await self.record_fills()
+                        except Exception:
+                            log.warning("Recording fills failed")
                     results[preset] = trades
                 view = {"day": day.isoformat(), "scanned_at": f"{live.now_ist():%H:%M:%S}",
                         "results": results, "errors": errors, "running": False}

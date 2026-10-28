@@ -232,6 +232,20 @@ class Repository:
             _audit(conn, "activity", message, level="ERROR" if payload["status"] == "unknown" else "INFO")
             self._evidence(conn, tid.split("|", 3)[1], "ORDER_RESULT", {"trade_id": tid, "account": account, "side": side, "order": payload})
 
+    def save_fill(self, tid, account, side, price=None, charges=None):
+        """Record the broker's average fill price and/or charges on a submitted order (kept once known)."""
+        with self.db.connect(write=True) as conn:
+            row = conn.execute("SELECT payload FROM broker_orders WHERE trade_id=? AND account=? AND side=?", (tid, account, side)).fetchone()
+            if row is None:
+                return
+            payload = json.loads(row["payload"])
+            changes = {k: v for k, v in (("fill_price", price), ("charges", charges)) if v is not None and payload.get(k) != v}
+            if not changes:
+                return
+            payload.update(changes)
+            conn.execute("UPDATE broker_orders SET payload=?,updated_at=? WHERE trade_id=? AND account=? AND side=?",
+                         (encode(payload), utc_now(), tid, account, side))
+
     def recover(self):
         with self.db.connect(write=True) as conn:
             pending = conn.execute("SELECT * FROM broker_orders WHERE status='pending'").fetchall()
@@ -284,13 +298,22 @@ class Repository:
             for r in conn.execute("SELECT * FROM journal_trades WHERE day BETWEEN ? AND ? ORDER BY day,preset,position", (start, end)):
                 days[r["day"]][r["preset"]]["trades"].append(json.loads(r["payload"]))
             notes = {r[0]: r[1] for r in conn.execute("SELECT DISTINCT n.trade_id,n.text FROM notes n JOIN journal_trades t ON n.trade_id=t.trade_id WHERE t.day BETWEEN ? AND ?", (start, end))}
-            # Trades a broker actually bought: {trade id: {account: quantity}} (trade ids are "preset|YYYY-MM-DD|…").
-            live = {}
-            for r in conn.execute("SELECT trade_id,account,payload FROM broker_orders WHERE side='BUY' "
-                                  "AND substr(trade_id, instr(trade_id,'|')+1, 10) BETWEEN ? AND ?", (str(start), str(end))):
+            # Trades a broker actually bought, with the real fill prices once known:
+            # {trade id: {account: {"qty", "buy", "sell"}}} (trade ids are "preset|YYYY-MM-DD|…").
+            live, sells = {}, {}
+            for r in conn.execute("SELECT trade_id,account,side,payload FROM broker_orders "
+                                  "WHERE substr(trade_id, instr(trade_id,'|')+1, 10) BETWEEN ? AND ?", (str(start), str(end))):
                 order = json.loads(r["payload"])
-                if order.get("order_id"):
-                    live.setdefault(r["trade_id"], {})[r["account"]] = order.get("qty") or 0
+                if not order.get("order_id"):
+                    continue
+                if r["side"] == "BUY":
+                    live.setdefault(r["trade_id"], {})[r["account"]] = {"qty": order.get("qty") or 0, "buy": order.get("fill_price"), "sell": None,
+                                                                         "buy_charges": order.get("charges"), "sell_charges": None}
+                else:
+                    sells[(r["trade_id"], r["account"])] = order
+            for (tid, account), order in sells.items():
+                if account in live.get(tid, {}):
+                    live[tid][account].update(sell=order.get("fill_price"), sell_charges=order.get("charges"))
             return {"days": days, "notes": notes, "live": live}
 
     def set_note(self, tid, text):
