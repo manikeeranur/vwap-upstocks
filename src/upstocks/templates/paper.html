@@ -242,7 +242,8 @@ function updateLiveValues() {
   BROKER_ORDER.forEach(b => live[b] = {pnl:0, trades:0, open:0, charges:0});
   PRESETS.forEach(p => { for (const t of S.view.results?.[p] || []) {
     const m = marks.get(t.id); if (!m) continue;
-    for (const [acc,o] of Object.entries(t.orders || {})) {
+    for (const [acc,snap] of Object.entries(t.orders || {})) {
+      const o = S.state.orders?.[acc]?.[t.id] || snap;   // the scan's copy predates saved fills and charges
       const b = acc.split(':')[1]; if (!o.buy?.order_id || !live[b]) continue;
       // Real fills: today's from the broker (refreshed every 20 s), otherwise the fill saved with the order.
       const f = F?.[acc] || {}, buy = f[o.buy.order_id] ?? o.buy.fill_price, sell = o.sell?.order_id ? f[o.sell.order_id] ?? o.sell.fill_price : null;
