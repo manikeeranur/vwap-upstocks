@@ -9,7 +9,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from .. import accounts, brokers
 from ..observability import redact
-from ..schemas import BrokerKeys, BrokerRequest, Login, TelegramSetting
+from ..schemas import BrokerKeys, BrokerRequest, IndTotp, IndToken, Login, TelegramSetting
 from .common import templates
 
 router = APIRouter()
@@ -121,6 +121,8 @@ async def _save_token(request, user_id, broker, token, profile):
 async def broker_login(broker: str, request: Request):
     if broker not in brokers.BROKERS:
         raise HTTPException(404, "Unknown broker")
+    if broker == "indmoney":   # no login page: the token is pasted or generated on My brokers
+        return RedirectResponse("/brokers#indmoney", status_code=303)
     creds = await asyncio.to_thread(_creds, request, request.state.user_id, broker)
     if not (creds.api_key and creds.api_secret):
         return RedirectResponse(f"/brokers?missing={broker}", status_code=303)
@@ -206,6 +208,33 @@ async def upstox_notify(request: Request):
         _pending_upstox[key] = [(u, t) for u, t in _pending_upstox.get(key, []) if u != uid]
         return {"ok": True}
     return JSONResponse({"ok": False}, status_code=202)
+
+
+async def _ind_save(request, token):
+    try:
+        profile = await brokers.ind_profile(token)
+    except brokers.BrokerError as exc:
+        raise HTTPException(400, redact(str(exc)))
+    await asyncio.to_thread(request.app.state.repository.save_broker_keys, request.state.user_id, "indmoney")
+    await _save_token(request, request.state.user_id, "indmoney", token, profile)
+    return await asyncio.to_thread(_status, request, request.state.user_id)
+
+
+@router.post("/api/brokers/indmoney/token")
+async def ind_token(body: IndToken, request: Request):
+    return await _ind_save(request, body.token.strip())
+
+
+@router.post("/api/brokers/indmoney/totp")
+async def ind_totp(body: IndTotp, request: Request):
+    creds = await asyncio.to_thread(_creds, request, request.state.user_id, "indmoney")
+    if not creds.api_key:
+        raise HTTPException(400, "Save your INDstocks Client ID first")
+    try:
+        token = await brokers.ind_generate_token(creds.api_key, body.mpin, body.totp)
+    except brokers.BrokerError as exc:
+        raise HTTPException(400, redact(str(exc)))
+    return await _ind_save(request, token)
 
 
 @router.post("/api/brokers/telegram")

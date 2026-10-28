@@ -61,12 +61,12 @@ async def account_page(request: Request, broker: str = "upstox"):
     Each section loads independently; a static-IP refusal is shown per section."""
     broker = broker if broker in brokers.BROKERS else "upstox"
     now = datetime.now(upstox.IST).strftime("%d %b %Y %H:%M")
-    if broker == "kite":
-        creds = await asyncio.to_thread(_creds, request, request.state.user_id, "kite")
+    if broker in ("kite", "indmoney"):
+        creds = await asyncio.to_thread(_creds, request, request.state.user_id, broker)
         if not creds.token_valid():
             return templates.TemplateResponse(request, "account.html", {"broker": broker, "a": None, "blocked": False,
                                                                         "login_needed": True, "now": now})
-        acct = await brokers.kite_account(creds)
+        acct = await (brokers.kite_account(creds) if broker == "kite" else brokers.ind_account(creds))
         blocked = all(v["error"] for v in acct.values())
     else:
         acct = await upstox.account()

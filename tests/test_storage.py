@@ -28,7 +28,7 @@ class StorageTests(unittest.TestCase):
 
     def test_schema_idempotent_and_wal(self):
         self.db.initialize()
-        self.assertEqual(self.db.check(), {"integrity": "ok", "foreign_key_errors": 0, "schema_version": 4})
+        self.assertEqual(self.db.check(), {"integrity": "ok", "foreign_key_errors": 0, "schema_version": 5})
         with self.db.connect() as conn:
             self.assertEqual(conn.execute("PRAGMA journal_mode").fetchone()[0], "wal")
             self.assertEqual(conn.execute("PRAGMA foreign_keys").fetchone()[0], 1)

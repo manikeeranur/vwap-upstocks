@@ -159,7 +159,7 @@ body .strat { padding:20px; } .strat.islive { border-color:var(--pe); }
       <div id="strats" class="strategy-list" aria-busy="true"><div class="card loading-card">Loading strategy settings…</div></div>
     </section>
     <details class="card log-card"><summary>Execution activity</summary><pre id="log">Loading activity…</pre></details>
-    <details class="how-it-works"><summary>Execution details</summary><p>Active strategies scan every minute from 09:16 to 15:30 IST on weekdays, using completed candles. Paper mode tracks simulated trades. Each broker has its own Live switch per strategy: Upstox Live sends Upstox orders for its lots × lot size, and Kite Live sends Kite orders for its lots × the Kite lot size. Orders go only to brokers you have logged in to today (see My brokers), using signals no more than 3 minutes old. Open live positions are still exited if Live is switched off. Orders require the static IP registered with each broker. The scanner continues while this app is running, even when this page is closed. Past-day replays do not place orders. Replaying today uses your current trading settings.</p></details>
+    <details class="how-it-works"><summary>Execution details</summary><p>Active strategies scan every minute from 09:16 to 15:30 IST on weekdays, using completed candles. Paper mode tracks simulated trades. Each broker has its own Live switch per strategy: Upstox Live sends Upstox orders for its lots × lot size, Kite Live sends Kite orders for its lots × the Kite lot size, and INDmoney Live sends INDmoney (INDstocks) orders the same way. Orders go only to brokers you have logged in to today (see My brokers), using signals no more than 3 minutes old. Open live positions are still exited if Live is switched off. Orders require the static IP registered with each broker. The scanner continues while this app is running, even when this page is closed. Past-day replays do not place orders. Replaying today uses your current trading settings.</p></details>
   </div>
 </main>
 <script>
@@ -172,7 +172,7 @@ const fmt = n => Number(n || 0).toFixed(2);
 const money = n => `${n < 0 ? '−' : ''}₹${Math.abs(Math.round(n)).toLocaleString('en-IN')}`;
 const ampm = s => { if (!s) return '—'; const [h,m] = s.split(':').map(Number); return `${h % 12 || 12}:${String(m).padStart(2,'0')} ${h >= 12 ? 'PM' : 'AM'}`; };
 const todayIST = () => { const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date()).map(v => [v.type,v.value])); return `${p.year}-${p.month}-${p.day}`; };
-const BROKER_NAMES = {upstox:'Upstox', kite:'Kite'}, BROKER_ORDER = ['upstox','kite'];
+const BROKER_NAMES = {upstox:'Upstox', kite:'Kite', indmoney:'INDmoney'}, BROKER_ORDER = ['upstox','kite','indmoney'];
 let B = null;
 const accounts = () => BROKER_ORDER.map(b => { const e = Object.entries(S.state.accounts || {}).find(([,a]) => a.broker === b); return e && {id:e[0], ...e[1]}; }).filter(Boolean);
 const account = b => accounts().find(a => a.broker === b);

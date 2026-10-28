@@ -95,6 +95,27 @@ MIGRATIONS = [
         # Broker account name, email and photo from the last login: {"user_id","name","email","avatar"}.
         "ALTER TABLE broker_accounts ADD COLUMN profile TEXT NOT NULL DEFAULT '{}'",
     ),
+    (
+        # Add INDmoney (INDstocks) as a third broker.
+        """CREATE TABLE broker_accounts_v5 (
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            broker TEXT NOT NULL CHECK(broker IN ('upstox','kite','indmoney')),
+            api_key TEXT NOT NULL DEFAULT '', api_secret TEXT NOT NULL DEFAULT '',
+            access_token TEXT NOT NULL DEFAULT '', token_issued TEXT, broker_user TEXT,
+            updated_at TEXT NOT NULL, profile TEXT NOT NULL DEFAULT '{}', PRIMARY KEY(user_id, broker))""",
+        """INSERT INTO broker_accounts_v5(user_id,broker,api_key,api_secret,access_token,token_issued,broker_user,updated_at,profile)
+           SELECT user_id,broker,api_key,api_secret,access_token,token_issued,broker_user,updated_at,profile FROM broker_accounts""",
+        "DROP TABLE broker_accounts",
+        "ALTER TABLE broker_accounts_v5 RENAME TO broker_accounts",
+        """CREATE TABLE broker_strategy_v5 (
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            broker TEXT NOT NULL CHECK(broker IN ('upstox','kite','indmoney')), preset TEXT NOT NULL,
+            live INTEGER NOT NULL CHECK(live IN (0,1)), lots INTEGER NOT NULL CHECK(lots > 0),
+            PRIMARY KEY(user_id, broker, preset))""",
+        "INSERT INTO broker_strategy_v5(user_id,broker,preset,live,lots) SELECT user_id,broker,preset,live,lots FROM broker_strategy",
+        "DROP TABLE broker_strategy",
+        "ALTER TABLE broker_strategy_v5 RENAME TO broker_strategy",
+    ),
 ]
 
 

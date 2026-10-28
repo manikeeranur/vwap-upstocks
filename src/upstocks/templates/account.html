@@ -39,18 +39,19 @@
 <body>
 {% set active = "account" %}{% include "_nav.html" %}
 <main id="main" tabindex="-1">
-  {% set bname = "Kite (Zerodha)" if broker == "kite" else "Upstox" %}
+  {% set bname = {"kite": "Kite (Zerodha)", "indmoney": "INDmoney"}.get(broker, "Upstox") %}
   <header class="page-heading"><div><h1>Broker account</h1><p class="sub">Your {{ bname }} balances and activity.</p></div><div class="heading-actions"><span class="account-timestamp">{{ now }} IST</span><a class="btn ghost" href="/account?broker={{ broker }}">{{ ui_icon("refresh") }} Refresh</a></div></header>
   <nav class="seg broker-tabs" aria-label="Broker">
     <a href="/account?broker=upstox" class="{{ 'on' if broker == 'upstox' else '' }}" {% if broker == 'upstox' %}aria-current="page"{% endif %}>Upstox</a>
     <a href="/account?broker=kite" class="{{ 'on' if broker == 'kite' else '' }}" {% if broker == 'kite' %}aria-current="page"{% endif %}>Kite (Zerodha)</a>
+    <a href="/account?broker=indmoney" class="{{ 'on' if broker == 'indmoney' else '' }}" {% if broker == 'indmoney' %}aria-current="page"{% endif %}>INDmoney</a>
   </nav>
 
   {% if login_needed %}
   <section class="card account-empty">
     <span class="upload-icon">{{ ui_icon("lock") }}</span>
-    <h2>Kite is not logged in today</h2>
-    <p>Log in to Kite on My brokers to see your Zerodha funds, positions, orders and trades here.</p>
+    <h2>{{ bname }} is not logged in today</h2>
+    <p>Log in to {{ bname }} on My brokers to see your funds, positions, orders and trades here.</p>
     <a class="btn primary" href="/brokers">Go to My brokers {{ ui_icon("arrow") }}</a>
   </section>
   {% endif %}
@@ -59,7 +60,7 @@
   <section class="card account-empty">
     <span class="upload-icon">{{ ui_icon("lock") }}</span>
     <h2>Account access restricted</h2>
-    {% if broker == "kite" %}<p>Kite refused every request: {{ a.profile.error }}</p>{% else %}<p>Upstox account data is available from your registered IP.<br>You can still use market data and research tools.</p>{% endif %}
+    {% if broker != "upstox" %}<p>{{ bname }} refused every request: {{ a.profile.error }}</p>{% else %}<p>Upstox account data is available from your registered IP.<br>You can still use market data and research tools.</p>{% endif %}
     <a class="btn ghost" href="/data">Explore market data {{ ui_icon("arrow") }}</a>
     <details><summary>Connection details</summary><p>Register this computer’s public IP in Upstox Developer Console → your app → Static IP, or open the app on your registered machine.</p></details>
   </section>
@@ -119,7 +120,7 @@
         <td class="num">{{ money(r.average_price) }}</td><td class="num">{{ money(r.last_price) }}</td><td class="num">{{ money(r.buy_value) }}</td><td class="num">{{ money(r.sell_value) }}</td>
         <td class="num">{{ pnl(r.realised) }}</td><td class="num">{{ pnl(r.unrealised) }}</td><td class="num"><b>{{ pnl(r.pnl) }}</b></td></tr>
       {% endfor %}
-      <tr><td colspan="9" class="muted">Total</td><td class="num"><b>{{ pnl(rows|sum(attribute="pnl")) }}</b></td></tr>
+      <tr><td colspan="9" class="muted">Total</td><td class="num"><b>{{ pnl(rows|map(attribute="pnl")|select("number")|sum) }}</b></td></tr>
     </table></div>
     {% else %}<p class="muted">No positions today.</p>{% endif %}
     {% endif %}
@@ -168,12 +169,12 @@
     {% set rows = (a.charges.data if a.charges is defined else none) or [] %}
     {% if a.charges is defined and a.charges.data is not none %}
     {% if rows %}
-    {% set gross = (a.positions.data or [])|sum(attribute="pnl") %}{% set total = rows|sum(attribute="total") %}
+    {% set gross = (a.positions.data or [])|map(attribute="pnl")|select("number")|sum %}{% set total = rows|map(attribute="total")|select("number")|sum %}
     <div class="kv" style="margin-bottom:10px">
       {% set v = gross %}<div><span>Gross P&amp;L</span><b class="{{ 'up' if v >= 0 else 'down' }}">{{ '+' if v >= 0 else '−' }}₹{{ "{:,.2f}".format(v|abs) }}</b></div>
       <div><span>Total charges</span><b class="down">{{ money(total) }}</b></div>
       {% set v = gross - total %}<div><span>Net P&amp;L</span><b class="{{ 'up' if v >= 0 else 'down' }}">{{ '+' if v >= 0 else '−' }}₹{{ "{:,.2f}".format(v|abs) }}</b></div>
-      <div><span>Executed orders</span><b>{{ rows|length }}</b></div>
+      <div><span>Executed orders</span><b>{{ a.charges.orders if a.charges.orders is defined else rows|length }}</b></div>
     </div>
     <div class="tbl"><table>
       <tr><th>Time</th><th>Symbol</th><th>Side</th><th class="num">Qty</th><th class="num">Avg</th><th class="num">Brokerage</th><th class="num">STT</th><th class="num">Exchange</th><th class="num">SEBI</th><th class="num">Stamp</th><th class="num">GST</th><th class="num">Total</th></tr>
@@ -182,9 +183,9 @@
         <td class="num">{{ r.qty }}</td><td class="num">{{ money(r.price) }}</td><td class="num">{{ money(r.brokerage) }}</td><td class="num">{{ money(r.stt) }}</td>
         <td class="num">{{ money(r.exchange) }}</td><td class="num">{{ money(r.sebi) }}</td><td class="num">{{ money(r.stamp) }}</td><td class="num">{{ money(r.gst) }}</td><td class="num"><b>{{ money(r.total) }}</b></td></tr>
       {% endfor %}
-      <tr><td colspan="5" class="muted">Total</td>{% for k in ["brokerage","stt","exchange","sebi","stamp","gst"] %}<td class="num">{{ money(rows|sum(attribute=k)) }}</td>{% endfor %}<td class="num"><b>{{ money(total) }}</b></td></tr>
+      <tr><td colspan="5" class="muted">Total</td>{% for k in ["brokerage","stt","exchange","sebi","stamp","gst"] %}<td class="num">{{ money(rows|map(attribute=k)|select("number")|sum) }}</td>{% endfor %}<td class="num"><b>{{ money(total) }}</b></td></tr>
     </table></div>
-    <p class="muted" style="font-size:12px">Estimated by the broker for today; the contract note is final.</p>
+    <p class="muted" style="font-size:12px">{{ a.charges.note ~ " " if a.charges.note is defined else "" }}Estimated by the broker for today; the contract note is final.</p>
     {% else %}<p class="muted">No executed orders today, so no charges.</p>{% endif %}
     {% endif %}
   </section>
@@ -203,11 +204,57 @@
         <td class="num">{{ money((r.average_price or 0) * (r.quantity or 0)) }}</td><td class="num">{{ money((r.last_price or 0) * (r.quantity or 0)) }}</td>
         <td class="num"><b>{{ pnl(r.pnl) }}</b></td><td class="num">{{ pnl(r.day_change) }} <span class="muted">{{ "{:+.2f}%".format(r.day_change_percentage) if r.day_change_percentage is number else "" }}</span></td></tr>
       {% endfor %}
-      <tr><td colspan="6" class="muted">Total</td><td class="num"><b>{{ pnl(rows|sum(attribute="pnl")) }}</b></td><td></td></tr>
+      <tr><td colspan="6" class="muted">Total</td><td class="num"><b>{{ pnl(rows|map(attribute="pnl")|select("number")|sum) }}</b></td><td></td></tr>
     </table></div>
     {% else %}<p class="muted">No holdings.</p>{% endif %}
     {% endif %}
   </section>
+  {% if a.mf_holdings is defined %}
+  <section class="sec">
+    <h2>Mutual funds</h2>
+    {{ err("mf_holdings") }}
+    {% set rows = a.mf_holdings.data or [] %}
+    {% if a.mf_holdings.data is not none %}
+    {% if rows %}
+    <div class="tbl"><table>
+      <tr><th>Fund</th><th>Folio</th><th class="num">Units</th><th class="num">Avg NAV</th><th class="num">NAV</th><th class="num">Invested</th><th class="num">Current</th><th class="num">P&amp;L</th></tr>
+      {% for r in rows %}
+      <tr><td><b>{{ r.fund or r.tradingsymbol }}</b></td><td class="muted">{{ r.folio or "" }}</td><td class="num">{{ "{:,.3f}".format(r.quantity) if r.quantity is number else "—" }}</td>
+        <td class="num">{{ money(r.average_price) }}</td><td class="num">{{ money(r.last_price) }} <span class="muted">{{ r.last_price_date or "" }}</span></td>
+        <td class="num">{{ money((r.average_price or 0) * (r.quantity or 0)) }}</td><td class="num">{{ money((r.last_price or 0) * (r.quantity or 0)) }}</td>
+        <td class="num"><b>{{ pnl(r.pnl) }}</b></td></tr>
+      {% endfor %}
+      {% set t = namespace(inv=0, cur=0) %}{% for r in rows %}{% set t.inv = t.inv + (r.average_price or 0) * (r.quantity or 0) %}{% set t.cur = t.cur + (r.last_price or 0) * (r.quantity or 0) %}{% endfor %}
+      <tr><td colspan="5" class="muted">Total</td><td class="num">{{ money(t.inv) }}</td><td class="num">{{ money(t.cur) }}</td>
+        <td class="num"><b>{{ pnl(rows|map(attribute="pnl")|select("number")|sum) }}</b></td></tr>
+    </table></div>
+    {% else %}<p class="muted">No mutual fund holdings.</p>{% endif %}
+    {% endif %}
+  </section>
+
+  <section class="sec">
+    <h2>SIPs</h2>
+    {{ err("sips") }}
+    {% set rows = a.sips.data or [] %}
+    {% if a.sips.data is not none %}
+    {% if rows %}
+    <div class="tbl"><table>
+      <tr><th>Fund</th><th>Status</th><th>Frequency</th><th class="num">Amount</th><th class="num">Done</th><th class="num">Pending</th><th>Next instalment</th><th>Last instalment</th></tr>
+      {% for r in rows %}
+      <tr><td><b>{{ r.fund or r.tradingsymbol }}</b></td><td class="{{ 'up' if r.status == 'ACTIVE' else 'muted' }}">{{ r.status }}</td><td>{{ (r.frequency or "")|capitalize }}</td>
+        <td class="num">{{ money(r.instalment_amount) }}</td><td class="num">{{ r.completed_instalments if r.completed_instalments is not none else "—" }}</td>
+        <td class="num">{{ r.pending_instalments if r.pending_instalments is not none and r.pending_instalments >= 0 else "—" }}</td>
+        <td>{{ (r.next_instalment or "—")[:10] }}</td><td>{{ (r.last_instalment or "—")[:10] }}</td></tr>
+      {% endfor %}
+      {% set active = rows|selectattr("status", "equalto", "ACTIVE")|list %}
+      <tr><td colspan="3" class="muted">Active SIPs: {{ active|length }}</td><td class="num"><b>{{ money(active|map(attribute="instalment_amount")|select("number")|sum) }}</b></td><td colspan="4" class="muted">per instalment</td></tr>
+    </table></div>
+    {% else %}<p class="muted">No SIPs.</p>{% endif %}
+    {% endif %}
+  </section>
+  {% else %}
+  <p class="muted" style="font-size:12px;margin-top:16px">Mutual funds and SIPs held in {{ bname }} aren’t available through its trading API, so they don’t appear here.</p>
+  {% endif %}
   {% endif %}
 </main>
 </body>

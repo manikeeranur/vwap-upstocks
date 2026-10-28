@@ -11,7 +11,7 @@ from .database import Database, utc_now
 from .observability import clean, redact, request_id
 
 PRESETS = ("frontend_live", "smc_live", "ema25_vwap", "ema_pullback", "smc_tuned", "smc_ema_combo", "harmonic")
-BROKERS = ("upstox", "kite")
+BROKERS = ("upstox", "kite", "indmoney")
 
 
 def account_id(user_id, broker):

@@ -97,11 +97,14 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_each_broker_account_gets_its_own_order(self):
         await self.live()
         await self.trading.configure(PRESET, user=1, broker="kite", live=True, lots=3)
+        await self.trading.configure(PRESET, user=1, broker="indmoney", live=True, lots=2)
         trade = {**TRADE, "id": TID, "open": True, "status": "EOD", "entry_time": "09:36", "entry": 300,
                  "expiry": "2026-10-13", "strike": 25000, "type": "CE"}
         with patch("upstocks.upstox.place_market_order", new=AsyncMock(return_value="u-1")) as up, \
                 patch("upstocks.brokers.kite_instrument", new=AsyncMock(return_value={"tradingsymbol": "NIFTY26O1325000CE", "lot_size": 65})), \
                 patch("upstocks.brokers.kite_place", new=AsyncMock(return_value="k-1")) as kite, \
+                patch("upstocks.brokers.ind_instrument", new=AsyncMock(return_value={"security_id": "56998", "trading_symbol": "NIFTY 13 OCT 25000 CE", "lot_size": 65})), \
+                patch("upstocks.brokers.ind_place", new=AsyncMock(return_value="DRV-1")) as ind, \
                 patch("upstocks.live.market_open", return_value=True), \
                 patch("upstocks.live.now_ist", return_value=datetime(2026, 10, 12, 9, 37, tzinfo=upstox.IST)):
             self.trading._credentials = lambda account: brokers.Credentials(account.split(":")[1], "k", "s", "t", "2026-10-12T08:31:00+05:30")
@@ -111,6 +114,13 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         orders = self.repo.state()["orders"]
         self.assertEqual(orders["1:upstox"][TID]["buy"]["order_id"], "u-1")
         self.assertEqual(orders["1:kite"][TID]["buy"]["order_id"], "k-1")
+        self.assertEqual(ind.await_args.args[1:4], ("56998", 130, "BUY"))
+        self.assertEqual(orders["1:indmoney"][TID]["buy"]["order_id"], "DRV-1")
+
+    def test_indmoney_token_lasts_24_hours(self):
+        creds = brokers.Credentials("indmoney", "", "", "t", "2026-10-12T08:31:00+05:30")
+        self.assertTrue(creds.token_valid(datetime(2026, 10, 13, 8, 30, tzinfo=upstox.IST)))
+        self.assertFalse(creds.token_valid(datetime(2026, 10, 13, 8, 32, tzinfo=upstox.IST)))
 
     async def test_cancellation_recovers_unknown_intent(self):
         await self.live()

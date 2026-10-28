@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, 
 from . import vwap
 
 Preset = Literal["frontend_live", "smc_live", "ema25_vwap", "ema_pullback", "smc_ema_combo", "smc_tuned", "harmonic"]
-Broker = Literal["upstox", "kite"]
+Broker = Literal["upstox", "kite", "indmoney"]
 
 
 class Input(BaseModel):
@@ -57,6 +57,17 @@ class BrokerKeys(Input):
 
 class BrokerRequest(Input):
     broker: Broker
+
+
+class IndToken(Input):
+    """A token pasted from indstocks.com/app/api-trading/access-tokens."""
+    token: str = Field(min_length=20, max_length=4000, pattern=r"^\S+$")
+
+
+class IndTotp(Input):
+    """MPIN and the current authenticator code, used once to generate a token and never stored."""
+    mpin: str = Field(pattern=r"^[0-9]{4,6}$")
+    totp: str = Field(pattern=r"^[0-9]{6}$")
 
 
 class TelegramSetting(Input):

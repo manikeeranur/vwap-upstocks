@@ -56,7 +56,7 @@
   // Show the logged-in broker account's photo (Kite first, then Upstox) in the header.
   const headerAccount = document.querySelector('.header-account');
   if (headerAccount) fetch('/api/brokers').then(r => r.ok ? r.json() : null).then(s => {
-    const p = s && ['kite','upstox'].map(b => s.brokers[b]?.profile).find(p => p && (p.name || p.user_id));
+    const p = s && ['kite','upstox','indmoney'].map(b => s.brokers[b]?.profile).find(p => p && (p.name || p.user_id));
     if (!p) return;
     const name = p.name || p.user_id, pic = document.createElement(p.avatar ? 'img' : 'span');
     pic.className = 'header-avatar';

@@ -497,12 +497,35 @@ async def account() -> dict:
             return name, {"data": None, "error": str(e)}
     pairs = await asyncio.gather(*(one(n, p) for n, p in ACCOUNT_ENDPOINTS.items()))
     out = dict(pairs)
+    out["mf_holdings"], out["sips"] = await asyncio.gather(_mf("/v2/mf/holdings"), _sips())
     orders = out["orders"]["data"]
     try:
         out["charges"] = {"data": await charges(orders) if orders is not None else None, "error": out["orders"]["error"]}
     except UpstoxError as e:
         out["charges"] = {"data": None, "error": str(e)}
     return out
+
+
+async def _mf(path: str) -> dict:
+    try:
+        return {"data": (await _get(path)).get("data") or [], "error": None}
+    except UpstoxError as e:
+        return {"data": None, "error": str(e)}
+
+
+async def _sips() -> dict:
+    """Every SIP registration (the API pages 30 at a time)."""
+    rows, page = [], 1
+    try:
+        while True:
+            body = await _get("/v2/mf/sips", {"page_number": page, "records": 30})
+            rows += body.get("data") or []
+            total = ((body.get("meta_data") or {}).get("page") or {}).get("total_pages") or 1
+            if page >= total or page >= 20:
+                return {"data": rows, "error": None}
+            page += 1
+    except UpstoxError as e:
+        return {"data": None, "error": str(e)}
 
 
 async def charges(orders: list) -> list:
