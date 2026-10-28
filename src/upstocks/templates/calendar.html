@@ -8,6 +8,12 @@
 {% include "_style.html" %}
 <style>
   main { max-width: none; padding: 24px 28px 48px; }
+  .broker-tiles { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin:-6px 0 18px; }
+  .broker-tile { display:flex; align-items:center; gap:12px; padding:12px 14px; border:1px solid var(--border); border-radius:10px; background:var(--card); }
+  .broker-tile .broker-logo { width:28px; height:28px; }
+  .broker-tile span { display:block; font-size:11px; color:var(--muted); } .broker-tile b { display:block; font-size:17px; font-weight:600; margin-top:2px; }
+  .broker-tile small { margin-left:auto; font-size:11px; color:var(--muted); text-align:right; }
+  @media (max-width:700px) { .broker-tiles { grid-template-columns:1fr; } }
   .head { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 14px; margin-bottom: 18px; }
   .head h1 { margin: 0; } .head .sub { margin: 2px 0 0; }
   .mnav { display: flex; align-items: center; gap: 8px; }
@@ -55,10 +61,18 @@
     <span style="flex:1"></span>
     <label>Strategy <select id="strat"><option value="">All strategies</option>
       {% for p in presets %}<option value="{{ p }}">{{ {"ema25_vwap":"VWAP + EMA25","ema_pullback":"EMA pullback","smc_ema_combo":"SMC + EMA (1/day)"}.get(p, labels[p]) }}</option>{% endfor %}</select></label>
+    <label>Mode <select id="mode">
+      <option value="paper">Paper</option>
+      <option value="live">Live · all brokers</option>
+      <option value="live:upstox">Live · Upstox</option>
+      <option value="live:kite">Live · Kite</option>
+      <option value="live:indmoney">Live · INDmoney</option>
+    </select></label>
     <div class="mnav"><button id="prev" type="button" aria-label="Previous month">‹</button><h2 id="mon"></h2><button id="next" type="button" aria-label="Next month">›</button></div>
   </div>
   <p class="page-status" id="pageStatus" role="status">Loading your calendar…</p>
   <div class="tiles" id="tiles"></div>
+  <div class="broker-tiles" id="brokerTiles" hidden></div>
   <div class="card">
     <div class="cal" id="cal"></div>
   </div>
@@ -73,6 +87,15 @@ const ampm = s => { if (!s) return "—"; let [h, m] = s.split(":").map(Number);
 const iso = d => d.toLocaleDateString("en-CA");
 let cur = new Date(TODAY); cur.setDate(1);
 let J = null, sel = null, loadVersion = 0;
+const mode = () => $("mode").value;   // "paper", "live" or "live:<broker>"
+const BROKERS = { upstox: "Upstox", kite: "Kite", indmoney: "INDmoney" };
+// Paper: every trade at the journal's quantity. Live: only trades a broker bought, at the quantity sent
+// (summed across the chosen brokers), priced at the strategy's entry/exit.
+const liveOf = t => {
+  const want = mode().split(":")[1];
+  const acc = Object.entries(J.live?.[t.id] || {}).filter(([a]) => !want || a.split(":")[1] === want);
+  return acc.length ? Object.fromEntries(acc) : null;
+};
 
 async function load() {
   const version = ++loadVersion;
@@ -95,7 +118,14 @@ function dayTrades(d) {
   const out = [];
   for (const [p, v] of Object.entries(J.days[d] || {})) {
     if ($("strat").value && p !== $("strat").value) continue;
-    v.trades.forEach(t => out.push({ ...t, preset: p, rs: t.pnl * v.lots * v.lot_size }));
+    v.trades.forEach(t => {
+      if (mode() === "paper") { out.push({ ...t, preset: p, rs: t.pnl * v.lots * v.lot_size }); return; }
+      const acc = liveOf(t); if (!acc) return;
+      const qty = Object.values(acc).reduce((a, q) => a + q, 0);
+      const byBroker = Object.fromEntries(Object.entries(acc).map(([a, q]) => [a.split(":")[1], {qty: q, rs: t.pnl * q}]));
+      out.push({ ...t, preset: p, rs: t.pnl * qty, qty, byBroker,
+                 brokers: Object.entries(byBroker).map(([b, x]) => `${BROKERS[b] || b} · ${x.qty} qty`).join(", ") });
+    });
   }
   return out.sort((a, b) => a.entry_time.localeCompare(b.entry_time));
 }
@@ -114,12 +144,21 @@ function render() {
   const net = vals.reduce((a, [, v]) => a + v.rs, 0), green = vals.filter(([, v]) => v.rs > 0).length, red = vals.filter(([, v]) => v.rs < 0).length;
   const best = vals.reduce((a, d) => !a || d[1].rs > a[1].rs ? d : a, null), worst = vals.reduce((a, d) => !a || d[1].rs < a[1].rs ? d : a, null);
   const tile = (k, v, s = "", cls = "") => `<div class="tile"><span>${k}</span><b class="${cls}">${v}</b><small>${s}</small></div>`;
+  // Live, all brokers: the month split by broker.
+  const showBrokers = mode() === "live";
+  $("brokerTiles").hidden = !showBrokers;
+  if (showBrokers) {
+    const per = {}; for (const b of Object.keys(BROKERS)) per[b] = {rs: 0, n: 0};
+    for (let d = 1; d <= last.getDate(); d++) for (const t of dayTrades(iso(new Date(y, m, d))))
+      for (const [b, x] of Object.entries(t.byBroker || {})) { per[b].rs += x.rs; per[b].n++; }
+    $("brokerTiles").innerHTML = Object.entries(per).map(([b, x]) => `<div class="broker-tile">${window.brokerLogo ? brokerLogo(b, 28) : ""}<div><span>${BROKERS[b]}</span><b class="${x.n ? (x.rs >= 0 ? "up" : "down") : "muted"}">${x.n ? money(x.rs) : "—"}</b></div><small>${x.n} ${x.n === 1 ? "trade" : "trades"}</small></div>`).join("");
+  }
   $("tiles").innerHTML = [
-    tile("Month P&L", money(net), `${vals.reduce((a, [, v]) => a + v.n, 0)} trades · gross`, net >= 0 ? "up" : "down"),
+    tile(mode() === "paper" ? "Month paper P&L" : `Month live P&L${mode().includes(":") ? " · " + BROKERS[mode().split(":")[1]] : ""}`, money(net), `${vals.reduce((a, [, v]) => a + v.n, 0)} ${mode() !== "paper" ? "live " : ""}trades · gross${mode() !== "paper" ? " · at strategy prices" : ""}`, net >= 0 ? "up" : "down"),
     tile("Green days", green, `of ${vals.length} traded days`, "up"),
     tile("Red days", red, "", "down"),
-    tile("Best day", best ? money(best[1].rs) : "—", best ? best[0] : "", "up"),
-    tile("Worst day", worst ? money(worst[1].rs) : "—", worst ? worst[0] : "", "down"),
+    tile("Best day", best ? money(best[1].rs) : "—", best ? best[0] : "", best ? (best[1].rs >= 0 ? "up" : "down") : ""),
+    tile("Worst day", worst ? money(worst[1].rs) : "—", worst ? worst[0] : "", worst ? (worst[1].rs >= 0 ? "up" : "down") : ""),
   ].join("");
   const cells = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map(d => `<div class="dow">${d}</div>`);
   for (let i = 0; i < lead; i++) cells.push(`<div class="day out wk"></div>`);
@@ -142,19 +181,20 @@ function renderDetail() {
   const ts = dayTrades(sel), net = ts.reduce((a, t) => a + t.rs, 0);
   $("detail").hidden = false;
   $("detail").innerHTML = `<h3>${new Date(sel).toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" })} · <span class="${net >= 0 ? "up" : "down"}">${money(net)}</span></h3>
-    <div class="scroll"><table><thead><tr><th>Strategy</th><th>In → out</th><th>Option</th><th>Entry</th><th>Exit</th><th>Status</th><th>P&amp;L pts</th><th>P&amp;L ₹</th><th>Note</th></tr></thead><tbody>${
+    <div class="scroll"><table><thead><tr><th>Strategy</th><th>In → out</th><th>Option</th><th>Entry</th><th>Exit</th><th>Status</th><th>P&amp;L pts</th><th>P&amp;L ₹</th>${mode() !== "paper" ? "<th>Live at</th>" : ""}<th>Note</th></tr></thead><tbody>${
     ts.map(t => `<tr><td>${LABELS[t.preset]}</td><td>${ampm(t.entry_time)} → ${t.open ? "…" : ampm(t.exit_time)}</td>
       <td><b style="color:${t.type === "CE" ? "var(--ce)" : "var(--pe)"}">${t.symbol}</b></td><td>₹${fmt(t.entry)}</td><td>₹${fmt(t.exit)}</td>
       <td class="st ${t.status}">${t.open ? "OPEN" : t.status === "TIME_EXIT" ? "TIME EXIT" : t.status}</td>
-      <td class="${t.rs >= 0 ? "up" : "down"}">${t.pnl >= 0 ? "+" : ""}${fmt(t.pnl)}</td><td class="${t.rs >= 0 ? "up" : "down"}">${money(t.rs)}</td>
+      <td class="${t.rs >= 0 ? "up" : "down"}">${t.pnl >= 0 ? "+" : ""}${fmt(t.pnl)}</td><td class="${t.rs >= 0 ? "up" : "down"}">${money(t.rs)}</td>${mode() !== "paper" ? `<td style="text-align:left">${t.brokers} · ${t.qty} qty</td>` : ""}
       <td class="muted" style="text-align:left;white-space:normal">${(J.notes[t.id] || "").replace(/</g, "&lt;")}</td></tr>`).join("")
-    || `<tr><td class="muted" colspan="9">No trades that day.</td></tr>`}</tbody></table></div>`;
+    || `<tr><td class="muted" colspan="${mode() !== "paper" ? 10 : 9}">${mode() !== "paper" ? "No live trades that day." : "No trades that day."}</td></tr>`}</tbody></table></div>`;
 }
 
 $("cal").addEventListener("click", e => { const d = e.target.closest(".day[data-d]"); if (!d) return; sel = d.dataset.d; render(); $("cal").querySelector(`[data-d="${sel}"]`)?.focus({preventScroll:true}); });
 $("prev").addEventListener("click", () => { cur.setMonth(cur.getMonth() - 1); sel = null; load(); });
 $("next").addEventListener("click", () => { cur.setMonth(cur.getMonth() + 1); sel = null; load(); });
 $("strat").addEventListener("change", render);
+$("mode").addEventListener("change", render);
 load();
 </script>
 </body>

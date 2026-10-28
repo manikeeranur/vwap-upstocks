@@ -91,7 +91,7 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(result["days"][day][PRESET]["trades"][0]["pnl"], 20)
         self.assertIn("smc_live", result["days"][day])
         self.assertFalse(self.repo.get_view()["running"])
-        self.assertEqual(self.repo.journal("2026-10-01", "2026-10-02"), {"days": {}, "notes": {}})
+        self.assertEqual(self.repo.journal("2026-10-01", "2026-10-02"), {"days": {}, "notes": {}, "live": {}})
 
     def test_jobs_survive_restart_and_partial_results_are_kept(self):
         self.initialize()

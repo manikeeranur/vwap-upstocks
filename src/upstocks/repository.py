@@ -284,7 +284,14 @@ class Repository:
             for r in conn.execute("SELECT * FROM journal_trades WHERE day BETWEEN ? AND ? ORDER BY day,preset,position", (start, end)):
                 days[r["day"]][r["preset"]]["trades"].append(json.loads(r["payload"]))
             notes = {r[0]: r[1] for r in conn.execute("SELECT DISTINCT n.trade_id,n.text FROM notes n JOIN journal_trades t ON n.trade_id=t.trade_id WHERE t.day BETWEEN ? AND ?", (start, end))}
-            return {"days": days, "notes": notes}
+            # Trades a broker actually bought: {trade id: {account: quantity}} (trade ids are "preset|YYYY-MM-DD|…").
+            live = {}
+            for r in conn.execute("SELECT trade_id,account,payload FROM broker_orders WHERE side='BUY' "
+                                  "AND substr(trade_id, instr(trade_id,'|')+1, 10) BETWEEN ? AND ?", (str(start), str(end))):
+                order = json.loads(r["payload"])
+                if order.get("order_id"):
+                    live.setdefault(r["trade_id"], {})[r["account"]] = order.get("qty") or 0
+            return {"days": days, "notes": notes, "live": live}
 
     def set_note(self, tid, text):
         with self.db.connect(write=True) as conn:
