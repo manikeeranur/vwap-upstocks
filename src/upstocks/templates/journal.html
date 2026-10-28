@@ -33,6 +33,8 @@
   .broker-tile span { display:block; font-size:11px; color:var(--muted); } .broker-tile b { display:block; font-size:17px; font-weight:600; margin-top:2px; }
   .broker-tile small { margin-left:auto; font-size:11px; color:var(--muted); text-align:right; }
   .broker-cell { display:inline-flex; align-items:center; gap:6px; white-space:nowrap; }
+  .acc-sub { display:block; font-size:10px; color:var(--muted); margin-top:1px; }
+  .strat-card td:has(.broker-cell), .strat-card th.acc { text-align:left; }
   @media (max-width:700px) { .broker-tiles { grid-template-columns:1fr; } }
   .badge { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
   .badge.live { background: #e11d4818; color: var(--pe); } .badge.paper { background: #4f46e518; color: var(--accent); }
@@ -98,6 +100,13 @@ const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;",
 const t0 = new Date("{{ today }}"); $("from").value = new Date(t0.getFullYear(), t0.getMonth(), 1).toLocaleDateString("en-CA");
 let J = null, loadVersion = 0, lastCurve = [];
 const BROKERS = { upstox: "Upstox", kite: "Kite", indmoney: "INDmoney" };
+// A broker account: which broker, and whose login it was when the order went (Client ID + name).
+const holderName = h => (h || "").split(/\s+/).filter(Boolean).map(w => w[0] + w.slice(1).toLowerCase()).join(" ");
+const accLabel = x => `${BROKERS[x.broker] || x.broker}${x.client_id ? ` · ${holderName(x.holder) || x.client_id} (${x.client_id})` : ""}`;
+function accountTiles(per) {   // per: {key: {broker, client_id, holder, gross, net, n}}
+  for (const b of Object.keys(BROKERS)) if (!Object.values(per).some(x => x.broker === b)) per[b] = {broker: b, client_id: "", holder: "", gross: 0, net: 0, n: 0};
+  return Object.values(per).map(x => `<div class="broker-tile">${window.brokerLogo ? brokerLogo(x.broker, 28) : ""}<div><span>${BROKERS[x.broker]}${x.client_id ? ` · ${holderName(x.holder) || ""}` : ""}</span><b class="${x.n ? (x.net >= 0 ? "up" : "down") : "muted"}">${x.n ? money(x.net) : "—"}</b></div><small>${x.client_id ? x.client_id + "<br>" : ""}${x.n} ${x.n === 1 ? "trade" : "trades"}${x.n ? ` · gross ${money(x.gross)}` : ""}</small></div>`).join("");
+}
 const isLive = () => $("src").value !== "paper";
 // Same formula as the Strategy backtest page, used only when the broker's own charges aren't known.
 function estCharges(entry, exit, qty) {
@@ -136,7 +145,7 @@ function rows() {
         const real = o.buy != null && o.sell != null, gross = real ? (o.sell - o.buy) * o.qty : t.pnl * o.qty;
         const realCh = o.buy_charges != null && o.sell_charges != null;
         const ch = realCh ? o.buy_charges + o.sell_charges : estCharges(o.buy ?? t.entry, o.sell ?? t.exit, o.qty);
-        out.push({ ...t, preset: p, broker, qty: o.qty, buyFill: o.buy, sellFill: o.sell, real, realCh, gross, ch, rs: gross - ch });
+        out.push({ ...t, preset: p, broker, client_id: o.client_id || "", holder: o.holder || "", qty: o.qty, buyFill: o.buy, sellFill: o.sell, real, realCh, gross, ch, rs: gross - ch });
       }
     }
   }
@@ -163,9 +172,9 @@ function render() {
   ].join("");
   $("brokerTiles").hidden = $("src").value !== "live";
   if ($("src").value === "live") {
-    const per = {}; for (const b of Object.keys(BROKERS)) per[b] = {gross: 0, net: 0, n: 0};
-    R.forEach(t => { per[t.broker].gross += t.gross; per[t.broker].net += t.rs; per[t.broker].n++; });
-    $("brokerTiles").innerHTML = Object.entries(per).map(([b, x]) => `<div class="broker-tile">${window.brokerLogo ? brokerLogo(b, 28) : ""}<div><span>${BROKERS[b]}</span><b class="${x.n ? (x.net >= 0 ? "up" : "down") : "muted"}">${x.n ? money(x.net) : "—"}</b></div><small>${x.n} ${x.n === 1 ? "trade" : "trades"}${x.n ? `<br>gross ${money(x.gross)}` : ""}</small></div>`).join("");
+    const per = {};   // account-wise: broker + client ID
+    R.forEach(t => { const a = per[`${t.broker}|${t.client_id}`] ||= {broker: t.broker, client_id: t.client_id, holder: t.holder, gross: 0, net: 0, n: 0}; a.gross += t.gross; a.net += t.rs; a.n++; });
+    $("brokerTiles").innerHTML = accountTiles(per);
   }
   $("extraTiles").innerHTML = [
     ...(isLive() ? [tile("Max drawdown", money(-dd), "peak to trough", dd ? "down" : "")] : []),
@@ -191,23 +200,24 @@ function render() {
     const T = R.filter(t => t.preset === p).reverse(), s = per[p] || { n: 0, w: 0, rs: 0 };
     return `<div class="card strat-card"><div class="sh"><h2>${LABELS[p]}</h2>
       <span class="sum">${s.n} trade${s.n === 1 ? "" : "s"}${s.n ? ` · win ${Math.round(s.w / s.n * 100)}%` : ""} · <b class="${s.rs >= 0 ? "up" : "down"}">${money(s.rs)}</b></span></div>
-      <div class="tbl"><table><thead><tr><th>Date</th><th>In → out</th><th>Option</th>${isLive()
-        ? "<th>Broker</th><th>Qty</th><th>Buy fill</th><th>Sell fill</th><th>Status</th><th>Gross ₹</th><th>Charges</th><th>Net ₹</th>"
+      <div class="tbl"><table><thead><tr><th>Date</th>${isLive() ? "" : "<th>In → out</th>"}<th>Option</th>${isLive()
+        ? "<th class='acc'>Account</th><th>Qty</th><th>Buy fill</th><th>Sell fill</th><th>Status</th><th>Gross ₹</th><th>Charges</th><th>Net ₹</th>"
         : "<th>Entry</th><th>Exit</th><th>Status</th><th>P&amp;L pts</th><th>P&amp;L ₹</th>"}<th>Note</th></tr></thead><tbody>${
       T.map(t => {
         const st = t.open ? "OPEN" : t.status, pc = t.rs >= 0 ? "up" : "down";
-        const head = `<tr><td>${t.date}</td><td>${ampm(t.entry_time)} → ${t.open ? "…" : ampm(t.exit_time)}</td>
+        const when = `${ampm(t.entry_time)} → ${t.open ? "…" : ampm(t.exit_time)}`;
+        const head = `<tr>${isLive() ? `<td>${t.date}<small class="acc-sub">${when}</small></td>` : `<td>${t.date}</td><td>${when}</td>`}
           <td><b style="color:${t.type === "CE" ? "var(--ce)" : "var(--pe)"}">${t.symbol}</b></td>`;
         const status = `<td class="st ${st}">${st === "TIME_EXIT" ? "TIME EXIT" : st}</td>`;
         const cells = isLive()
-          ? `<td><span class="broker-cell">${window.brokerLogo ? brokerLogo(t.broker, 16) : ""}${BROKERS[t.broker] || t.broker}</span></td><td>${t.qty}</td>
+          ? `<td><span class="broker-cell">${window.brokerLogo ? brokerLogo(t.broker, 16) : ""}<span>${BROKERS[t.broker] || t.broker}${t.client_id ? `<small class="acc-sub">${holderName(t.holder) || ""} · ${t.client_id}</small>` : ""}</span></span></td><td>${t.qty}</td>
              <td>${t.buyFill != null ? "₹" + fmt(t.buyFill) : `<span class="muted">₹${fmt(t.entry)} est.</span>`}</td>
              <td>${t.sellFill != null ? "₹" + fmt(t.sellFill) : `<span class="muted">₹${fmt(t.exit)} est.</span>`}</td>${status}
              <td class="${t.gross >= 0 ? "up" : "down"}">${money(t.gross)}</td><td class="down">${money(-t.ch)}${t.realCh ? "" : ' <small class="muted">est.</small>'}</td><td class="${pc}"><b>${money(t.rs)}</b></td>`
           : `<td>₹${fmt(t.entry)}</td><td>₹${fmt(t.exit)}</td>${status}<td class="${pc}">${t.pnl >= 0 ? "+" : ""}${fmt(t.pnl)}</td><td class="${pc}">${money(t.rs)}</td>`;
         return `${head}${cells}
           <td class="note"><input type="text" data-id="${esc(t.id)}" value="${esc(J.notes[t.id] || "")}" aria-label="Note for ${esc(t.symbol)} on ${esc(t.date)}" placeholder="Add a note…"></td></tr>`;
-      }).join("") || `<tr><td class="muted" colspan="${isLive() ? 12 : 9}">No ${isLive() ? "live " : ""}trades in this range.</td></tr>`}</tbody></table></div></div>`;
+      }).join("") || `<tr><td class="muted" colspan="${isLive() ? 11 : 9}">No ${isLive() ? "live " : ""}trades in this range.</td></tr>`}</tbody></table></div></div>`;
   }).join("");
 }
 

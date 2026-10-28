@@ -8,6 +8,7 @@ twice, and an unknown outcome is never retried.
 import asyncio
 from copy import deepcopy
 from datetime import date, timedelta
+import json
 import logging
 import time
 import uuid
@@ -262,6 +263,16 @@ class TradingService:
         return brokers.Credentials(acc["broker"], row.get("api_key", ""), open_(row.get("api_secret", "")),
                                    open_(row.get("access_token", "")), row.get("token_issued"))
 
+    def _holder(self, account):
+        """Whose broker account an order goes to: (client id, name) from that broker's current login."""
+        acc = self.state["accounts"][account]
+        row = self.repository.broker_account(acc["user"], acc["broker"]) or {}
+        try:
+            name = json.loads(row.get("profile") or "{}").get("name") or ""
+        except ValueError:
+            name = ""
+        return row.get("broker_user") or "", name
+
     async def _order(self, account, preset, tid, trade, side, why):
         acc = self.state["accounts"].get(account)
         if acc is None:
@@ -282,8 +293,11 @@ class TradingService:
             exit_qty = buy.get("qty") if side == "SELL" and buy.get("qty") else None
             lots = acc["lots"].get(preset, 1)
             qty = exit_qty or lots * self.state["lot_size"]
+            client_id, holder = await asyncio.to_thread(self._holder, account)
             record = {"at": f"{live.now_ist():%H:%M:%S}", "qty": qty, "why": why, "symbol": trade.get("symbol", ""),
                       "broker": acc["broker"], "status": "pending",
+                      # The broker account this order went to — a broker's login can change between days.
+                      "client_id": client_id, "holder": holder,
                       # Kept so an exit (incl. manual square-off) can find the same contract at any broker.
                       "contract": {k: trade.get(k) for k in ("expiry", "strike", "type") if trade.get(k) is not None}}
             context = {"trade": deepcopy(trade), "account": account, "lots": lots, "lot_size": self.state["lot_size"],

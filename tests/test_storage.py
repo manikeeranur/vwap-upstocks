@@ -33,11 +33,11 @@ class StorageTests(unittest.TestCase):
             self.repo.finish_order(tid, "1:kite", side, {"status": "submitted", "order_id": oid, "qty": 65}, "sent")
             self.repo.save_fill(tid, "1:kite", side, price, 60.5 if side == "BUY" else 67.58)
         live = self.repo.journal("2026-10-28", "2026-10-28")["live"]
-        self.assertEqual(live, {tid: {"1:kite": {"qty": 65, "buy": 439.1, "sell": 543.8, "buy_charges": 60.5, "sell_charges": 67.58}}})
+        self.assertEqual(live, {tid: {"1:kite": {"qty": 65, "buy": 439.1, "sell": 543.8, "buy_charges": 60.5, "sell_charges": 67.58, "client_id": "", "holder": ""}}})
 
     def test_schema_idempotent_and_wal(self):
         self.db.initialize()
-        self.assertEqual(self.db.check(), {"integrity": "ok", "foreign_key_errors": 0, "schema_version": 5})
+        self.assertEqual(self.db.check(), {"integrity": "ok", "foreign_key_errors": 0, "schema_version": 6})
         with self.db.connect() as conn:
             self.assertEqual(conn.execute("PRAGMA journal_mode").fetchone()[0], "wal")
             self.assertEqual(conn.execute("PRAGMA foreign_keys").fetchone()[0], 1)

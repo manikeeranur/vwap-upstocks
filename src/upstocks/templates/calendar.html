@@ -98,6 +98,13 @@ function estCharges(entry, exit, qty) {
   const gst = (brokerage + exchange + clearing) * 0.18, sebi = turnover * 0.000001, stamp = entry * qty * 0.00003;
   return brokerage + stt + exchange + clearing + gst + sebi + stamp;
 }
+// A broker account: which broker, and whose login it was when the order went (Client ID + name).
+const holderName = h => (h || "").split(/\s+/).filter(Boolean).map(w => w[0] + w.slice(1).toLowerCase()).join(" ");
+const accLabel = x => `${BROKERS[x.broker] || x.broker}${x.client_id ? ` · ${holderName(x.holder) || x.client_id} (${x.client_id})` : ""}`;
+function accountTiles(per) {   // per: {key: {broker, client_id, holder, gross, net, n}}
+  for (const b of Object.keys(BROKERS)) if (!Object.values(per).some(x => x.broker === b)) per[b] = {broker: b, client_id: "", holder: "", gross: 0, net: 0, n: 0};
+  return Object.values(per).map(x => `<div class="broker-tile">${window.brokerLogo ? brokerLogo(x.broker, 28) : ""}<div><span>${BROKERS[x.broker]}${x.client_id ? ` · ${holderName(x.holder) || ""}` : ""}</span><b class="${x.n ? (x.net >= 0 ? "up" : "down") : "muted"}">${x.n ? money(x.net) : "—"}</b></div><small>${x.client_id ? x.client_id + "<br>" : ""}${x.n} ${x.n === 1 ? "trade" : "trades"}${x.n ? ` · gross ${money(x.gross)}` : ""}</small></div>`).join("");
+}
 const liveOf = t => {
   const want = mode().split(":")[1];
   const acc = Object.entries(J.live?.[t.id] || {}).filter(([a]) => !want || a.split(":")[1] === want);
@@ -133,13 +140,14 @@ function dayTrades(d) {
         const real = o.buy != null && o.sell != null, gross = real ? (o.sell - o.buy) * o.qty : t.pnl * o.qty;
         const realCh = o.buy_charges != null && o.sell_charges != null;
         const ch = realCh ? o.buy_charges + o.sell_charges : estCharges(o.buy ?? t.entry, o.sell ?? t.exit, o.qty);
-        return [a.split(":")[1], {qty: o.qty, real, realCh, buy: o.buy, sell: o.sell, gross, ch, rs: gross - ch}];
+        const broker = a.split(":")[1];
+        return [`${broker}|${o.client_id || ""}`, {broker, client_id: o.client_id || "", holder: o.holder || "", qty: o.qty, real, realCh, buy: o.buy, sell: o.sell, gross, ch, rs: gross - ch}];
       }));
       const parts = Object.values(byBroker), qty = parts.reduce((a, x) => a + x.qty, 0);
       const gross = parts.reduce((a, x) => a + x.gross, 0), ch = parts.reduce((a, x) => a + x.ch, 0);
       // In live mode the day's figure is net of charges.
       out.push({ ...t, preset: p, rs: gross - ch, gross, ch, chEst: parts.some(x => !x.realCh), qty, byBroker, estimated: parts.some(x => !x.real),
-                 brokers: Object.entries(byBroker).map(([b, x]) => `${BROKERS[b] || b} · ${x.qty} qty${x.real ? ` · ₹${fmt(x.buy)} → ₹${fmt(x.sell)}` : " · est."}`).join("<br>") });
+                 brokers: Object.values(byBroker).map(x => `${accLabel(x)} · ${x.qty} qty${x.real ? ` · ₹${fmt(x.buy)} → ₹${fmt(x.sell)}` : " · est."}`).join("<br>") });
     });
   }
   return out.sort((a, b) => a.entry_time.localeCompare(b.entry_time));
@@ -159,14 +167,14 @@ function render() {
   const net = vals.reduce((a, [, v]) => a + v.rs, 0), green = vals.filter(([, v]) => v.rs > 0).length, red = vals.filter(([, v]) => v.rs < 0).length;
   const best = vals.reduce((a, d) => !a || d[1].rs > a[1].rs ? d : a, null), worst = vals.reduce((a, d) => !a || d[1].rs < a[1].rs ? d : a, null);
   const tile = (k, v, s = "", cls = "") => `<div class="tile"><span>${k}</span><b class="${cls}">${v}</b><small>${s}</small></div>`;
-  // Live, all brokers: the month split by broker.
+  // Live, all brokers: the month split by broker account.
   const showBrokers = mode() === "live";
   $("brokerTiles").hidden = !showBrokers;
   if (showBrokers) {
-    const per = {}; for (const b of Object.keys(BROKERS)) per[b] = {gross: 0, rs: 0, n: 0};
+    const per = {};   // account-wise: broker + client ID
     for (let d = 1; d <= last.getDate(); d++) for (const t of dayTrades(iso(new Date(y, m, d))))
-      for (const [b, x] of Object.entries(t.byBroker || {})) { per[b].gross += x.gross; per[b].rs += x.rs; per[b].n++; }
-    $("brokerTiles").innerHTML = Object.entries(per).map(([b, x]) => `<div class="broker-tile">${window.brokerLogo ? brokerLogo(b, 28) : ""}<div><span>${BROKERS[b]}</span><b class="${x.n ? (x.gross >= 0 ? "up" : "down") : "muted"}">${x.n ? money(x.gross) : "—"}</b></div><small>${x.n} ${x.n === 1 ? "trade" : "trades"}${x.n ? `<br>net <b class="${x.rs >= 0 ? "up" : "down"}" style="display:inline;font-size:11px">${money(x.rs)}</b>` : ""}</small></div>`).join("");
+      for (const [k, x] of Object.entries(t.byBroker || {})) { const a = per[k] ||= {broker: x.broker, client_id: x.client_id, holder: x.holder, gross: 0, net: 0, n: 0}; a.gross += x.gross; a.net += x.rs; a.n++; }
+    $("brokerTiles").innerHTML = accountTiles(per);
   }
   if (mode() !== "paper") {
     let g = 0, c = 0, n = 0, est = false;

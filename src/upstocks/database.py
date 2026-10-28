@@ -116,6 +116,14 @@ MIGRATIONS = [
         "DROP TABLE broker_strategy",
         "ALTER TABLE broker_strategy_v5 RENAME TO broker_strategy",
     ),
+    (
+        # Orders placed before the account holder was recorded: take it from that broker's login at the time of this
+        # upgrade, which is still the account those orders went to.
+        """UPDATE broker_orders SET payload = json_set(payload,
+             '$.client_id', COALESCE((SELECT broker_user FROM broker_accounts a WHERE a.user_id || ':' || a.broker = broker_orders.account), ''),
+             '$.holder', COALESCE((SELECT json_extract(a.profile, '$.name') FROM broker_accounts a WHERE a.user_id || ':' || a.broker = broker_orders.account), ''))
+           WHERE json_extract(payload, '$.order_id') IS NOT NULL AND json_extract(payload, '$.client_id') IS NULL""",
+    ),
 ]
 
 

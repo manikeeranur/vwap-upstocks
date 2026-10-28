@@ -98,6 +98,8 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         await self.live()
         await self.trading.configure(PRESET, user=1, broker="kite", live=True, lots=3)
         await self.trading.configure(PRESET, user=1, broker="indmoney", live=True, lots=2)
+        self.repo.save_broker_keys(1, "kite", "k")
+        self.repo.save_broker_token(1, "kite", "sealed", "2026-10-12T08:31:00+05:30", "AB1234", {"name": "Test Holder"})
         trade = {**TRADE, "id": TID, "open": True, "status": "EOD", "entry_time": "09:36", "entry": 300,
                  "expiry": "2026-10-13", "strike": 25000, "type": "CE"}
         with patch("upstocks.upstox.place_market_order", new=AsyncMock(return_value="u-1")) as up, \
@@ -114,6 +116,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         orders = self.repo.state()["orders"]
         self.assertEqual(orders["1:upstox"][TID]["buy"]["order_id"], "u-1")
         self.assertEqual(orders["1:kite"][TID]["buy"]["order_id"], "k-1")
+        self.assertEqual((orders["1:kite"][TID]["buy"]["client_id"], orders["1:kite"][TID]["buy"]["holder"]), ("AB1234", "Test Holder"))
         self.assertEqual(ind.await_args.args[1:4], ("56998", 130, "BUY"))
         self.assertEqual(orders["1:indmoney"][TID]["buy"]["order_id"], "DRV-1")
 

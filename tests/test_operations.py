@@ -216,7 +216,7 @@ class OperationsApiTests(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.headers['content-type'], 'application/zip')
             with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
-                self.assertEqual(json.loads(archive.read('manifest.json'))['schema_version'], 5)
+                self.assertEqual(json.loads(archive.read('manifest.json'))['schema_version'], 6)
             self.assertEqual(client.get('/health/ready').json()['audit_failures'], 0)
 
     def test_exception_frames_exclude_source_and_local_secrets(self):

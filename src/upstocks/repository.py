@@ -308,7 +308,8 @@ class Repository:
                     continue
                 if r["side"] == "BUY":
                     live.setdefault(r["trade_id"], {})[r["account"]] = {"qty": order.get("qty") or 0, "buy": order.get("fill_price"), "sell": None,
-                                                                         "buy_charges": order.get("charges"), "sell_charges": None}
+                                                                         "buy_charges": order.get("charges"), "sell_charges": None,
+                                                                         "client_id": order.get("client_id") or "", "holder": order.get("holder") or ""}
                 else:
                     sells[(r["trade_id"], r["account"])] = order
             for (tid, account), order in sells.items():
