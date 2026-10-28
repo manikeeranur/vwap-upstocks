@@ -1,9 +1,11 @@
+import asyncio
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 
-from .. import upstox, vwap
+from .. import brokers, upstox, vwap
+from .accounts import _creds
 from .common import _parse_day, candles_csv, csv_name, templates
 
 router = APIRouter()
@@ -54,13 +56,23 @@ async def index(request: Request):
 
 
 @router.get("/account", response_class=HTMLResponse)
-async def account_page(request: Request):
-    """Profile, funds, holdings, positions, orders and trades — server-rendered.
+async def account_page(request: Request, broker: str = "upstox"):
+    """Profile, funds, holdings, positions, orders and trades — server-rendered, for Upstox or Kite.
     Each section loads independently; a static-IP refusal is shown per section."""
-    acct = await upstox.account()
-    blocked = all(v["error"] and "static IP" in v["error"] for v in acct.values())
-    return templates.TemplateResponse(request, "account.html", {"a": acct, "blocked": blocked,
-                                                                "now": datetime.now(upstox.IST).strftime("%d %b %Y %H:%M")})
+    broker = broker if broker in brokers.BROKERS else "upstox"
+    now = datetime.now(upstox.IST).strftime("%d %b %Y %H:%M")
+    if broker == "kite":
+        creds = await asyncio.to_thread(_creds, request, request.state.user_id, "kite")
+        if not creds.token_valid():
+            return templates.TemplateResponse(request, "account.html", {"broker": broker, "a": None, "blocked": False,
+                                                                        "login_needed": True, "now": now})
+        acct = await brokers.kite_account(creds)
+        blocked = all(v["error"] for v in acct.values())
+    else:
+        acct = await upstox.account()
+        blocked = all(v["error"] and "static IP" in v["error"] for v in acct.values())
+    return templates.TemplateResponse(request, "account.html", {"broker": broker, "a": acct, "blocked": blocked,
+                                                                "login_needed": False, "now": now})
 
 
 @router.get("/api/account")

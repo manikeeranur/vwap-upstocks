@@ -9,6 +9,9 @@
 <style>
   main { max-width: none; padding: 20px 24px 48px; }
   .sec { margin-top: 16px; }
+  .broker-tabs { display:inline-flex; margin-bottom:8px; min-height:0; }
+  .broker-tabs a { font-size:12px; font-weight:500; padding:6px 14px; border:1px solid transparent; border-radius:5px; color:var(--muted); text-decoration:none; }
+  .broker-tabs a.on { background:var(--card); color:var(--text); border-color:var(--border); box-shadow:0 1px 3px #00000009; }
   .sec h2 { font-size: 13px; letter-spacing: 1.4px; text-transform: uppercase; color: var(--muted); margin: 0 0 10px; }
   .kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
   .kv div { background: var(--card); padding: 12px 14px; }
@@ -32,13 +35,27 @@
 <body>
 {% set active = "account" %}{% include "_nav.html" %}
 <main id="main" tabindex="-1">
-  <header class="page-heading"><div><h1>Broker account</h1><p class="sub">Your Upstox balances and activity.</p></div><div class="heading-actions"><span class="account-timestamp">{{ now }} IST</span><a class="btn ghost" href="/account">{{ ui_icon("refresh") }} Refresh</a></div></header>
+  {% set bname = "Kite (Zerodha)" if broker == "kite" else "Upstox" %}
+  <header class="page-heading"><div><h1>Broker account</h1><p class="sub">Your {{ bname }} balances and activity.</p></div><div class="heading-actions"><span class="account-timestamp">{{ now }} IST</span><a class="btn ghost" href="/account?broker={{ broker }}">{{ ui_icon("refresh") }} Refresh</a></div></header>
+  <nav class="seg broker-tabs" aria-label="Broker">
+    <a href="/account?broker=upstox" class="{{ 'on' if broker == 'upstox' else '' }}" {% if broker == 'upstox' %}aria-current="page"{% endif %}>Upstox</a>
+    <a href="/account?broker=kite" class="{{ 'on' if broker == 'kite' else '' }}" {% if broker == 'kite' %}aria-current="page"{% endif %}>Kite (Zerodha)</a>
+  </nav>
+
+  {% if login_needed %}
+  <section class="card account-empty">
+    <span class="upload-icon">{{ ui_icon("lock") }}</span>
+    <h2>Kite is not logged in today</h2>
+    <p>Log in to Kite on My brokers to see your Zerodha funds, positions, orders and trades here.</p>
+    <a class="btn primary" href="/brokers">Go to My brokers {{ ui_icon("arrow") }}</a>
+  </section>
+  {% endif %}
 
   {% if blocked %}
   <section class="card account-empty">
     <span class="upload-icon">{{ ui_icon("lock") }}</span>
     <h2>Account access restricted</h2>
-    <p>Upstox account data is available from your registered IP.<br>You can still use market data and research tools.</p>
+    {% if broker == "kite" %}<p>Kite refused every request: {{ a.profile.error }}</p>{% else %}<p>Upstox account data is available from your registered IP.<br>You can still use market data and research tools.</p>{% endif %}
     <a class="btn ghost" href="/data">Explore market data {{ ui_icon("arrow") }}</a>
     <details><summary>Connection details</summary><p>Register this computer’s public IP in Upstox Developer Console → your app → Static IP, or open the app on your registered machine.</p></details>
   </section>
@@ -48,7 +65,7 @@
   {% macro money(v) %}{% if v is number %}₹{{ "{:,.2f}".format(v) }}{% else %}—{% endif %}{% endmacro %}
   {% macro pnl(v) %}{% if v is number %}<span class="{{ 'up' if v >= 0 else 'down' }}">{{ '+' if v >= 0 else '−' }}₹{{ "{:,.2f}".format(v|abs) }}</span>{% else %}—{% endif %}{% endmacro %}
 
-  {% if not blocked %}
+  {% if a and not blocked %}
   <section class="sec">
     <h2>Profile</h2>
     {{ err("profile") }}

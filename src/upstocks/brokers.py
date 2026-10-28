@@ -11,6 +11,7 @@ Kite    login  https://kite.zerodha.com/connect/login → /broker/kite/callback
 """
 from __future__ import annotations
 
+import asyncio
 import csv
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -198,3 +199,38 @@ async def place_order(creds: Credentials, trade: dict, qty_lots: int, lot_size: 
     q = qty or qty_lots * (inst["lot_size"] or lot_size)
     oid = await kite_place(creds, inst["tradingsymbol"], q, side, tag)
     return oid, q, inst["tradingsymbol"]
+
+
+async def kite_account(creds: Credentials) -> dict:
+    """Kite profile, funds, positions, holdings, orders and trades in the shape the account page uses."""
+    headers = _kite_headers(creds.api_key, creds.access_token)
+
+    async def one(c, name, path):
+        try:
+            r = await c.get(f"{KITE_API}{path}", headers=headers)
+            body = await _json(r, "Kite")
+            if r.status_code != 200 or body.get("status") != "success":
+                raise BrokerError(f"Kite: {body.get('message') or r.status_code}")
+            return name, {"data": body.get("data"), "error": None}
+        except (BrokerError, httpx.HTTPError) as exc:
+            return name, {"data": None, "error": str(exc) or "Kite request failed"}
+
+    async with httpx.AsyncClient(timeout=20) as c:
+        out = dict(await asyncio.gather(*(one(c, n, p) for n, p in (
+            ("profile", "/user/profile"), ("funds", "/user/margins"), ("positions", "/portfolio/positions"),
+            ("holdings", "/portfolio/holdings"), ("orders", "/orders"), ("trades", "/trades")))))
+    if out["profile"]["data"]:
+        p = out["profile"]["data"]
+        out["profile"]["data"] = {**p, "broker": "ZERODHA", "is_active": True}
+    if out["funds"]["data"]:
+        def seg(x):
+            if not x:
+                return None
+            a, u = x.get("available") or {}, x.get("utilised") or {}
+            return {"available_margin": x.get("net"), "used_margin": u.get("debits"), "payin_amount": a.get("intraday_payin"),
+                    "span_margin": u.get("span"), "exposure_margin": u.get("exposure"), "notional_cash": a.get("cash")}
+        out["funds"]["data"] = {k: seg(out["funds"]["data"].get(k)) for k in ("equity", "commodity")}
+    if out["positions"]["data"] is not None:
+        out["positions"]["data"] = (out["positions"]["data"] or {}).get("net") or []
+    return out
+
