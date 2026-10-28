@@ -217,16 +217,19 @@
     {% if a.mf_holdings.data is not none %}
     {% if rows %}
     <div class="tbl"><table>
-      <tr><th>Fund</th><th>Folio</th><th class="num">Units</th><th class="num">Avg NAV</th><th class="num">NAV</th><th class="num">Invested</th><th class="num">Current</th><th class="num">P&amp;L</th></tr>
+      <tr><th>Fund</th><th>Folio</th><th class="num">Units</th><th class="num">Avg NAV</th><th class="num">NAV</th><th class="num">Invested</th><th class="num">Current</th><th class="num">P&amp;L</th><th class="num">P&amp;L %</th></tr>
+      {# Brokers' own MF pnl can be missing or 0 (Kite sends 0.0), so it is always worked out from NAVs. #}
+      {% set t = namespace(inv=0, cur=0) %}
       {% for r in rows %}
+      {% set inv = (r.average_price or 0) * (r.quantity or 0) %}{% set cur = (r.last_price or 0) * (r.quantity or 0) %}
+      {% set t.inv = t.inv + inv %}{% set t.cur = t.cur + cur %}
       <tr><td><b>{{ r.fund or r.tradingsymbol }}</b></td><td class="muted">{{ r.folio or "" }}</td><td class="num">{{ "{:,.3f}".format(r.quantity) if r.quantity is number else "—" }}</td>
         <td class="num">{{ money(r.average_price) }}</td><td class="num">{{ money(r.last_price) }} <span class="muted">{{ r.last_price_date or "" }}</span></td>
-        <td class="num">{{ money((r.average_price or 0) * (r.quantity or 0)) }}</td><td class="num">{{ money((r.last_price or 0) * (r.quantity or 0)) }}</td>
-        <td class="num"><b>{{ pnl(r.pnl) }}</b></td></tr>
+        <td class="num">{{ money(inv) }}</td><td class="num">{{ money(cur) }}</td>
+        <td class="num"><b>{{ pnl(cur - inv) }}</b></td><td class="num {{ 'up' if cur >= inv else 'down' }}">{{ "{:+.2f}%".format((cur - inv) / inv * 100) if inv else "—" }}</td></tr>
       {% endfor %}
-      {% set t = namespace(inv=0, cur=0) %}{% for r in rows %}{% set t.inv = t.inv + (r.average_price or 0) * (r.quantity or 0) %}{% set t.cur = t.cur + (r.last_price or 0) * (r.quantity or 0) %}{% endfor %}
       <tr><td colspan="5" class="muted">Total</td><td class="num">{{ money(t.inv) }}</td><td class="num">{{ money(t.cur) }}</td>
-        <td class="num"><b>{{ pnl(rows|map(attribute="pnl")|select("number")|sum) }}</b></td></tr>
+        <td class="num"><b>{{ pnl(t.cur - t.inv) }}</b></td><td class="num {{ 'up' if t.cur >= t.inv else 'down' }}"><b>{{ "{:+.2f}%".format((t.cur - t.inv) / t.inv * 100) if t.inv else "—" }}</b></td></tr>
     </table></div>
     {% else %}<p class="muted">No mutual fund holdings.</p>{% endif %}
     {% endif %}
