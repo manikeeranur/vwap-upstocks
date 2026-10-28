@@ -27,6 +27,13 @@
   .journal-empty p { color:var(--muted); margin:4px 0; font-size:12px; }
   #equity { width: 100%; height: 220px; display: block; }
   .up { color: var(--ok); } .down { color: var(--pe); } .muted { color: var(--muted); }
+  .broker-tiles { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin:0 0 16px; }
+  .broker-tile { display:flex; align-items:center; gap:12px; padding:12px 14px; border:1px solid var(--border); border-radius:10px; background:var(--card); }
+  .broker-tile .broker-logo { width:28px; height:28px; }
+  .broker-tile span { display:block; font-size:11px; color:var(--muted); } .broker-tile b { display:block; font-size:17px; font-weight:600; margin-top:2px; }
+  .broker-tile small { margin-left:auto; font-size:11px; color:var(--muted); text-align:right; }
+  .broker-cell { display:inline-flex; align-items:center; gap:6px; white-space:nowrap; }
+  @media (max-width:700px) { .broker-tiles { grid-template-columns:1fr; } }
   .badge { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
   .badge.live { background: #e11d4818; color: var(--pe); } .badge.paper { background: #4f46e518; color: var(--accent); }
   .st { font-weight: 700; } .st.SL { color: var(--pe); } .st.TARGET { color: var(--ok); } .st.OPEN { color: var(--accent); }
@@ -35,6 +42,7 @@
   .tbl { overflow-x: auto; }
   .bf { font-size: 13px; color: var(--muted); }
   .strat-card { margin-top: 16px; }
+  .strat-card th, .strat-card td { padding:10px 8px; } .strat-card th:first-child, .strat-card td:first-child { padding-left:12px; }
   .strat-card .sh { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; margin-bottom: 4px; }
   .strat-card .sh h2 { margin: 0; color: var(--text); letter-spacing: .4px; text-transform: none; font-size: 15px; }
   .strat-card .sum { color: var(--muted); font-size: 13px; margin-left: auto; }
@@ -57,15 +65,22 @@
       <label>To <input type="date" id="to" value="{{ today }}"></label>
       <label>Strategy <select id="strat"><option value="">All strategies</option>
         {% for p in presets %}<option value="{{ p }}">{{ {"ema25_vwap":"VWAP + EMA25","ema_pullback":"EMA pullback","smc_ema_combo":"SMC + EMA (1/day)"}.get(p, labels[p]) }}</option>{% endfor %}</select></label>
-      <label>Trades <select id="src"><option value="orders" selected>Live orders only</option><option value="">Paper + live</option><option value="paper">Paper only</option></select></label>
+      <label>Mode <select id="src">
+        <option value="live" selected>Live · all brokers</option>
+        <option value="live:upstox">Live · Upstox</option>
+        <option value="live:kite">Live · Kite</option>
+        <option value="live:indmoney">Live · INDmoney</option>
+        <option value="paper">Paper</option>
+      </select></label>
     </div>
   </div>
 
   <p class="page-status" id="pageStatus" role="status">Loading your journal…</p>
   <div class="tiles" id="tiles"></div>
+  <div class="broker-tiles" id="brokerTiles" hidden></div>
 
   <div class="two">
-    <div class="card"><h2>Equity curve <span class="muted" style="font-size:11px;font-weight:400">· Gross P&amp;L, ₹</span></h2><svg id="equity" preserveAspectRatio="none" role="img" aria-label="Cumulative gross profit and loss"></svg></div>
+    <div class="card"><h2>Equity curve <span class="muted" style="font-size:11px;font-weight:400" id="curveLabel">· Gross P&amp;L, ₹</span></h2><svg id="equity" preserveAspectRatio="none" role="img" aria-label="Cumulative gross profit and loss"></svg></div>
     <div class="card"><h2>By strategy</h2><div class="tbl"><table id="byStrat"></table></div></div>
   </div>
 
@@ -82,6 +97,15 @@ const ampm = s => { if (!s) return "—"; let [h, m] = s.split(":").map(Number);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const t0 = new Date("{{ today }}"); $("from").value = new Date(t0.getFullYear(), t0.getMonth(), 1).toLocaleDateString("en-CA");
 let J = null, loadVersion = 0, lastCurve = [];
+const BROKERS = { upstox: "Upstox", kite: "Kite", indmoney: "INDmoney" };
+const isLive = () => $("src").value !== "paper";
+// Same formula as the Strategy backtest page, used only when the broker's own charges aren't known.
+function estCharges(entry, exit, qty) {
+  const turnover = (entry + exit) * qty, brokerage = 40;
+  const stt = exit * qty * 0.000625, exchange = turnover * 0.00053, clearing = turnover * 0.00003;
+  const gst = (brokerage + exchange + clearing) * 0.18, sebi = turnover * 0.000001, stamp = entry * qty * 0.00003;
+  return brokerage + stt + exchange + clearing + gst + sebi + stamp;
+}
 
 async function load() {
   const version = ++loadVersion, status = $("pageStatus");
@@ -104,9 +128,16 @@ function rows() {
   for (const [d, byP] of Object.entries(J.days).sort()) for (const [p, v] of Object.entries(byP)) {
     if ($("strat").value && p !== $("strat").value) continue;
     for (const t of v.trades) {
-      if ($("src").value === "orders" && !t.live) continue;
-      if ($("src").value === "paper" && t.live) continue;
-      out.push({ ...t, preset: p, qty: v.lots * v.lot_size, rs: t.pnl * v.lots * v.lot_size });
+      if (!isLive()) { out.push({ ...t, preset: p, qty: v.lots * v.lot_size, rs: t.pnl * v.lots * v.lot_size }); continue; }
+      // Live: one row per broker that bought it, at that broker's real fills and charges.
+      const want = $("src").value.split(":")[1];
+      for (const [acc, o] of Object.entries(J.live?.[t.id] || {})) {
+        const broker = acc.split(":")[1]; if (want && broker !== want) continue;
+        const real = o.buy != null && o.sell != null, gross = real ? (o.sell - o.buy) * o.qty : t.pnl * o.qty;
+        const realCh = o.buy_charges != null && o.sell_charges != null;
+        const ch = realCh ? o.buy_charges + o.sell_charges : estCharges(o.buy ?? t.entry, o.sell ?? t.exit, o.qty);
+        out.push({ ...t, preset: p, broker, qty: o.qty, buyFill: o.buy, sellFill: o.sell, real, realCh, gross, ch, rs: gross - ch });
+      }
     }
   }
   return out.sort((a, b) => (a.date + a.entry_time).localeCompare(b.date + b.entry_time));
@@ -122,17 +153,27 @@ function render() {
   let cum = 0, peak = 0, dd = 0; const curve = [0];
   R.forEach(t => { cum += t.rs; curve.push(cum); peak = Math.max(peak, cum); dd = Math.max(dd, peak - cum); });
   const tile = (k, v, s = "", cls = "") => `<div class="tile"><span>${k}</span><b class="${cls}">${v}</b><small>${s}</small></div>`;
+  const gross = R.reduce((a, t) => a + (t.gross ?? t.rs), 0), chg = R.reduce((a, t) => a + (t.ch || 0), 0), anyEst = R.some(t => t.ch != null && (!t.real || !t.realCh));
   $("tiles").innerHTML = [
-    tile("Net P&L", money(net), `${R.length} trades · gross, before charges`, net >= 0 ? "up" : "down"),
+    isLive() ? tile("Net P&L", money(net), `${R.length} live trades · after ₹${chg.toLocaleString("en-IN", {minimumFractionDigits:2, maximumFractionDigits:2})} charges${anyEst ? " (some est.)" : ""}`, net >= 0 ? "up" : "down")
+             : tile("Net P&L", money(net), `${R.length} trades · gross, before charges`, net >= 0 ? "up" : "down"),
     tile("Win rate", R.length ? `${Math.round(wins.length / R.length * 100)}%` : "—", `${wins.length} won · ${losses.length} lost`),
     tile("Profit factor", gl > 0 ? (gw / gl).toFixed(2) : wins.length ? "∞" : "—", ""),
-    tile("Max drawdown", money(-dd), "peak to trough", dd ? "down" : ""),
+    isLive() ? tile("Gross P&L", money(gross), "Real fill prices, before charges", gross >= 0 ? "up" : "down") : tile("Max drawdown", money(-dd), "peak to trough", dd ? "down" : ""),
   ].join("");
+  $("brokerTiles").hidden = $("src").value !== "live";
+  if ($("src").value === "live") {
+    const per = {}; for (const b of Object.keys(BROKERS)) per[b] = {gross: 0, net: 0, n: 0};
+    R.forEach(t => { per[t.broker].gross += t.gross; per[t.broker].net += t.rs; per[t.broker].n++; });
+    $("brokerTiles").innerHTML = Object.entries(per).map(([b, x]) => `<div class="broker-tile">${window.brokerLogo ? brokerLogo(b, 28) : ""}<div><span>${BROKERS[b]}</span><b class="${x.n ? (x.net >= 0 ? "up" : "down") : "muted"}">${x.n ? money(x.net) : "—"}</b></div><small>${x.n} ${x.n === 1 ? "trade" : "trades"}${x.n ? `<br>gross ${money(x.gross)}` : ""}</small></div>`).join("");
+  }
   $("extraTiles").innerHTML = [
+    ...(isLive() ? [tile("Max drawdown", money(-dd), "peak to trough", dd ? "down" : "")] : []),
     tile("Avg win / loss", wins.length || losses.length ? `${money(wins.length ? gw / wins.length : 0)} / ${money(losses.length ? -gl / losses.length : 0)}` : "—"),
-    tile("Best day", best ? money(best[1]) : "—", best ? best[0] : "", "up"),
-    tile("Worst day", worst ? money(worst[1]) : "—", worst ? worst[0] : "", "down"),
+    tile("Best day", best ? money(best[1]) : "—", best ? best[0] : "", best ? (best[1] >= 0 ? "up" : "down") : ""),
+    tile("Worst day", worst ? money(worst[1]) : "—", worst ? worst[0] : "", worst ? (worst[1] >= 0 ? "up" : "down") : ""),
   ].join("");
+  $("curveLabel").textContent = isLive() ? "· Net P&L after charges, ₹" : "· Gross P&L, ₹";
   lastCurve = curve; drawEquity(curve);
   const per = {}; R.forEach(t => { const s = per[t.preset] ||= { n: 0, w: 0, rs: 0 }; s.n++; s.w += t.rs > 0; s.rs += t.rs; });
   $("byStrat").innerHTML = `<thead><tr><th>Strategy</th><th>Trades</th><th>Win %</th><th>Net ₹</th></tr></thead><tbody>${
@@ -144,21 +185,29 @@ function render() {
     return;
   }
   // One table per strategy (in the menu's order), newest trade first.
-  const shown = $("strat").value ? [$("strat").value] : PRESETS;
+  // Live: only strategies that had live trades in the range.
+  const shown = $("strat").value ? [$("strat").value] : isLive() ? PRESETS.filter(p => per[p]) : PRESETS;
   $("trades").innerHTML = shown.map(p => {
     const T = R.filter(t => t.preset === p).reverse(), s = per[p] || { n: 0, w: 0, rs: 0 };
     return `<div class="card strat-card"><div class="sh"><h2>${LABELS[p]}</h2>
       <span class="sum">${s.n} trade${s.n === 1 ? "" : "s"}${s.n ? ` · win ${Math.round(s.w / s.n * 100)}%` : ""} · <b class="${s.rs >= 0 ? "up" : "down"}">${money(s.rs)}</b></span></div>
-      <div class="tbl"><table><thead><tr><th>Date</th><th>In → out</th><th>Option</th><th>Entry</th><th>Exit</th><th>Status</th><th>P&amp;L pts</th><th>P&amp;L ₹</th><th>Mode</th><th>Note</th></tr></thead><tbody>${
+      <div class="tbl"><table><thead><tr><th>Date</th><th>In → out</th><th>Option</th>${isLive()
+        ? "<th>Broker</th><th>Qty</th><th>Buy fill</th><th>Sell fill</th><th>Status</th><th>Gross ₹</th><th>Charges</th><th>Net ₹</th>"
+        : "<th>Entry</th><th>Exit</th><th>Status</th><th>P&amp;L pts</th><th>P&amp;L ₹</th>"}<th>Note</th></tr></thead><tbody>${
       T.map(t => {
         const st = t.open ? "OPEN" : t.status, pc = t.rs >= 0 ? "up" : "down";
-        const mode = t.live ? "live" : "paper";
-        return `<tr><td>${t.date}</td><td>${ampm(t.entry_time)} → ${t.open ? "…" : ampm(t.exit_time)}</td>
-          <td><b style="color:${t.type === "CE" ? "var(--ce)" : "var(--pe)"}">${t.symbol}</b></td><td>₹${fmt(t.entry)}</td><td>₹${fmt(t.exit)}</td>
-          <td class="st ${st}">${st === "TIME_EXIT" ? "TIME EXIT" : st}</td><td class="${pc}">${t.pnl >= 0 ? "+" : ""}${fmt(t.pnl)}</td>
-          <td class="${pc}">${money(t.rs)}</td><td><span class="badge ${mode}">${mode}</span></td>
+        const head = `<tr><td>${t.date}</td><td>${ampm(t.entry_time)} → ${t.open ? "…" : ampm(t.exit_time)}</td>
+          <td><b style="color:${t.type === "CE" ? "var(--ce)" : "var(--pe)"}">${t.symbol}</b></td>`;
+        const status = `<td class="st ${st}">${st === "TIME_EXIT" ? "TIME EXIT" : st}</td>`;
+        const cells = isLive()
+          ? `<td><span class="broker-cell">${window.brokerLogo ? brokerLogo(t.broker, 16) : ""}${BROKERS[t.broker] || t.broker}</span></td><td>${t.qty}</td>
+             <td>${t.buyFill != null ? "₹" + fmt(t.buyFill) : `<span class="muted">₹${fmt(t.entry)} est.</span>`}</td>
+             <td>${t.sellFill != null ? "₹" + fmt(t.sellFill) : `<span class="muted">₹${fmt(t.exit)} est.</span>`}</td>${status}
+             <td class="${t.gross >= 0 ? "up" : "down"}">${money(t.gross)}</td><td class="down">${money(-t.ch)}${t.realCh ? "" : ' <small class="muted">est.</small>'}</td><td class="${pc}"><b>${money(t.rs)}</b></td>`
+          : `<td>₹${fmt(t.entry)}</td><td>₹${fmt(t.exit)}</td>${status}<td class="${pc}">${t.pnl >= 0 ? "+" : ""}${fmt(t.pnl)}</td><td class="${pc}">${money(t.rs)}</td>`;
+        return `${head}${cells}
           <td class="note"><input type="text" data-id="${esc(t.id)}" value="${esc(J.notes[t.id] || "")}" aria-label="Note for ${esc(t.symbol)} on ${esc(t.date)}" placeholder="Add a note…"></td></tr>`;
-      }).join("") || `<tr><td class="muted" colspan="10">No trades in this range.</td></tr>`}</tbody></table></div></div>`;
+      }).join("") || `<tr><td class="muted" colspan="${isLive() ? 12 : 9}">No ${isLive() ? "live " : ""}trades in this range.</td></tr>`}</tbody></table></div></div>`;
   }).join("");
 }
 
