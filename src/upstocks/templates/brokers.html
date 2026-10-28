@@ -11,7 +11,7 @@
   @media (max-width:900px) { .broker-grid { grid-template-columns:1fr; } }
   body .broker { padding:22px; }
   .broker-head { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:18px; }
-  .broker-head h2 { margin:0; font-size:16px; }
+  .broker-head h2 { margin:0; font-size:16px; display:flex; align-items:center; gap:10px; }
   .status { font-size:11px; font-weight:500; border-radius:6px; padding:4px 8px; border:1px solid var(--border); color:var(--muted); white-space:nowrap; }
   .status.ok { color:var(--ok); border-color:color-mix(in srgb,var(--ok) 35%,var(--border)); }
   .status.bad { color:var(--pe); border-color:color-mix(in srgb,var(--pe) 35%,var(--border)); }
@@ -86,7 +86,7 @@ function profileCard(p) {
 function indCard(x) {
   const b = 'indmoney';
   return `<section class="card broker" id="indmoney" aria-label="${NAMES[b]}">
-      <div class="broker-head"><h2>${NAMES[b]}</h2><span class="status ${x.logged_in ? 'ok' : 'bad'}">${x.logged_in ? 'Logged in today' : 'Not logged in'}</span></div>
+      <div class="broker-head"><h2>${brokerLogo(b,26)}${NAMES[b]}</h2><span class="status ${x.logged_in ? 'ok' : 'bad'}">${x.logged_in ? 'Logged in today' : 'Not logged in'}</span></div>
       ${profileCard(x.profile)}
       <form data-indtoken>
         <label>Today's access token <input name="token" type="password" autocomplete="off" spellcheck="false" placeholder="Paste the token from indstocks.com"></label>
@@ -111,7 +111,7 @@ function render(s) {
   last = s;
   $('grid').innerHTML = Object.entries(s.brokers).map(([b,x]) => b === 'indmoney' ? indCard(x) : `
     <section class="card broker" aria-label="${NAMES[b]}">
-      <div class="broker-head"><h2>${NAMES[b]}</h2><span class="status ${x.logged_in ? 'ok' : x.has_key ? 'bad' : ''}">${x.logged_in ? 'Logged in today' : x.has_key ? 'Not logged in' : 'Not set up'}</span></div>
+      <div class="broker-head"><h2>${brokerLogo(b,26)}${NAMES[b]}</h2><span class="status ${x.logged_in ? 'ok' : x.has_key ? 'bad' : ''}">${x.logged_in ? 'Logged in today' : x.has_key ? 'Not logged in' : 'Not set up'}</span></div>
       ${profileCard(x.profile)}
       ${x.has_key && x.has_secret && !editing.has(b) ? `<div class="saved-keys"><div><span>API key</span><b>******</b></div><div><span>API secret</span><b>******</b></div><button class="btn ghost" type="button" data-edit="${b}">Change keys</button></div>` : `<form data-keys="${b}">
         <label>API key <input name="api_key" autocomplete="off" spellcheck="false" placeholder="${x.has_key ? '****** (saved)' : 'Paste your API key'}"></label>

@@ -33,7 +33,7 @@
 .metric-value { display:block; font:600 30px/1.25 var(--font); letter-spacing:-1.1px; margin:16px 0 8px; overflow-wrap:anywhere; }
 .metric small { display:block; font-size:11px; color:var(--muted); }
 .session-rail { grid-area:controls; display:grid; gap:16px; position:sticky; top:88px; min-width:0; }
-body .scan-card,body .research-card { padding:20px; }
+body .scan-card { padding:20px; }
 .rail-title { display:flex; align-items:center; gap:9px; margin:0 0 20px; }
 .rail-title h2 { margin:0; } .rail-title svg { width:16px; height:16px; color:var(--muted); }
 .market-status { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:20px; }
@@ -44,11 +44,6 @@ body .scan-card,body .research-card { padding:20px; }
 .scan-actions .btn { padding:9px; }
 .scan-note { display:flex; align-items:flex-start; gap:8px; margin-top:18px; padding-top:15px; border-top:1px solid var(--border); color:var(--muted); font-size:11px; }
 .scan-note svg { width:13px; height:13px; flex:none; margin-top:2px; } .scan-note p { margin:0; }
-.research-card .rail-title { margin-bottom:8px; }
-.research-link { display:flex; align-items:center; gap:10px; padding:12px 0; color:var(--text); text-decoration:none; }
-.research-link .tool-icon { width:31px; height:31px; display:grid; place-items:center; color:var(--muted); background:var(--surface); border:1px solid var(--border); border-radius:7px; flex:none; }
-.research-link svg { width:15px; height:15px; } .research-link b { display:block; font-size:12px; font-weight:500; }
-.research-link > span:last-child { margin-left:auto; color:var(--muted); } .research-link:hover b { color:var(--accent); }
 .connection { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:20px; padding:12px 16px; border:1px solid var(--pe); border-radius:8px; color:var(--pe); background:var(--card); }
 .strategy-region { grid-area:strategies; min-width:0; }
 .section-heading { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin:0 0 16px; }
@@ -57,16 +52,23 @@ body .scan-card,body .research-card { padding:20px; }
 .strategy-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
 .strat { container-type:inline-size; }
 .heading-right { display:flex; align-items:center; gap:12px; } .settings-btn { min-height:32px; padding:5px 11px; }
-.mode-chip { display:inline-flex; align-items:center; font-size:11px; font-weight:500; padding:4px 9px; border-radius:999px; border:1px solid var(--border); background:var(--surface); color:var(--muted); }
-.mode-chip.on { color:var(--accent); border-color:color-mix(in srgb,var(--accent) 30%,var(--border)); }
-.mode-chip.live { color:var(--pe); border-color:color-mix(in srgb,var(--pe) 35%,var(--border)); }
-.strat-dialog { width:min(860px,calc(100% - 32px)); }
+.strat-dialog { width:min(1000px,calc(100% - 32px)); }
+.th-broker { display:inline-flex; align-items:center; gap:6px; } .live-broker { align-items:center !important; }
 .set-scroll { overflow:auto; max-height:calc(100dvh - 220px); }
 .set-table { width:100%; border-collapse:collapse; font-size:12px; }
 .set-table th { text-align:left; font-size:10px; letter-spacing:.8px; text-transform:uppercase; color:var(--muted); font-weight:500; padding:8px 10px; border-bottom:1px solid var(--border); white-space:nowrap; position:sticky; top:0; background:var(--card); }
 .set-table td { text-align:left; padding:10px; border-bottom:1px solid var(--border); vertical-align:middle; white-space:nowrap; }
-.set-table td b { display:block; font-size:13px; } .set-table td small { display:block; font-size:10px; color:var(--muted); white-space:normal; max-width:220px; }
-.set-cell { display:flex; align-items:center; gap:8px; } .set-cell .lots { width:58px; min-height:32px; padding:4px 8px; font-size:12px; } .set-cell span { font-size:10px; color:var(--muted); }
+.set-table td b { display:block; font-size:13px; } .set-table td small { display:block; font-size:10px; color:var(--muted); white-space:normal; max-width:200px; }
+.set-cell { display:flex; align-items:center; gap:8px; padding:6px 8px; border:1px solid transparent; border-radius:9px; transition:background .15s,border-color .15s; }
+.set-cell .broker-logo { opacity:.55; filter:grayscale(.6); transition:opacity .15s,filter .15s; }
+.set-cell.on { background:color-mix(in srgb,var(--ok) 9%,var(--card)); border-color:color-mix(in srgb,var(--ok) 35%,var(--border)); }
+.set-cell.on .broker-logo { opacity:1; filter:none; }
+#stratDialog .tog.livechk input:checked + .sw { background:var(--ok); }
+.live-dot { display:inline-flex; align-items:center; gap:5px; font-size:9px !important; font-weight:700; letter-spacing:.8px; color:var(--ok) !important; }
+.live-dot::before { content:''; width:7px; height:7px; border-radius:50%; background:var(--ok); animation:livePulse 1.6s ease-out infinite; }
+@keyframes livePulse { 0% { box-shadow:0 0 0 0 color-mix(in srgb,var(--ok) 55%,transparent); } 100% { box-shadow:0 0 0 7px transparent; } }
+@media (prefers-reduced-motion:reduce) { .live-dot::before { animation:none; } } .set-cell .lots { width:50px !important; min-height:30px; padding:4px 6px; font-size:12px; text-align:center; }
+.th-warn { display:block; margin-top:3px; font-size:9px; letter-spacing:.3px; text-transform:none; color:var(--pe); font-weight:500; } .set-cell span { font-size:10px; color:var(--muted); }
 @media (max-width:700px) {
   .set-table thead { display:none; } .set-table, .set-table tbody, .set-table tr, .set-table td { display:block; width:100%; }
   .set-table tr { padding:10px 0; border-bottom:1px solid var(--border); } .set-table td { border:0; padding:6px 0; display:flex; align-items:center; justify-content:space-between; }
@@ -124,7 +126,7 @@ body .strat { padding:20px; } .strat.islive { border-color:var(--pe); }
 @media(max-width:1340px) { .strategy-list { grid-template-columns:1fr; } .strategy-controls .quantity { margin-left:auto; flex-basis:auto; } }
 @media(max-width:1100px) {
   .workspace-grid { grid-template-columns:minmax(0,1fr); grid-template-areas:'performance' 'controls' 'strategies' 'activity' 'help'; }
-  .session-rail { position:static; } .research-card { display:none; }
+  .session-rail { position:static; }
   .scan-toolbar { display:grid; grid-template-columns:1fr 2fr; align-items:center; gap:20px; }
   .market-status { margin-bottom:0; } .scan-actions { grid-template-columns:repeat(2,minmax(0,1fr)); align-items:end; }
   .scan-actions label { grid-column:auto; } .metrics { gap:12px; } .metric { padding:16px; } .metric-value { font-size:26px; }
@@ -160,7 +162,7 @@ body .strat { padding:20px; } .strat.islive { border-color:var(--pe); }
       <div class="metric"><div class="metric-heading"><span class="metric-label">Open signals</span>{{ ui_icon("activity", "metric-icon") }}</div><strong class="metric-value" id="openTrades">—</strong><small>Across all strategies</small></div>
       <div class="metric"><div class="metric-heading"><span class="metric-label">Active strategies</span>{{ ui_icon("layers", "metric-icon") }}</div><strong class="metric-value" id="activeStrats">—</strong><small id="activeCaption">Of 4 available</small></div>
     </section>
-    <aside class="session-rail" aria-label="Session and research tools">
+    <aside class="session-rail" aria-label="Trading session">
       <section class="card scan-card" aria-label="Scan controls">
         <div class="rail-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4 7h8m4 0h4M4 17h3m4 0h9M12 4v6M7 14v6"/></svg><h2>Trading session</h2></div>
         <div class="scan-toolbar">
@@ -173,11 +175,6 @@ body .strat { padding:20px; } .strat.islive { border-color:var(--pe); }
           </div>
         </div>
         <div class="scan-note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><p id="scanInfo" role="status">Connecting to your workspace…</p></div>
-      </section>
-      <section class="card research-card" aria-label="Research shortcuts">
-        <div class="rail-title"><h2>Research tools</h2></div>
-        <a class="research-link" href="/vwap"><span class="tool-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 19V9m6 10V4m6 15v-7m5 7H2"/></svg></span><span><b>Strategy backtest</b></span><span aria-hidden="true">↗</span></a>
-        <a class="research-link" href="/data"><span class="tool-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 17v4h16v-4"/></svg></span><span><b>Market data</b></span><span aria-hidden="true">↗</span></a>
       </section>
     </aside>
     <section class="strategy-region" aria-labelledby="strategy-heading">
@@ -289,7 +286,7 @@ function updateLiveValues() {
   }});
   text($('livePnl'), liveTrades ? money(liveTotal) : '—'); color($('livePnl'), liveTotal);
   text($('liveCaption'), liveTrades ? `${liveTrades} live ${liveTrades === 1 ? 'trade' : 'trades'} today · ${estimated ? `${estimated} at strategy prices until fills load` : 'real fill prices'} · before charges` : 'No live trades today');
-  const chips = BROKER_ORDER.map(b => `<div class="live-broker"><span>${BROKER_NAMES[b]}</span><b class="${live[b].pnl >= 0 ? 'up' : 'down'}">${live[b].trades ? money(live[b].pnl) : '—'}</b><small>${live[b].trades ? `${live[b].trades} ${live[b].trades === 1 ? 'trade' : 'trades'}${live[b].open ? ` · ${live[b].open} open` : ''}` : 'no trades'}</small></div>`).join('');
+  const chips = BROKER_ORDER.map(b => `<div class="live-broker">${brokerLogo(b,16)}<span>${BROKER_NAMES[b]}</span><b class="${live[b].pnl >= 0 ? 'up' : 'down'}">${live[b].trades ? money(live[b].pnl) : '—'}</b><small>${live[b].trades ? `${live[b].trades} ${live[b].trades === 1 ? 'trade' : 'trades'}${live[b].open ? ` · ${live[b].open} open` : ''}` : 'no trades'}</small></div>`).join('');
   if ($('liveBrokers').innerHTML !== chips) $('liveBrokers').innerHTML = chips;
   const replay = S.view.day && S.view.day !== todayIST();
   const label = replay ? 'Replay · prices fixed' : !S.market_open ? 'Market closed' : open ? (delayed ? 'Prices delayed · retrying' : 'Live prices · 1s') : 'Prices · waiting for entry';
@@ -355,11 +352,7 @@ function render() {
       }).join('');
       return `<section class="card strat ${live ? 'islive' : ''}" aria-label="${esc(LABELS[p])}">
         <div class="strategy-top"><div class="strategy-title"><span class="strategy-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="${STRATEGY_ICONS[index]}"/></svg></span><div><h3>${esc(LABELS[p])}</h3><p>${DESCRIPTIONS[p]}</p></div></div><div class="strategy-pnl"><span class="pnl-label">P&amp;L</span><b data-strategy-pnl="${p}" class="${pts >= 0 ? 'up' : 'down'}">${view.day ? money(pts * qty) : '—'}</b><small>${trades.length} trades${open ? ` · ${open} open` : ''}</small></div></div>
-        <div class="strategy-controls">
-          <span class="mode-chip ${cfg.on ? 'on' : ''}">Paper ${cfg.on ? 'on' : 'off'}</span>
-          ${accounts().filter(a => a.live[p]).map(a => `<span class="mode-chip live">${BROKER_NAMES[a.broker]} Live · ${a.lots[p]} ${a.lots[p] === 1 ? 'lot' : 'lots'}${B && !B[a.broker]?.logged_in ? ' · not logged in' : ''}</span>`).join('') || '<span class="mode-chip">Live off</span>'}
-          ${accounts().map(a => { const pos = openLive(a.id,p); return pos ? `<button class="btn ghost sq" type="button" data-sq="${p}" data-broker="${a.broker}">Square off ${pos} · ${BROKER_NAMES[a.broker]}</button>` : ''; }).join('')}
-        </div>
+        ${(sq => sq ? `<div class="strategy-controls">${sq}</div>` : '')(accounts().map(a => { const pos = openLive(a.id,p); return pos ? `<button class="btn ghost sq" type="button" data-sq="${p}" data-broker="${a.broker}">Square off ${pos} · ${BROKER_NAMES[a.broker]}</button>` : ''; }).join(''))}
         ${err ? `<p class="strategy-error" role="status">${esc(err)}</p>` : ''}
         ${trades.length ? `<div class="scroll trade-scroll" tabindex="0" role="region" aria-label="${esc(LABELS[p])} trades; scroll for more columns"><table><thead><tr><th>#</th><th>Entry</th><th>Option</th><th>Entry ₹</th><th>SL</th><th>Target</th><th>Max profit</th><th>Max loss</th><th>Status</th><th>Exit</th><th>Exit / LTP</th><th>P&amp;L pts</th><th>P&amp;L ₹</th><th>Live BUY</th><th>Live SELL</th></tr></thead><tbody>${rows}</tbody></table></div><div class="trade-cards">${trades.map(t => tradeCard(t,qty)).join('')}</div>` : `<div class="empty-state"><span class="empty-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/></svg></span><div><b>${!cfg.on && !live ? 'Strategy paused' : err ? 'Market data unavailable' : 'Awaiting signal'}</b><p>${!cfg.on && !live ? 'Enable Paper to start tracking signals.' : err ? 'Check the message above and try scanning again.' : view.day ? `No trades for ${esc(view.day)}.` : ''}</p></div></div>`}
       </section>`;
@@ -378,14 +371,14 @@ function renderSettings() {
   if (document.activeElement?.matches('#stratDialog input[type=number]')) return;   // don't wipe what is being typed
   const accs = accounts();
   $('stratDialogSub').textContent = `Paper, live orders and lots for every strategy · lot size ${S.state.lot_size}`;
-  const head = accs.map(a => `<th>${BROKER_NAMES[a.broker]} Live${B && !B[a.broker]?.logged_in ? ' <span class="err">· not logged in</span>' : ''}</th>`).join('');
+  const head = accs.map(a => `<th><span class="th-broker">${brokerLogo(a.broker,16)}${BROKER_NAMES[a.broker]} Live · lots</span>${B && !B[a.broker]?.logged_in ? '<small class="th-warn">Not logged in today</small>' : ''}</th>`).join('');
   const rows = shownPresets().map(p => {
     const cfg = S.state.config[p];
     return `<tr><td><b>${esc(LABELS[p])}</b><small>${DESCRIPTIONS[p]}</small></td>
       <td data-label="Paper"><label class="check tog"><input type="checkbox" role="switch" aria-label="Paper scanning for ${esc(LABELS[p])}" data-on="${p}" ${cfg.on ? 'checked' : ''}><span class="sw"></span></label></td>
       ${accs.map(a => { const n = BROKER_NAMES[a.broker];
-        return `<td data-label="${n} Live"><div class="set-cell"><label class="check tog livechk"><input type="checkbox" role="switch" aria-label="${n} live orders for ${esc(LABELS[p])}" data-live="${p}" data-broker="${a.broker}" ${a.live[p] ? 'checked' : ''}><span class="sw"></span></label>
-          <input type="number" class="lots" aria-label="${n} lots for ${esc(LABELS[p])}" title="Lots" data-lots="${p}" data-broker="${a.broker}" min="1" step="1" inputmode="numeric" value="${a.lots[p]}" required><span>lots</span></div></td>`; }).join('')}</tr>`;
+        return `<td data-label="${n} Live"><div class="set-cell ${a.live[p] ? 'on' : ''}">${brokerLogo(a.broker,20)}<label class="check tog livechk"><input type="checkbox" role="switch" aria-label="${n} live orders for ${esc(LABELS[p])}" data-live="${p}" data-broker="${a.broker}" ${a.live[p] ? 'checked' : ''}><span class="sw"></span></label>
+          <input type="number" class="lots" aria-label="${n} lots for ${esc(LABELS[p])}" title="Lots" data-lots="${p}" data-broker="${a.broker}" min="1" step="1" inputmode="numeric" value="${a.lots[p]}" required>${a.live[p] ? '<span class="live-dot" title="Live orders on">LIVE</span>' : ''}</div></td>`; }).join('')}</tr>`;
   }).join('');
   $('stratDialogBody').innerHTML = `<div class="set-scroll"><table class="set-table"><thead><tr><th>Strategy</th><th>Paper</th>${head}</tr></thead><tbody>${rows}</tbody></table></div>`;
 }

@@ -1,3 +1,4 @@
+{% import "_broker_logos.html" as logos %}
 {% set items = [
   ("paper", "/paper", "Overview", '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>'),
   ("journal", "/journal", "Trade journal", '<path d="M4 4h12a4 4 0 0 1 4 4v12H8a4 4 0 0 1-4-4z"/><path d="M8 9h8M8 13h6"/>'),
@@ -46,6 +47,8 @@
 <script>
 (() => {
   const dashboardToken = {{ request.app.state.dashboard_token | default('') | tojson }};
+  window.BROKER_LOGOS = {{ logos.broker_logos | tojson }};
+  window.brokerLogo = (b, size = 18) => window.BROKER_LOGOS[b] ? `<img class="broker-logo" src="${window.BROKER_LOGOS[b]}" width="${size}" height="${size}" alt="" aria-hidden="true">` : '';
   window.appFetch = (path, options = {}) => {
     const url = new URL(path, location.href);
     if (url.origin !== location.origin) throw new Error('Dashboard requests must use the same origin');

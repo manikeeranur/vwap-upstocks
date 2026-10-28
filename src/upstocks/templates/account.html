@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>upstocks — account</title>
 {% from "_icons.html" import ui_icon %}
+{% from "_broker_logos.html" import broker_logo %}
 {% include "_style.html" %}
 <style>
   main { max-width: none; padding: 20px 24px 48px; }
@@ -14,7 +15,7 @@
   .kv.kv4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   @media (max-width: 760px) { .kv.kv4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   .broker-tabs { display:inline-flex; margin-bottom:8px; min-height:0; }
-  .broker-tabs a { font-size:12px; font-weight:500; padding:6px 14px; border:1px solid transparent; border-radius:5px; color:var(--muted); text-decoration:none; }
+  .broker-tabs a { display:inline-flex; align-items:center; gap:7px; font-size:12px; font-weight:500; padding:6px 14px; border:1px solid transparent; border-radius:5px; color:var(--muted); text-decoration:none; }
   .broker-tabs a.on { background:var(--card); color:var(--text); border-color:var(--border); box-shadow:0 1px 3px #00000009; }
   .sec h2 { font-size: 13px; letter-spacing: 1.4px; text-transform: uppercase; color: var(--muted); margin: 0 0 10px; }
   .kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
@@ -42,9 +43,9 @@
   {% set bname = {"kite": "Kite (Zerodha)", "indmoney": "INDmoney"}.get(broker, "Upstox") %}
   <header class="page-heading"><div><h1>Broker account</h1><p class="sub">Your {{ bname }} balances and activity.</p></div><div class="heading-actions"><span class="account-timestamp">{{ now }} IST</span><a class="btn ghost" href="/account?broker={{ broker }}">{{ ui_icon("refresh") }} Refresh</a></div></header>
   <nav class="seg broker-tabs" aria-label="Broker">
-    <a href="/account?broker=upstox" class="{{ 'on' if broker == 'upstox' else '' }}" {% if broker == 'upstox' %}aria-current="page"{% endif %}>Upstox</a>
-    <a href="/account?broker=kite" class="{{ 'on' if broker == 'kite' else '' }}" {% if broker == 'kite' %}aria-current="page"{% endif %}>Kite (Zerodha)</a>
-    <a href="/account?broker=indmoney" class="{{ 'on' if broker == 'indmoney' else '' }}" {% if broker == 'indmoney' %}aria-current="page"{% endif %}>INDmoney</a>
+    <a href="/account?broker=upstox" class="{{ 'on' if broker == 'upstox' else '' }}" {% if broker == 'upstox' %}aria-current="page"{% endif %}>{{ broker_logo("upstox", 16) }}Upstox</a>
+    <a href="/account?broker=kite" class="{{ 'on' if broker == 'kite' else '' }}" {% if broker == 'kite' %}aria-current="page"{% endif %}>{{ broker_logo("kite", 16) }}Kite (Zerodha)</a>
+    <a href="/account?broker=indmoney" class="{{ 'on' if broker == 'indmoney' else '' }}" {% if broker == 'indmoney' %}aria-current="page"{% endif %}>{{ broker_logo("indmoney", 16) }}INDmoney</a>
   </nav>
 
   {% if login_needed %}
