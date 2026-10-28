@@ -239,22 +239,25 @@ function updateLiveValues() {
   // Live P&L: trades a broker actually bought × the quantity sent, at the broker's real fill prices
   // (open positions at the latest price). Without fills yet, the strategy's prices stand in.
   const live = {}; let liveTotal = 0, liveTrades = 0, estimated = 0;
-  BROKER_ORDER.forEach(b => live[b] = {pnl:0, trades:0, open:0});
+  BROKER_ORDER.forEach(b => live[b] = {pnl:0, trades:0, open:0, charges:0});
   PRESETS.forEach(p => { for (const t of S.view.results?.[p] || []) {
     const m = marks.get(t.id); if (!m) continue;
     for (const [acc,o] of Object.entries(t.orders || {})) {
       const b = acc.split(':')[1]; if (!o.buy?.order_id || !live[b]) continue;
-      const f = F?.[acc] || {}, buy = f[o.buy.order_id], sell = o.sell?.order_id ? f[o.sell.order_id] : null;
+      // Real fills: today's from the broker (refreshed every 20 s), otherwise the fill saved with the order.
+      const f = F?.[acc] || {}, buy = f[o.buy.order_id] ?? o.buy.fill_price, sell = o.sell?.order_id ? f[o.sell.order_id] ?? o.sell.fill_price : null;
       const exitPrice = o.sell?.order_id ? sell : m.price;
       const v = buy != null && exitPrice != null ? (exitPrice - buy) * (o.buy.qty || 0) : m.pnl * (o.buy.qty || 0);
       if (buy == null || exitPrice == null) estimated++;
       live[b].pnl += v; live[b].trades++; if (!o.sell?.order_id) live[b].open++;
+      live[b].charges += (o.buy.charges ?? 0) + (o.sell?.charges ?? 0);
       liveTotal += v; liveTrades++;
     }
   }});
   text($('livePnl'), liveTrades ? money(liveTotal) : '—'); color($('livePnl'), liveTotal);
-  text($('liveCaption'), liveTrades ? `${liveTrades} live ${liveTrades === 1 ? 'trade' : 'trades'} today · ${estimated ? `${estimated} at strategy prices until fills load` : 'real fill prices'} · before charges` : 'No live trades today');
-  const chips = BROKER_ORDER.map(b => `<div class="live-broker">${brokerLogo(b,16)}<span>${BROKER_NAMES[b]}</span><b class="${live[b].pnl >= 0 ? 'up' : 'down'}">${live[b].trades ? money(live[b].pnl) : '—'}</b><small>${live[b].trades ? `${live[b].trades} ${live[b].trades === 1 ? 'trade' : 'trades'}${live[b].open ? ` · ${live[b].open} open` : ''}` : 'no trades'}</small></div>`).join('');
+  const liveCharges = BROKER_ORDER.reduce((a, b) => a + live[b].charges, 0), onDay = S.view.day && S.view.day !== todayIST() ? ` on ${S.view.day}` : ' today';
+  text($('liveCaption'), liveTrades ? `${liveTrades} live ${liveTrades === 1 ? 'trade' : 'trades'}${onDay} · ${estimated ? `${estimated} at strategy prices until fills load` : 'real fill prices'}${liveCharges ? ` · charges ${money(liveCharges)} · net ${money(liveTotal - liveCharges)}` : ' · before charges'}` : `No live trades${onDay}`);
+  const chips = BROKER_ORDER.map(b => `<div class="live-broker">${brokerLogo(b,16)}<span>${BROKER_NAMES[b]}</span><b class="${live[b].pnl >= 0 ? 'up' : 'down'}">${live[b].trades ? money(live[b].pnl) : '—'}</b><small>${live[b].trades ? `${live[b].trades} ${live[b].trades === 1 ? 'trade' : 'trades'}${live[b].open ? ` · ${live[b].open} open` : ''}${live[b].charges ? ` · net ${money(live[b].pnl - live[b].charges)}` : ''}` : 'no trades'}</small></div>`).join('');
   if ($('liveBrokers').innerHTML !== chips) $('liveBrokers').innerHTML = chips;
   const replay = S.view.day && S.view.day !== todayIST();
   const label = replay ? 'Replay · prices fixed' : !S.market_open ? 'Market closed' : open ? (delayed ? 'Prices delayed · retrying' : 'Live prices · 1s') : 'Prices · waiting for entry';
