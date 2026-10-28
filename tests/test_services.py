@@ -129,6 +129,16 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((trade["peak_high"], trade["peak_low"]), (636.7, 455))
         self.assertEqual(candles.await_count, 1)
 
+    async def test_live_fills_only_for_accounts_with_orders_today(self):
+        today = upstox.today_ist().isoformat()
+        self.trading.state["orders"] = {"1:kite": {f"harmonic|{today}|10:01|NSE_FO|1": {"buy": {"order_id": "b1"}}},
+                                        "1:upstox": {"harmonic|2020-01-01|10:01|NSE_FO|1": {"buy": {"order_id": "old"}}}}
+        self.trading._credentials = lambda account: brokers.Credentials(account.split(":")[1], "k", "s", "t", brokers.now_iso())
+        with patch("upstocks.brokers.order_fills", new=AsyncMock(return_value={"b1": 439.1})) as fills:
+            self.assertEqual(await self.trading.live_fills(1), {"1:kite": {"b1": 439.1}})
+            await self.trading.live_fills(1)   # cached
+        self.assertEqual(fills.await_count, 1)
+
     def test_indmoney_token_lasts_24_hours(self):
         creds = brokers.Credentials("indmoney", "", "", "t", "2026-10-12T08:31:00+05:30")
         self.assertTrue(creds.token_valid(datetime(2026, 10, 13, 8, 30, tzinfo=upstox.IST)))

@@ -15,6 +15,12 @@
 .mode-badge.live { color:var(--pe); border-color:color-mix(in srgb,var(--pe) 30%,var(--border)); }
 .workspace-grid { display:grid; grid-template-columns:minmax(0,1fr) 280px; grid-template-areas:'performance performance' 'strategies controls' 'activity controls' 'help controls'; gap:24px; align-items:start; }
 .metrics { grid-area:performance; display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:16px; }
+.live-strip { order:9; grid-column:1/-1; display:flex; align-items:center; flex-wrap:wrap; gap:12px 28px; padding:16px 20px; border:1px solid var(--border); border-radius:11px; background:var(--card); box-shadow:var(--shadow); }
+.live-total { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; }
+.live-total strong { font:600 22px/1.2 var(--font); letter-spacing:-.6px; } .live-total small { font-size:11px; color:var(--muted); }
+.live-brokers { display:flex; flex-wrap:wrap; gap:8px; margin-left:auto; }
+.live-broker { display:flex; align-items:baseline; gap:8px; padding:7px 12px; border:1px solid var(--border); border-radius:8px; background:var(--surface); font-size:12px; }
+.live-broker span { color:var(--muted); } .live-broker b { font-weight:600; } .live-broker small { color:var(--muted); font-size:10px; }
 .metric { padding:20px; min-width:0; border:1px solid var(--border); border-radius:11px; background:var(--card); box-shadow:var(--shadow); }
 .metric.featured { background:var(--accent-soft); border-color:color-mix(in srgb,var(--accent) 18%,var(--border)); }
 .metric-heading { display:flex; justify-content:space-between; align-items:center; gap:10px; }
@@ -129,7 +135,11 @@ body .strat { padding:20px; } .strat.islive { border-color:var(--pe); }
   <div class="connection" id="connection" role="alert" hidden><span id="connectionText"></span><button type="button" class="btn ghost" id="retryBtn">Retry</button></div>
   <div class="workspace-grid">
     <section class="metrics" aria-label="Strategy summary">
-      <div class="metric featured"><div class="metric-heading"><span class="metric-label">Total P&amp;L</span><span class="metric-unit">PAPER</span></div><div class="profit-line"><strong class="metric-value" id="totalPnl">—</strong><span>INR</span></div><small id="pnlCaption">Simulated · before charges</small></div>
+      <div class="metric featured"><div class="metric-heading"><span class="metric-label">Paper P&amp;L</span><span class="metric-unit">PAPER</span></div><div class="profit-line"><strong class="metric-value" id="totalPnl">—</strong><span>INR</span></div><small id="pnlCaption">Simulated · before charges</small></div>
+      <div class="live-strip" aria-label="Live P&amp;L">
+        <div class="live-total"><span class="metric-label">Live P&amp;L</span><strong id="livePnl">—</strong><small id="liveCaption">No live trades today</small></div>
+        <div class="live-brokers" id="liveBrokers"></div>
+      </div>
       <div class="metric"><div class="metric-heading"><span class="metric-label">Total trades</span>{{ ui_icon("trades", "metric-icon") }}</div><strong class="metric-value" id="totalTrades">—</strong><small id="tradeCaption">Latest scan</small></div>
       <div class="metric"><div class="metric-heading"><span class="metric-label">Open signals</span>{{ ui_icon("activity", "metric-icon") }}</div><strong class="metric-value" id="openTrades">—</strong><small>Across all strategies</small></div>
       <div class="metric"><div class="metric-heading"><span class="metric-label">Active strategies</span>{{ ui_icon("layers", "metric-icon") }}</div><strong class="metric-value" id="activeStrats">—</strong><small id="activeCaption">Of 4 available</small></div>
@@ -181,7 +191,8 @@ const paperLots = p => { const on = accounts().filter(a => a.live[p]); return on
 const openLive = (acc,p) => Object.entries(S.state.orders?.[acc] || {}).filter(([id,o]) => id.startsWith(p + '|') && o.buy?.order_id && !o.sell).length;
 async function loadBrokers() { try { B = (await api('/api/brokers')).brokers; if (S && !confirming) render(); } catch {} }
 let S = null, busy = false, saving = false, confirming = false, refreshing = false, refreshVersion = 0;
-let Q = null, quoting = false, quoteFailed = false;
+let Q = null, quoting = false, quoteFailed = false, F = null;
+async function refreshFills() { try { F = await api('/api/paper/fills'); updateLiveValues(); } catch {} }
 $('replay').max = todayIST();
 async function api(path, body) {
   const r = await appFetch(path, body === undefined ? {} : {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
@@ -239,6 +250,26 @@ function updateLiveValues() {
     const pnl = totals[node.dataset.strategyPnl]; text(node,S.view.day ? money(pnl) : '—'); color(node,pnl);
   }
   if (S.view.day) { text($('totalPnl'),money(total)); color($('totalPnl'),total); }
+  // Live P&L: trades a broker actually bought × the quantity sent, at the broker's real fill prices
+  // (open positions at the latest price). Without fills yet, the strategy's prices stand in.
+  const live = {}; let liveTotal = 0, liveTrades = 0, estimated = 0;
+  BROKER_ORDER.forEach(b => live[b] = {pnl:0, trades:0, open:0});
+  PRESETS.forEach(p => { for (const t of S.view.results?.[p] || []) {
+    const m = marks.get(t.id); if (!m) continue;
+    for (const [acc,o] of Object.entries(t.orders || {})) {
+      const b = acc.split(':')[1]; if (!o.buy?.order_id || !live[b]) continue;
+      const f = F?.[acc] || {}, buy = f[o.buy.order_id], sell = o.sell?.order_id ? f[o.sell.order_id] : null;
+      const exitPrice = o.sell?.order_id ? sell : m.price;
+      const v = buy != null && exitPrice != null ? (exitPrice - buy) * (o.buy.qty || 0) : m.pnl * (o.buy.qty || 0);
+      if (buy == null || exitPrice == null) estimated++;
+      live[b].pnl += v; live[b].trades++; if (!o.sell?.order_id) live[b].open++;
+      liveTotal += v; liveTrades++;
+    }
+  }});
+  text($('livePnl'), liveTrades ? money(liveTotal) : '—'); color($('livePnl'), liveTotal);
+  text($('liveCaption'), liveTrades ? `${liveTrades} live ${liveTrades === 1 ? 'trade' : 'trades'} today · ${estimated ? `${estimated} at strategy prices until fills load` : 'real fill prices'} · before charges` : 'No live trades today');
+  const chips = BROKER_ORDER.map(b => `<div class="live-broker"><span>${BROKER_NAMES[b]}</span><b class="${live[b].pnl >= 0 ? 'up' : 'down'}">${live[b].trades ? money(live[b].pnl) : '—'}</b><small>${live[b].trades ? `${live[b].trades} ${live[b].trades === 1 ? 'trade' : 'trades'}${live[b].open ? ` · ${live[b].open} open` : ''}` : 'no trades'}</small></div>`).join('');
+  if ($('liveBrokers').innerHTML !== chips) $('liveBrokers').innerHTML = chips;
   const replay = S.view.day && S.view.day !== todayIST();
   const label = replay ? 'Replay · prices fixed' : !S.market_open ? 'Market closed' : open ? (delayed ? 'Prices delayed · retrying' : 'Live prices · 1s') : 'Prices · waiting for entry';
   text($('refreshHint'),label); $('refreshHint').classList.toggle('quote-delayed',!!open && delayed);
@@ -406,7 +437,8 @@ $('strats').addEventListener('change',async e => {
 });
 $('strats').addEventListener('focusout',() => { setTimeout(() => { if(S && !saving && !confirming && !$('strats').contains(document.activeElement)) render(); },0); });
 document.addEventListener('visibilitychange',() => { if(!document.hidden) { refresh(); refreshQuotes(); } });
-refresh().then(refreshQuotes); loadBrokers();
+refresh().then(refreshQuotes); loadBrokers(); refreshFills();
+setInterval(() => { if(!document.hidden) refreshFills(); },20000);
 setInterval(() => { if(!document.hidden) loadBrokers(); },60000);
 setInterval(() => { if(!document.hidden) refresh(); },10000);
 setInterval(() => { if(!document.hidden) { updateLiveValues(); refreshQuotes(); } },1000);

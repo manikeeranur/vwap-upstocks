@@ -14,6 +14,12 @@ async def paper_state(request: Request):
     return request.app.state.trading.snapshot(request.state.user_id)
 
 
+@router.get("/api/paper/fills")
+async def paper_fills(request: Request):
+    """Real fill prices of today's live orders, for the Overview's live P&L."""
+    return await request.app.state.trading.live_fills(request.state.user_id)
+
+
 @router.get("/api/paper/quotes")
 async def paper_quotes(request: Request):
     return await request.app.state.quotes.get()

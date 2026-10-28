@@ -9,6 +9,7 @@ import asyncio
 from copy import deepcopy
 from datetime import date, timedelta
 import logging
+import time
 import uuid
 
 from .. import brokers, live, upstox
@@ -30,6 +31,7 @@ class TradingService:
         self._task = None
         self._skipped = set()   # (account, trade id) already reported as "not logged in"
         self._peak_cache = {}   # closed trade -> (peak high, peak low)
+        self._fills_cache = {}  # account -> (monotonic time, {order id: fill price})
 
     def start(self):
         if self._task is None:
@@ -133,6 +135,29 @@ class TradingService:
             if not t.get("open"):
                 self._peak_cache[key] = (t["peak_high"], t["peak_low"])
         await asyncio.gather(*(one(t) for t in trades if t.get("instrument_key") and t.get("entry_time")))
+
+    async def live_fills(self, user_id):
+        """{account: {order id: fill price}} for this person's brokers that have live orders today (cached 20 s)."""
+        today = upstox.today_ist().isoformat()
+        out = {}
+        for account, acc in self.state["accounts"].items():
+            if acc["user"] != user_id or not any(today in tid for tid in self.state["orders"].get(account, {})):
+                continue
+            hit = self._fills_cache.get(account)
+            if hit and time.monotonic() - hit[0] < 20:
+                out[account] = hit[1]
+                continue
+            creds = await asyncio.to_thread(self._credentials, account)
+            if not creds.token_valid():
+                continue
+            try:
+                fills = await brokers.order_fills(creds)
+            except Exception:
+                log.warning("Broker fills unavailable", extra={"account": account})
+                continue
+            self._fills_cache[account] = (time.monotonic(), fills)
+            out[account] = fills
+        return out
 
     def _any_live(self, preset):
         return any(acc["live"].get(preset) for acc in self.state["accounts"].values())

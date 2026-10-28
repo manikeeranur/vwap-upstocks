@@ -426,3 +426,26 @@ async def ind_account(creds: Credentials) -> dict:
         out["charges"] = {"data": None, "error": out["funds"]["error"]}
     return out
 
+
+async def order_fills(creds: Credentials) -> dict:
+    """{order id: average fill price} for today's filled orders at this broker."""
+    if creds.broker == "kite":
+        async with httpx.AsyncClient(timeout=20) as c:
+            r = await c.get(f"{KITE_API}/orders", headers=_kite_headers(creds.api_key, creds.access_token))
+        body = await _json(r, "Kite")
+        if r.status_code != 200 or body.get("status") != "success":
+            raise BrokerError(f"Kite orders: {body.get('message') or r.status_code}")
+        rows = [(o.get("order_id"), o.get("average_price"), o.get("filled_quantity")) for o in body.get("data") or []]
+    elif creds.broker == "upstox":
+        async with httpx.AsyncClient(timeout=20) as c:
+            r = await c.get(f"{UPSTOX_API}/v2/order/retrieve-all",
+                            headers={"Accept": "application/json", "Authorization": f"Bearer {creds.access_token}"})
+        body = await _json(r, "Upstox")
+        if r.status_code != 200:
+            raise BrokerError(f"Upstox orders: {r.status_code}")
+        rows = [(o.get("order_id"), o.get("average_price"), o.get("filled_quantity")) for o in body.get("data") or []]
+    else:
+        rows = [(o.get("id"), _num(o.get("traded_price")), o.get("traded_qty"))
+                for o in await _ind("GET", "/order-book", creds.access_token) or []]
+    return {str(oid): float(price) for oid, price, filled in rows if oid and price and (filled or 0) > 0}
+
