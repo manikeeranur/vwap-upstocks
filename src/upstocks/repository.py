@@ -385,7 +385,11 @@ class Repository:
     def save_broker_keys(self, user_id, broker, api_key=None, api_secret_sealed=None):
         with self.db.connect(write=True) as conn:
             conn.execute("INSERT OR IGNORE INTO broker_accounts(user_id,broker,updated_at) VALUES (?,?,?)", (user_id, broker, utc_now()))
-            if api_key is not None:
+            if api_key is not None and broker == "indmoney":
+                # INDmoney's Client ID only generates tokens; the current token stays valid when it changes.
+                conn.execute("UPDATE broker_accounts SET api_key=?,updated_at=? WHERE user_id=? AND broker=?",
+                             (api_key, utc_now(), user_id, broker))
+            elif api_key is not None:
                 # A different app key invalidates the old login; saving the same key again keeps it.
                 conn.execute("UPDATE broker_accounts SET api_key=?,access_token='',token_issued=NULL,broker_user=NULL,profile='{}',updated_at=? "
                              "WHERE user_id=? AND broker=? AND api_key<>?",
