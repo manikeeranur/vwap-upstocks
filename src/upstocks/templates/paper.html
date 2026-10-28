@@ -13,7 +13,7 @@
 .mode-badge { display:inline-flex; align-items:center; gap:7px; border:1px solid var(--border); background:var(--card); border-radius:6px; padding:6px 9px; color:var(--muted); font-size:11px; font-weight:500; white-space:nowrap; }
 .mode-badge::before,.pill::before { content:''; width:6px; height:6px; border-radius:50%; background:currentColor; flex:none; }
 .mode-badge.live { color:var(--pe); border-color:color-mix(in srgb,var(--pe) 30%,var(--border)); }
-.workspace-grid { display:grid; grid-template-columns:minmax(0,1fr) 280px; grid-template-areas:'performance performance' 'strategies controls' 'activity controls' 'help controls'; gap:24px; align-items:start; }
+.workspace-grid { display:grid; grid-template-columns:minmax(0,1fr); grid-template-areas:'performance' 'strategies' 'activity' 'help'; gap:24px; align-items:start; }
 .metrics { grid-area:performance; display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:16px; }
 .live-strip { order:9; grid-column:1/-1; display:flex; align-items:center; flex-wrap:wrap; gap:12px 28px; padding:16px 20px; border:1px solid var(--border); border-radius:11px; background:var(--card); box-shadow:var(--shadow); }
 .live-total { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; }
@@ -32,18 +32,6 @@
 .profit-line > span { font-size:10px; color:var(--muted); }
 .metric-value { display:block; font:600 30px/1.25 var(--font); letter-spacing:-1.1px; margin:16px 0 8px; overflow-wrap:anywhere; }
 .metric small { display:block; font-size:11px; color:var(--muted); }
-.session-rail { grid-area:controls; display:grid; gap:16px; position:sticky; top:88px; min-width:0; }
-body .scan-card { padding:20px; }
-.rail-title { display:flex; align-items:center; gap:9px; margin:0 0 20px; }
-.rail-title h2 { margin:0; } .rail-title svg { width:16px; height:16px; color:var(--muted); }
-.market-status { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:20px; }
-.pill { display:inline-flex; align-items:center; gap:7px; font-size:11px; font-weight:500; color:var(--muted); } .pill.open { color:var(--ok); }
-#clock { display:block; font-size:10px; color:var(--muted); margin-top:5px; }
-.scan-actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px 10px; }
-.scan-actions label { grid-column:1/-1; } .scan-actions input { width:100%; }
-.scan-actions .btn { padding:9px; }
-.scan-note { display:flex; align-items:flex-start; gap:8px; margin-top:18px; padding-top:15px; border-top:1px solid var(--border); color:var(--muted); font-size:11px; }
-.scan-note svg { width:13px; height:13px; flex:none; margin-top:2px; } .scan-note p { margin:0; }
 .connection { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:20px; padding:12px 16px; border:1px solid var(--pe); border-radius:8px; color:var(--pe); background:var(--card); }
 .strategy-region { grid-area:strategies; min-width:0; }
 .section-heading { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin:0 0 16px; }
@@ -125,17 +113,12 @@ body .strat { padding:20px; } .strat.islive { border-color:var(--pe); }
 @container(max-width:720px) { .trade-scroll { display:none; } .trade-cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(230px,100%),1fr)); gap:10px; margin-top:16px; } }
 @media(max-width:1340px) { .strategy-list { grid-template-columns:1fr; } .strategy-controls .quantity { margin-left:auto; flex-basis:auto; } }
 @media(max-width:1100px) {
-  .workspace-grid { grid-template-columns:minmax(0,1fr); grid-template-areas:'performance' 'controls' 'strategies' 'activity' 'help'; }
-  .session-rail { position:static; }
-  .scan-toolbar { display:grid; grid-template-columns:1fr 2fr; align-items:center; gap:20px; }
-  .market-status { margin-bottom:0; } .scan-actions { grid-template-columns:repeat(2,minmax(0,1fr)); align-items:end; }
-  .scan-actions label { grid-column:auto; } .metrics { gap:12px; } .metric { padding:16px; } .metric-value { font-size:26px; }
+  .metrics { gap:12px; } .metric { padding:16px; } .metric-value { font-size:26px; }
 }
 @media(max-width:640px) {
   .overview-head { flex-wrap:wrap; gap:14px; margin-bottom:24px; } .overview-actions { width:100%; justify-content:space-between; }
   .metrics { grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; } .metric-value { font-size:28px; }
   .metric-label { font-size:11px; } .metric small { font-size:10px; } .metric-unit { display:none; }
-  .scan-toolbar { grid-template-columns:1fr; gap:16px; } .scan-actions { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .strategy-controls { gap:0 16px; } .strategy-controls .quantity { margin-left:0; flex-basis:100%; }
   .strategy-controls .lots { min-height:44px; } .strategy-controls .sq { width:100%; margin:8px 0; }
   .trade-scroll { display:none; } .trade-cards { display:grid; gap:10px; margin-top:16px; }
@@ -162,27 +145,12 @@ body .strat { padding:20px; } .strat.islive { border-color:var(--pe); }
       <div class="metric"><div class="metric-heading"><span class="metric-label">Open signals</span>{{ ui_icon("activity", "metric-icon") }}</div><strong class="metric-value" id="openTrades">—</strong><small>Across all strategies</small></div>
       <div class="metric"><div class="metric-heading"><span class="metric-label">Active strategies</span>{{ ui_icon("layers", "metric-icon") }}</div><strong class="metric-value" id="activeStrats">—</strong><small id="activeCaption">Of 4 available</small></div>
     </section>
-    <aside class="session-rail" aria-label="Trading session">
-      <section class="card scan-card" aria-label="Scan controls">
-        <div class="rail-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4 7h8m4 0h4M4 17h3m4 0h9M12 4v6M7 14v6"/></svg><h2>Trading session</h2></div>
-        <div class="scan-toolbar">
-          <div class="market-status"><span class="pill" id="mkt">Checking market hours</span><span id="clock">All times in IST</span></div>
-          <div class="scan-actions">
-            <label>Lot size <input type="number" id="lotsize" min="1" step="1" inputmode="numeric" required></label>
-            <label class="replay-field">Replay date <input type="date" id="replay"></label>
-            <button class="btn ghost" id="replayBtn" type="button" disabled>Replay day</button>
-            <button class="btn primary" id="scanBtn" type="button" disabled>Scan now</button>
-          </div>
-        </div>
-        <div class="scan-note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><p id="scanInfo" role="status">Connecting to your workspace…</p></div>
-      </section>
-    </aside>
     <section class="strategy-region" aria-labelledby="strategy-heading">
-      <div class="section-heading"><h2 id="strategy-heading">Strategies</h2><div class="heading-right"><span id="refreshHint" role="status">Live prices · 1s</span><button class="btn ghost settings-btn" type="button" id="settingsBtn" aria-haspopup="dialog" aria-controls="stratDialog"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg> Paper, live &amp; lots</button></div></div>
+      <div class="section-heading"><h2 id="strategy-heading">Strategies</h2><div class="heading-right"><span id="refreshHint" role="status">Live prices · 1s</span><a class="btn ghost settings-btn" href="/session">Scan &amp; replay</a><button class="btn ghost settings-btn" type="button" id="settingsBtn" aria-haspopup="dialog" aria-controls="stratDialog"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg> Paper, live &amp; lots</button></div></div>
       <div id="strats" class="strategy-list" aria-busy="true"><div class="card loading-card">Loading strategy settings…</div></div>
     </section>
     <details class="card log-card"><summary>Execution activity</summary><pre id="log">Loading activity…</pre></details>
-    <details class="how-it-works"><summary>Execution details</summary><p>Active strategies scan every minute from 09:16 to 15:30 IST on weekdays, using completed candles. Paper mode tracks simulated trades. Each broker has its own Live switch per strategy: Upstox Live sends Upstox orders for its lots × lot size, Kite Live sends Kite orders for its lots × the Kite lot size, and INDmoney Live sends INDmoney (INDstocks) orders the same way. Orders go only to brokers you have logged in to today (see My brokers), using signals no more than 3 minutes old. Open live positions are still exited if Live is switched off. Orders require the static IP registered with each broker. The scanner continues while this app is running, even when this page is closed. Past-day replays do not place orders. Replaying today uses your current trading settings.</p></details>
+    <details class="how-it-works"><summary>Execution details</summary><p>Active strategies scan every minute from 09:16 to 15:30 IST on weekdays, using completed candles. Paper mode tracks simulated trades. Each broker has its own Live switch per strategy: Upstox Live sends Upstox orders for its lots × lot size, Kite Live sends Kite orders for its lots × the Kite lot size, and INDmoney Live sends INDmoney (INDstocks) orders the same way. Orders go only to brokers you have logged in to today (see My brokers), using signals no more than 3 minutes old. Open live positions are still exited if Live is switched off. Orders require the static IP registered with each broker. The scanner continues while this app is running, even when this page is closed. Scans and past-day replays are on the Scan &amp; replay page; replays never place orders.</p></details>
   </div>
 </main>
 <dialog id="stratDialog" class="nav-dialog strat-dialog" aria-labelledby="stratDialogTitle">
@@ -211,7 +179,6 @@ async function loadBrokers() { try { B = (await api('/api/brokers')).brokers; if
 let S = null, busy = false, saving = false, confirming = false, refreshing = false, refreshVersion = 0;
 let Q = null, quoting = false, quoteFailed = false, F = null;
 async function refreshFills() { try { F = await api('/api/paper/fills'); updateLiveValues(); } catch {} }
-$('replay').max = todayIST();
 async function api(path, body) {
   const r = await appFetch(path, body === undefined ? {} : {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
   const j = await r.json().catch(() => ({}));
@@ -326,12 +293,6 @@ function render() {
   $('pauseEntries').textContent = state.entries_paused ? 'Resume entries' : 'Pause entries';
   $('pauseEntries').disabled = saving;
   $('pauseEntries').setAttribute('aria-pressed', String(!!state.entries_paused));
-  $('mkt').className = `pill ${S.market_open ? 'open' : 'closed'}`;
-  $('mkt').textContent = S.market_open ? 'Market hours · auto scan on' : 'Outside market hours';
-  $('clock').textContent = S.now + ' IST';
-  if (document.activeElement !== $('lotsize')) $('lotsize').value = state.lot_size;
-  if (!busy) $('scanInfo').textContent = view.running ? 'Scanning market data…' : view.day ? `Last scan ${view.scanned_at} IST · ${view.day}${view.day !== todayIST() ? ' · Replay' : ''}` : 'Ready to scan.';
-  $('scanBtn').disabled = $('replayBtn').disabled = busy || saving || view.running;
   let pnl = 0, tradesCount = 0, openCount = 0;
   PRESETS.forEach(p => { const trades = view.results?.[p] || []; pnl += trades.reduce((a,t) => a + t.pnl * paperLots(p) * state.lot_size,0); tradesCount += trades.length; openCount += trades.filter(t => t.open).length; });
   $('totalPnl').textContent = view.day ? money(pnl) : '—'; $('totalPnl').className = 'metric-value' + (view.day ? (pnl >= 0 ? ' up' : ' down') : '');
@@ -363,7 +324,7 @@ function render() {
   $('log').textContent = (state.log || []).slice().reverse().join('\n') || 'No live orders yet.';
   updateLiveValues();
 }
-const editingConfig = () => S && document.activeElement?.matches('#lotsize, #strats input, #stratDialog input');
+const editingConfig = () => S && document.activeElement?.matches('#strats input, #stratDialog input');
 // Harmonic, then EMA pullback, then the rest — for the cards and the settings table.
 const shownPresets = () => { const first = ['harmonic','ema_pullback'].filter(p => PRESETS.includes(p)); return [...first, ...PRESETS.filter(p => !first.includes(p))]; };
 function renderSettings() {
@@ -416,17 +377,6 @@ async function saveConfig(body, input) {
     notifyUI(e.message,true);
   } finally { saving = false; if (S) render(); }
 }
-async function scan(day) {
-  if (busy || saving || confirming || !S) return;
-  busy = true; refreshVersion++;
-  $('scanBtn').disabled = $('replayBtn').disabled = true;
-  $('scanBtn').textContent = day ? 'Scan now' : 'Scanning…'; $('replayBtn').textContent = day ? 'Replaying…' : 'Replay day';
-  $('scanInfo').textContent = day ? `Replaying ${day}… The first request can take a minute.` : 'Scanning completed candles…';
-  try { await api(`/api/paper/scan${day ? '?day=' + encodeURIComponent(day) : ''}`,{}); notifyUI(day ? 'Replay complete.' : 'Scan complete.'); }
-  catch(e) { notifyUI(e.message,true); }
-  finally { busy = false; $('scanBtn').textContent = 'Scan now'; $('replayBtn').textContent = 'Replay day'; $('scanBtn').disabled = $('replayBtn').disabled = false; await refresh(); }
-}
-$('scanBtn').addEventListener('click',() => scan());
 $('pauseEntries').addEventListener('click', async () => {
   if (!S || saving || confirming) return;
   const paused = !S.state.entries_paused;
@@ -438,8 +388,6 @@ $('pauseEntries').addEventListener('click', async () => {
   saveConfig({entries_paused:paused, ...(!paused ? {confirm:'LIVE'} : {})});
 });
 $('retryBtn').addEventListener('click',refresh);
-$('replayBtn').addEventListener('click',() => { const input = $('replay'); if (!input.value) { notifyUI('Choose a date to replay.',true); input.focus(); return; } input.max = todayIST(); if (input.reportValidity()) scan(input.value); });
-$('lotsize').addEventListener('change',e => { if(e.target.reportValidity()) saveConfig({lot_size:Number(e.target.value)},e.target); });
 $('strats').addEventListener('click',async e => {
   const button = e.target.closest('[data-sq]'); if(!button || busy || saving || confirming) return;
   const p = button.dataset.sq, broker = button.dataset.broker, positions = openLive(account(broker)?.id,p);

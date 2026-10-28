@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>upstocks — scan &amp; replay</title>
+{% from "_icons.html" import ui_icon %}
+{% include "_style.html" %}
+<style>
+  /* Session toolbar */
+  body .toolbar { display:flex; align-items:center; flex-wrap:wrap; gap:16px 24px; padding:14px 18px; margin-bottom:20px; }
+  .status { display:flex; align-items:center; gap:10px; min-width:0; padding-right:24px; border-right:1px solid var(--border); }
+  .status-dot { width:8px; height:8px; border-radius:50%; background:var(--muted); flex:none; }
+  .status.open .status-dot { background:var(--ok); box-shadow:0 0 0 4px color-mix(in srgb,var(--ok) 18%,transparent); }
+  .status b { display:block; font-size:12px; font-weight:600; } .status small { display:block; font-size:11px; color:var(--muted); margin-top:1px; }
+  .field { display:flex; align-items:center; gap:8px; margin:0; font-size:11px; color:var(--muted); font-weight:500; text-transform:none; letter-spacing:0; }
+  .field input { min-height:34px; padding:5px 10px; font-size:13px; }
+  .field #lotsize { width:72px; text-align:center; } .field #replay { width:150px; }
+  .toolbar-actions { display:flex; gap:8px; margin-left:auto; } .toolbar-actions .btn { min-height:34px; padding:6px 14px; }
+  .last-scan { flex-basis:100%; display:flex; align-items:center; gap:7px; font-size:11px; color:var(--muted); padding-top:12px; border-top:1px solid var(--border); }
+  .last-scan svg { width:13px; height:13px; }
+  @media (max-width:900px) { .status { border:0; padding:0; flex-basis:100%; } .toolbar-actions { margin-left:0; } }
+
+  /* Summary */
+  .kpis { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:16px; margin-bottom:20px; }
+  .kpi { padding:18px 20px; border:1px solid var(--border); border-radius:11px; background:var(--card); box-shadow:var(--shadow); }
+  .kpi span { display:block; font-size:12px; color:var(--muted); font-weight:500; }
+  .kpi b { display:block; margin-top:10px; font:600 26px/1.2 var(--font); letter-spacing:-.8px; font-variant-numeric:tabular-nums; }
+  .kpi small { display:block; margin-top:6px; font-size:11px; color:var(--muted); }
+  .kpi.net { background:var(--accent-soft); border-color:color-mix(in srgb,var(--accent) 22%,var(--border)); } .kpi.net span { color:var(--accent); }
+  @media (max-width:900px) { .kpis { grid-template-columns:1fr 1fr; } }
+
+  /* Trades table */
+  body .result-card { padding:0; overflow:hidden; }
+  .result-head { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:16px 20px; border-bottom:1px solid var(--border); }
+  .result-head h2 { margin:0; font-size:14px; } .result-head span { font-size:12px; color:var(--muted); }
+  .tbl-wrap { overflow:auto; }
+  .trades th:first-child, .trades td:first-child { padding-left:18px; } .trades th:last-child, .trades td:last-child { padding-right:18px; }
+  .trades { width:100%; border-collapse:collapse; font-size:12px; font-variant-numeric:tabular-nums; }
+  .trades th { position:sticky; top:0; z-index:1; background:var(--surface); text-align:left; font-size:10px; font-weight:600; letter-spacing:.7px; text-transform:uppercase; color:var(--muted); padding:10px 9px; border-bottom:1px solid var(--border); white-space:nowrap; }
+  .trades td { text-align:left; padding:10px 9px; border-bottom:1px solid var(--border); white-space:nowrap; vertical-align:middle; }
+  .trades .num { text-align:right; }
+  .trades tbody tr:not(.total):hover td { background:color-mix(in srgb,var(--surface) 60%,transparent); }
+  .trades tr.first:not(:first-child) td { border-top:2px solid var(--border); }
+  .opt { font-weight:600; } .opt.CE { color:var(--ce); } .opt.PE { color:var(--pe); }
+  .badge { display:inline-block; padding:2px 7px; border-radius:999px; font-size:10px; font-weight:600; letter-spacing:.3px; background:var(--surface); color:var(--muted); border:1px solid var(--border); }
+  .badge.SL { background:color-mix(in srgb,var(--pe) 10%,var(--card)); color:var(--pe); border-color:color-mix(in srgb,var(--pe) 25%,var(--border)); }
+  .badge.TARGET { background:var(--accent-soft); color:var(--ok); border-color:color-mix(in srgb,var(--ok) 25%,var(--border)); }
+  .badge.OPEN { background:color-mix(in srgb,var(--ce) 10%,var(--card)); color:var(--ce); border-color:color-mix(in srgb,var(--ce) 25%,var(--border)); }
+  .at { display:block; font-size:10px; color:var(--muted); margin-top:2px; }
+  .trades tr.total td { background:var(--surface); font-weight:600; border-bottom:0; padding-top:13px; padding-bottom:13px; }
+  .err-cell { color:var(--pe); font-size:11px; white-space:normal; }
+  .empty { padding:40px 20px; text-align:center; color:var(--muted); font-size:13px; }
+  .foot-note { padding:12px 20px; font-size:11px; color:var(--muted); border-top:1px solid var(--border); }
+</style>
+</head>
+<body>
+{% set active = "session" %}{% include "_nav.html" %}
+<main id="main" tabindex="-1">
+  <header class="page-heading"><div><h1>Scan &amp; replay</h1><p class="sub">Scan today's completed candles, or replay a past day. Replays never place orders.</p></div><div class="heading-actions"><a class="btn ghost" href="/paper">Open Overview {{ ui_icon("arrow") }}</a></div></header>
+
+  <section class="card toolbar" aria-label="Trading session">
+    <div class="status" id="status"><span class="status-dot" aria-hidden="true"></span><div><b id="mkt">Checking market hours</b><small id="clock">All times in IST</small></div></div>
+    <label class="field">Lot size <input type="number" id="lotsize" min="1" step="1" inputmode="numeric" required></label>
+    <label class="field">Replay date <input type="date" id="replay"></label>
+    <div class="toolbar-actions">
+      <button class="btn ghost" id="replayBtn" type="button" disabled>Replay day</button>
+      <button class="btn primary" id="scanBtn" type="button" disabled>Scan now</button>
+    </div>
+    <p class="last-scan" id="scanInfo" role="status"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span>Connecting…</span></p>
+  </section>
+
+  <div class="kpis" id="kpis" hidden>
+    <div class="kpi"><span>Gross P&amp;L</span><b id="grossPnl">—</b><small>Before charges</small></div>
+    <div class="kpi"><span>Charges</span><b class="down" id="chargesTotal">—</b><small>Estimated · brokerage, STT, GST, NSE</small></div>
+    <div class="kpi net"><span>Net P&amp;L</span><b id="netPnl">—</b><small>After charges</small></div>
+    <div class="kpi"><span>Trades</span><b id="tradeCount">—</b><small id="winRate">—</small></div>
+  </div>
+
+  <section class="card result-card" aria-labelledby="result-title">
+    <div class="result-head"><h2 id="result-title">Trades</h2><span id="resultDay">—</span></div>
+    <div class="tbl-wrap"><table class="trades">
+      <thead><tr><th>Strategy</th><th>Option</th><th>Entry</th><th>Exit</th><th>Status</th><th class="num">Max profit</th><th class="num">Max loss</th><th class="num">P&amp;L</th><th class="num">Charges</th><th class="num">Net</th></tr></thead>
+      <tbody id="results"><tr><td colspan="10" class="empty">Loading…</td></tr></tbody>
+    </table></div>
+    <p class="foot-note">P&amp;L uses the same quantity as the Overview (lots × lot size). Max profit / max loss are the P&amp;L at the option's highest / lowest price between entry and exit.</p>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const LABELS = { ...{{ labels | tojson }}, ema25_vwap: "VWAP + EMA25", ema_pullback: "EMA pullback", smc_ema_combo: "SMC + EMA (1/day)" }, PRESETS = {{ presets | tojson }};
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt = n => Number(n || 0).toFixed(2);
+const money = n => `${n < 0 ? '−' : ''}₹${Math.abs(Math.round(n)).toLocaleString('en-IN')}`;
+const ampm = s => { if (!s) return '—'; const [h,m] = s.split(':').map(Number); return `${h % 12 || 12}:${String(m).padStart(2,'0')} ${h >= 12 ? 'PM' : 'AM'}`; };
+const todayIST = () => { const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date()).map(v => [v.type,v.value])); return `${p.year}-${p.month}-${p.day}`; };
+// Same formula as the Strategy backtest page (calcCharges): brokerage, STT, NSE, clearing, GST, SEBI, stamp.
+function charges(entry, exit, qty) {
+  const turnover = (entry + exit) * qty, brokerage = 40;
+  const stt = exit * qty * 0.000625, exchange = turnover * 0.00053, clearing = turnover * 0.00003;
+  const gst = (brokerage + exchange + clearing) * 0.18, sebi = turnover * 0.000001, stamp = entry * qty * 0.00003;
+  return brokerage + stt + exchange + clearing + gst + sebi + stamp;
+}
+// Harmonic, then EMA pullback, then the rest — the Overview's order.
+const shownPresets = () => { const first = ['harmonic','ema_pullback'].filter(p => PRESETS.includes(p)); return [...first, ...PRESETS.filter(p => !first.includes(p))]; };
+// Same quantity as the Overview: the largest lots among live brokers for that strategy, else the Upstox lots.
+const paperLots = p => { const a = Object.values(S.state.accounts || {}), on = a.filter(x => x.live[p]); return on.length ? Math.max(...on.map(x => x.lots[p])) : a.find(x => x.broker === 'upstox')?.lots[p] || 1; };
+const signed = v => `<span class="${v >= 0 ? 'up' : 'down'}">${money(v)}</span>`;
+const peak = (price, t, qty) => price == null ? '<span class="muted">—</span>' : `${signed((price - t.entry) * qty)}<span class="at">@ ₹${fmt(price)}</span>`;
+let S = null, busy = false;
+$('replay').max = todayIST();
+async function api(path, body) {
+  const r = await appFetch(path, body === undefined ? {} : {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(typeof j.detail === 'string' ? j.detail : `Request failed (${r.status}). Please try again.`);
+  return j;
+}
+const info = text => { $('scanInfo').querySelector('span').textContent = text; };
+function render() {
+  const {state, view} = S, replay = view.day && view.day !== todayIST();
+  $('status').classList.toggle('open', !!S.market_open);
+  $('mkt').textContent = S.market_open ? 'Market open · auto scan on' : 'Market closed';
+  $('clock').textContent = S.now + ' IST';
+  if (document.activeElement !== $('lotsize')) $('lotsize').value = state.lot_size;
+  if (!busy) info(view.running ? 'Scanning market data…' : view.day ? `Last scan ${view.scanned_at} IST · ${view.day}${replay ? ' · Replay' : ''}` : 'Ready to scan.');
+  $('scanBtn').disabled = $('replayBtn').disabled = busy || view.running;
+  $('resultDay').textContent = view.day ? `${view.day}${replay ? ' · Replay' : ' · Today'} · scanned ${view.scanned_at} IST` : 'No scans yet';
+
+  let gross = 0, fees = 0, count = 0, won = 0;
+  const rows = [];
+  for (const p of shownPresets()) {
+    const trades = view.results?.[p] || [], err = view.errors?.[p];
+    if (!trades.length && !err) continue;
+    const qty = paperLots(p) * state.lot_size, name = `<b>${esc(LABELS[p] || p)}</b>`;
+    if (err && !trades.length) { rows.push(`<tr class="first"><td>${name}</td><td colspan="9" class="err-cell">${esc(err)}</td></tr>`); continue; }
+    trades.forEach((t, i) => {
+      const st = t.open ? 'OPEN' : t.status, pnl = t.pnl * qty, fee = charges(t.entry, t.exit, qty);
+      gross += pnl; fees += fee; count++; if (pnl - fee > 0) won++;
+      rows.push(`<tr class="${i ? '' : 'first'}"><td>${i ? '' : name}</td>
+        <td><span class="opt ${esc(t.type)}">${esc(t.symbol)}</span></td>
+        <td>${ampm(t.entry_time)} · ₹${fmt(t.entry)}</td>
+        <td>${t.open ? '<span class="muted">open</span>' : `${ampm(t.exit_time)} · ₹${fmt(t.exit)}`}</td>
+        <td><span class="badge ${esc(st)}">${esc(st === 'TIME_EXIT' ? 'TIME EXIT' : st)}</span></td>
+        <td class="num">${peak(t.peak_high, t, qty)}</td><td class="num">${peak(t.peak_low, t, qty)}</td>
+        <td class="num">${signed(pnl)}</td><td class="num down">${money(-fee)}</td><td class="num"><b>${signed(pnl - fee)}</b></td></tr>`);
+    });
+  }
+  if (count) rows.push(`<tr class="total"><td colspan="7">Total · ${count} ${count === 1 ? 'trade' : 'trades'}</td><td class="num">${signed(gross)}</td><td class="num down">${money(-fees)}</td><td class="num">${signed(gross - fees)}</td></tr>`);
+  $('results').innerHTML = rows.join('') || '<tr><td colspan="10" class="empty">No scan results yet. Scan now or replay a day.</td></tr>';
+
+  $('kpis').hidden = !count;
+  const paint = (id, v) => { $(id).textContent = money(v); $(id).className = v >= 0 ? 'up' : 'down'; };
+  paint('grossPnl', gross); $('chargesTotal').textContent = money(-fees); paint('netPnl', gross - fees);
+  $('tradeCount').textContent = count;
+  $('winRate').textContent = count ? `${won} won · ${count - won} lost · ${Math.round(won / count * 100)}% win rate` : '—';
+}
+async function load() {
+  if (busy) return;
+  try { S = await api('/api/paper'); render(); } catch (e) { info('Unable to update. ' + e.message); }
+}
+async function scan(day) {
+  if (busy || !S) return;
+  busy = true; $('scanBtn').disabled = $('replayBtn').disabled = true;
+  $('scanBtn').textContent = day ? 'Scan now' : 'Scanning…'; $('replayBtn').textContent = day ? 'Replaying…' : 'Replay day';
+  info(day ? `Replaying ${day}… The first request can take a minute.` : 'Scanning completed candles…');
+  try { await api(`/api/paper/scan${day ? '?day=' + encodeURIComponent(day) : ''}`, {}); notifyUI(day ? 'Replay complete.' : 'Scan complete.'); }
+  catch (e) { notifyUI(e.message, true); }
+  finally { busy = false; $('scanBtn').textContent = 'Scan now'; $('replayBtn').textContent = 'Replay day'; await load(); }
+}
+$('scanBtn').addEventListener('click', () => scan());
+$('replayBtn').addEventListener('click', () => { const input = $('replay'); if (!input.value) { notifyUI('Choose a date to replay.', true); input.focus(); return; } input.max = todayIST(); if (input.reportValidity()) scan(input.value); });
+$('lotsize').addEventListener('change', async e => {
+  if (!S || !e.target.reportValidity()) return;
+  try { const r = await api('/api/paper/config', {lot_size:Number(e.target.value), revision:S.state.revision}); S.state = r.state; notifyUI('Lot size saved.'); }
+  catch (x) { notifyUI(x.message, true); e.target.value = S.state.lot_size; }
+  render();
+});
+document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
+load();
+setInterval(() => { if (!document.hidden) load(); }, 10000);
+</script>
+</body>
+</html>
