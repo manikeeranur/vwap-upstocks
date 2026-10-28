@@ -29,6 +29,7 @@ class TradingService:
         self._config_lock = asyncio.Lock()
         self._task = None
         self._skipped = set()   # (account, trade id) already reported as "not logged in"
+        self._peak_cache = {}   # closed trade -> (peak high, peak low)
 
     def start(self):
         if self._task is None:
@@ -108,6 +109,31 @@ class TradingService:
                     if tid.startswith(preset + "|") and orders.get("buy", {}).get("order_id") and "sell" not in orders]
         return out
 
+    async def _peaks(self, day, trades):
+        """The option's highest and lowest price from entry to exit (or now, while open), from 1-minute candles.
+        Closed trades never change, so they are worked out once."""
+        async def one(t):
+            key = (day.isoformat(), t.get("id"), t.get("exit_time"), t.get("open"))
+            if not t.get("open") and key in self._peak_cache:
+                t["peak_high"], t["peak_low"] = self._peak_cache[key]
+                return
+            try:
+                expired = str(t.get("expiry") or "")[:10] < upstox.today_ist().isoformat()
+                rows = await upstox.candles(t["instrument_key"], "1m", day, day, expired)
+            except Exception:
+                log.warning("Peak candles unavailable", extra={"trade": t.get("id")})
+                return
+            end = "23:59" if t.get("open") else (t.get("exit_time") or "23:59")
+            window = [r for r in rows if t["entry_time"] <= r[0][11:16] <= end]
+            if not window:
+                return
+            hi = max([float(r[2]) for r in window] + [float(t["entry"])])
+            lo = min([float(r[3]) for r in window] + [float(t["entry"])])
+            t["peak_high"], t["peak_low"] = round(hi, 2), round(lo, 2)
+            if not t.get("open"):
+                self._peak_cache[key] = (t["peak_high"], t["peak_low"])
+        await asyncio.gather(*(one(t) for t in trades if t.get("instrument_key") and t.get("entry_time")))
+
     def _any_live(self, preset):
         return any(acc["live"].get(preset) for acc in self.state["accounts"].values())
 
@@ -138,6 +164,7 @@ class TradingService:
                     for trade in trades:
                         trade["orders"] = ({acc: deepcopy(o[trade["id"]]) for acc, o in self.state["orders"].items() if trade["id"] in o}
                                            if is_today else {})
+                    await self._peaks(day, trades)   # after orders, so it never delays them
                     results[preset] = trades
                 view = {"day": day.isoformat(), "scanned_at": f"{live.now_ist():%H:%M:%S}",
                         "results": results, "errors": errors, "running": False}

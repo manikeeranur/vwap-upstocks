@@ -117,6 +117,18 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ind.await_args.args[1:4], ("56998", 130, "BUY"))
         self.assertEqual(orders["1:indmoney"][TID]["buy"]["order_id"], "DRV-1")
 
+    async def test_peaks_are_the_high_and_low_between_entry_and_exit(self):
+        rows = [["2026-10-12T09:59:00+05:30", 0, 999, 1, 0], ["2026-10-12T10:01:00+05:30", 0, 470, 455, 0],
+                ["2026-10-12T11:00:00+05:30", 0, 636.7, 500, 0], ["2026-10-12T13:38:00+05:30", 0, 580, 560, 0],
+                ["2026-10-12T13:39:00+05:30", 0, 999, 1, 0]]
+        trade = {"id": "x", "instrument_key": "NSE_FO|1", "expiry": "2099-01-01", "entry_time": "10:01", "entry": 460,
+                 "exit_time": "13:38", "open": False}
+        with patch("upstocks.upstox.candles", new=AsyncMock(return_value=rows)) as candles:
+            await self.trading._peaks(date(2026, 10, 12), [trade])
+            await self.trading._peaks(date(2026, 10, 12), [dict(trade)])   # closed: worked out once
+        self.assertEqual((trade["peak_high"], trade["peak_low"]), (636.7, 455))
+        self.assertEqual(candles.await_count, 1)
+
     def test_indmoney_token_lasts_24_hours(self):
         creds = brokers.Credentials("indmoney", "", "", "t", "2026-10-12T08:31:00+05:30")
         self.assertTrue(creds.token_valid(datetime(2026, 10, 13, 8, 30, tzinfo=upstox.IST)))
