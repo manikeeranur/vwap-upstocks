@@ -9,6 +9,10 @@
 <style>
   main { max-width: none; padding: 20px 24px 48px; }
   .sec { margin-top: 16px; }
+  .tbl th, .tbl td { text-align: left; }
+  .tbl th.num, .tbl td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .kv.kv4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  @media (max-width: 760px) { .kv.kv4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   .broker-tabs { display:inline-flex; margin-bottom:8px; min-height:0; }
   .broker-tabs a { font-size:12px; font-weight:500; padding:6px 14px; border:1px solid transparent; border-radius:5px; color:var(--muted); text-decoration:none; }
   .broker-tabs a.on { background:var(--card); color:var(--text); border-color:var(--border); box-shadow:0 1px 3px #00000009; }
@@ -71,7 +75,7 @@
     {{ err("profile") }}
     {% set p = a.profile.data %}
     {% if p %}
-    <div class="kv">
+    <div class="kv kv4">
       <div><span>Name</span><b>{{ p.user_name or "—" }}</b></div>
       <div><span>Client ID</span><b>{{ p.user_id or "—" }}</b></div>
       <div><span>Email</span><b>{{ p.email or "—" }}</b></div>
@@ -109,13 +113,13 @@
     {% if a.positions.data is not none %}
     {% if rows %}
     <div class="tbl"><table>
-      <tr><th>Symbol</th><th>Product</th><th>Qty</th><th>Avg</th><th>LTP</th><th>Buy value</th><th>Sell value</th><th>Realised</th><th>Unrealised</th><th>P&amp;L</th></tr>
+      <tr><th>Symbol</th><th>Product</th><th class="num">Qty</th><th class="num">Avg</th><th class="num">LTP</th><th class="num">Buy value</th><th class="num">Sell value</th><th class="num">Realised</th><th class="num">Unrealised</th><th class="num">P&amp;L</th></tr>
       {% for r in rows %}
-      <tr><td><b>{{ r.trading_symbol or r.tradingsymbol }}</b> <span class="muted">{{ r.exchange }}</span></td><td>{{ r.product }}</td><td>{{ r.quantity }}</td>
-        <td>{{ money(r.average_price) }}</td><td>{{ money(r.last_price) }}</td><td>{{ money(r.buy_value) }}</td><td>{{ money(r.sell_value) }}</td>
-        <td>{{ pnl(r.realised) }}</td><td>{{ pnl(r.unrealised) }}</td><td><b>{{ pnl(r.pnl) }}</b></td></tr>
+      <tr><td><b>{{ r.trading_symbol or r.tradingsymbol }}</b> <span class="muted">{{ r.exchange }}</span></td><td>{{ r.product }}</td><td class="num">{{ r.quantity }}</td>
+        <td class="num">{{ money(r.average_price) }}</td><td class="num">{{ money(r.last_price) }}</td><td class="num">{{ money(r.buy_value) }}</td><td class="num">{{ money(r.sell_value) }}</td>
+        <td class="num">{{ pnl(r.realised) }}</td><td class="num">{{ pnl(r.unrealised) }}</td><td class="num"><b>{{ pnl(r.pnl) }}</b></td></tr>
       {% endfor %}
-      <tr><td colspan="9" class="muted">Total</td><td><b>{{ pnl(rows|sum(attribute="pnl")) }}</b></td></tr>
+      <tr><td colspan="9" class="muted">Total</td><td class="num"><b>{{ pnl(rows|sum(attribute="pnl")) }}</b></td></tr>
     </table></div>
     {% else %}<p class="muted">No positions today.</p>{% endif %}
     {% endif %}
@@ -128,14 +132,14 @@
     {% if a.holdings.data is not none %}
     {% if rows %}
     <div class="tbl"><table>
-      <tr><th>Symbol</th><th>Qty</th><th>Avg</th><th>LTP</th><th>Invested</th><th>Current</th><th>P&amp;L</th><th>Day change</th></tr>
+      <tr><th>Symbol</th><th class="num">Qty</th><th class="num">Avg</th><th class="num">LTP</th><th class="num">Invested</th><th class="num">Current</th><th class="num">P&amp;L</th><th class="num">Day change</th></tr>
       {% for r in rows %}
-      <tr><td><b>{{ r.tradingsymbol or r.trading_symbol }}</b> <span class="muted">{{ r.company_name }}</span></td><td>{{ r.quantity }}</td>
-        <td>{{ money(r.average_price) }}</td><td>{{ money(r.last_price) }}</td>
-        <td>{{ money((r.average_price or 0) * (r.quantity or 0)) }}</td><td>{{ money((r.last_price or 0) * (r.quantity or 0)) }}</td>
-        <td><b>{{ pnl(r.pnl) }}</b></td><td>{{ pnl(r.day_change) }} <span class="muted">{{ "{:+.2f}%".format(r.day_change_percentage) if r.day_change_percentage is number else "" }}</span></td></tr>
+      <tr><td><b>{{ r.tradingsymbol or r.trading_symbol }}</b> <span class="muted">{{ r.company_name }}</span></td><td class="num">{{ r.quantity }}</td>
+        <td class="num">{{ money(r.average_price) }}</td><td class="num">{{ money(r.last_price) }}</td>
+        <td class="num">{{ money((r.average_price or 0) * (r.quantity or 0)) }}</td><td class="num">{{ money((r.last_price or 0) * (r.quantity or 0)) }}</td>
+        <td class="num"><b>{{ pnl(r.pnl) }}</b></td><td class="num">{{ pnl(r.day_change) }} <span class="muted">{{ "{:+.2f}%".format(r.day_change_percentage) if r.day_change_percentage is number else "" }}</span></td></tr>
       {% endfor %}
-      <tr><td colspan="6" class="muted">Total</td><td><b>{{ pnl(rows|sum(attribute="pnl")) }}</b></td><td></td></tr>
+      <tr><td colspan="6" class="muted">Total</td><td class="num"><b>{{ pnl(rows|sum(attribute="pnl")) }}</b></td><td></td></tr>
     </table></div>
     {% else %}<p class="muted">No holdings.</p>{% endif %}
     {% endif %}
@@ -148,11 +152,11 @@
     {% if a.orders.data is not none %}
     {% if rows %}
     <div class="tbl"><table>
-      <tr><th>Time</th><th>Symbol</th><th>Side</th><th>Type</th><th>Product</th><th>Qty</th><th>Filled</th><th>Price</th><th>Trigger</th><th>Avg</th><th>Status</th><th>Message</th></tr>
+      <tr><th>Time</th><th>Symbol</th><th>Side</th><th>Type</th><th>Product</th><th class="num">Qty</th><th class="num">Filled</th><th class="num">Price</th><th class="num">Trigger</th><th class="num">Avg</th><th>Status</th><th>Message</th></tr>
       {% for r in rows|sort(attribute="order_timestamp", reverse=True) %}
       <tr><td>{{ (r.order_timestamp or "")[11:19] }}</td><td><b>{{ r.trading_symbol or r.tradingsymbol }}</b></td>
         <td class="{{ 'up' if r.transaction_type == 'BUY' else 'down' }}">{{ r.transaction_type }}</td><td>{{ r.order_type }}</td><td>{{ r.product }}</td>
-        <td>{{ r.quantity }}</td><td>{{ r.filled_quantity }}</td><td>{{ money(r.price) }}</td><td>{{ money(r.trigger_price) }}</td><td>{{ money(r.average_price) }}</td>
+        <td class="num">{{ r.quantity }}</td><td class="num">{{ r.filled_quantity }}</td><td class="num">{{ money(r.price) }}</td><td class="num">{{ money(r.trigger_price) }}</td><td class="num">{{ money(r.average_price) }}</td>
         <td><b>{{ r.status }}</b></td><td class="muted">{{ r.status_message or "" }}</td></tr>
       {% endfor %}
     </table></div>
@@ -167,11 +171,11 @@
     {% if a.trades.data is not none %}
     {% if rows %}
     <div class="tbl"><table>
-      <tr><th>Time</th><th>Symbol</th><th>Side</th><th>Qty</th><th>Price</th><th>Product</th><th>Order ID</th><th>Trade ID</th></tr>
+      <tr><th>Time</th><th>Symbol</th><th>Side</th><th class="num">Qty</th><th class="num">Price</th><th>Product</th><th>Order ID</th><th>Trade ID</th></tr>
       {% for r in rows %}
       <tr><td>{{ (r.exchange_timestamp or r.order_timestamp or "")[11:19] }}</td><td><b>{{ r.trading_symbol or r.tradingsymbol }}</b></td>
-        <td class="{{ 'up' if r.transaction_type == 'BUY' else 'down' }}">{{ r.transaction_type }}</td><td>{{ r.quantity }}</td>
-        <td>{{ money(r.average_price) }}</td><td>{{ r.product }}</td><td class="muted">{{ r.order_id }}</td><td class="muted">{{ r.trade_id }}</td></tr>
+        <td class="{{ 'up' if r.transaction_type == 'BUY' else 'down' }}">{{ r.transaction_type }}</td><td class="num">{{ r.quantity }}</td>
+        <td class="num">{{ money(r.average_price) }}</td><td>{{ r.product }}</td><td class="muted">{{ r.order_id }}</td><td class="muted">{{ r.trade_id }}</td></tr>
       {% endfor %}
     </table></div>
     {% else %}<p class="muted">No trades today.</p>{% endif %}
