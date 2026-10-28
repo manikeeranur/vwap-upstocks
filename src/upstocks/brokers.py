@@ -219,6 +219,11 @@ async def kite_account(creds: Credentials) -> dict:
         out = dict(await asyncio.gather(*(one(c, n, p) for n, p in (
             ("profile", "/user/profile"), ("funds", "/user/margins"), ("positions", "/portfolio/positions"),
             ("holdings", "/portfolio/holdings"), ("orders", "/orders"), ("trades", "/trades")))))
+    try:
+        out["charges"] = {"data": await kite_charges(creds, out["orders"]["data"]) if out["orders"]["data"] is not None else None,
+                          "error": out["orders"]["error"]}
+    except (BrokerError, httpx.HTTPError, KeyError) as exc:
+        out["charges"] = {"data": None, "error": str(exc) or "Kite charges unavailable"}
     if out["profile"]["data"]:
         p = out["profile"]["data"]
         out["profile"]["data"] = {**p, "broker": "ZERODHA", "is_active": True}
@@ -233,4 +238,37 @@ async def kite_account(creds: Credentials) -> dict:
     if out["positions"]["data"] is not None:
         out["positions"]["data"] = (out["positions"]["data"] or {}).get("net") or []
     return out
+
+
+def charge_row(order: dict, *, brokerage=0, stt=0, exchange=0, sebi=0, stamp=0, gst=0, total=0) -> dict:
+    """One executed order's charges, the same for every broker."""
+    n = lambda v: float(v or 0)
+    return {"time": str(order.get("order_timestamp") or order.get("exchange_timestamp") or "")[11:19],
+            "symbol": order.get("tradingsymbol") or order.get("trading_symbol") or "",
+            "side": order.get("transaction_type") or "", "qty": order.get("filled_quantity") or order.get("quantity") or 0,
+            "price": n(order.get("average_price")), "brokerage": n(brokerage), "stt": n(stt), "exchange": n(exchange),
+            "sebi": n(sebi), "stamp": n(stamp), "gst": n(gst), "total": n(total)}
+
+
+async def kite_charges(creds: Credentials, orders: list) -> list:
+    """Charges for today's executed Kite orders (Kite's virtual contract note)."""
+    done = [o for o in orders or [] if o.get("status") == "COMPLETE" and (o.get("filled_quantity") or 0) > 0]
+    if not done:
+        return []
+    params = [{"order_id": o["order_id"], "exchange": o["exchange"], "tradingsymbol": o["tradingsymbol"],
+               "transaction_type": o["transaction_type"], "variety": o.get("variety") or "regular",
+               "product": o["product"], "order_type": o["order_type"], "quantity": o["filled_quantity"],
+               "average_price": o["average_price"]} for o in done]
+    async with httpx.AsyncClient(timeout=20) as c:
+        r = await c.post(f"{KITE_API}/charges/orders", headers=_kite_headers(creds.api_key, creds.access_token), json=params)
+    body = await _json(r, "Kite")
+    if r.status_code != 200 or body.get("status") != "success":
+        raise BrokerError(f"Kite charges: {body.get('message') or r.status_code}")
+    rows = []
+    for o, note in zip(done, body.get("data") or []):
+        ch = note.get("charges") or {}
+        rows.append(charge_row(o, brokerage=ch.get("brokerage"), stt=ch.get("transaction_tax"),
+                               exchange=ch.get("exchange_turnover_charge"), sebi=ch.get("sebi_turnover_charge"),
+                               stamp=ch.get("stamp_duty"), gst=(ch.get("gst") or {}).get("total"), total=ch.get("total")))
+    return rows
 

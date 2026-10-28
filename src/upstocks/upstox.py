@@ -496,4 +496,29 @@ async def account() -> dict:
         except UpstoxError as e:
             return name, {"data": None, "error": str(e)}
     pairs = await asyncio.gather(*(one(n, p) for n, p in ACCOUNT_ENDPOINTS.items()))
-    return dict(pairs)
+    out = dict(pairs)
+    orders = out["orders"]["data"]
+    try:
+        out["charges"] = {"data": await charges(orders) if orders is not None else None, "error": out["orders"]["error"]}
+    except UpstoxError as e:
+        out["charges"] = {"data": None, "error": str(e)}
+    return out
+
+
+async def charges(orders: list) -> list:
+    """Charges for today's executed orders, one Upstox brokerage call per order."""
+    from .brokers import charge_row
+    rows = []
+    for o in orders or []:
+        qty = o.get("filled_quantity") or 0
+        if o.get("status") != "complete" or qty <= 0:
+            continue
+        d = ((await _get("/v2/charges/brokerage", {"instrument_token": o["instrument_token"], "quantity": qty,
+                                                   "product": o["product"], "transaction_type": o["transaction_type"],
+                                                   "price": o.get("average_price") or 0})).get("data") or {}).get("charges") or {}
+        taxes, other = d.get("taxes") or {}, d.get("other_taxes") or d.get("otherTaxes") or {}
+        rows.append(charge_row(o, brokerage=d.get("brokerage"), stt=taxes.get("stt"),
+                               exchange=(other.get("transaction") or 0) + (other.get("clearing") or 0),
+                               sebi=other.get("sebi_turnover"), stamp=taxes.get("stamp_duty"), gst=taxes.get("gst"),
+                               total=d.get("total")))
+    return rows

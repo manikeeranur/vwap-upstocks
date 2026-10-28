@@ -125,25 +125,6 @@
     {% endif %}
   </section>
 
-  <section class="sec">
-    <h2>Holdings</h2>
-    {{ err("holdings") }}
-    {% set rows = a.holdings.data or [] %}
-    {% if a.holdings.data is not none %}
-    {% if rows %}
-    <div class="tbl"><table>
-      <tr><th>Symbol</th><th class="num">Qty</th><th class="num">Avg</th><th class="num">LTP</th><th class="num">Invested</th><th class="num">Current</th><th class="num">P&amp;L</th><th class="num">Day change</th></tr>
-      {% for r in rows %}
-      <tr><td><b>{{ r.tradingsymbol or r.trading_symbol }}</b> <span class="muted">{{ r.company_name }}</span></td><td class="num">{{ r.quantity }}</td>
-        <td class="num">{{ money(r.average_price) }}</td><td class="num">{{ money(r.last_price) }}</td>
-        <td class="num">{{ money((r.average_price or 0) * (r.quantity or 0)) }}</td><td class="num">{{ money((r.last_price or 0) * (r.quantity or 0)) }}</td>
-        <td class="num"><b>{{ pnl(r.pnl) }}</b></td><td class="num">{{ pnl(r.day_change) }} <span class="muted">{{ "{:+.2f}%".format(r.day_change_percentage) if r.day_change_percentage is number else "" }}</span></td></tr>
-      {% endfor %}
-      <tr><td colspan="6" class="muted">Total</td><td class="num"><b>{{ pnl(rows|sum(attribute="pnl")) }}</b></td><td></td></tr>
-    </table></div>
-    {% else %}<p class="muted">No holdings.</p>{% endif %}
-    {% endif %}
-  </section>
 
   <section class="sec">
     <h2>Today’s orders</h2>
@@ -179,6 +160,52 @@
       {% endfor %}
     </table></div>
     {% else %}<p class="muted">No trades today.</p>{% endif %}
+    {% endif %}
+  </section>
+  <section class="sec">
+    <h2>Today’s charges</h2>
+    {{ err("charges") }}
+    {% set rows = (a.charges.data if a.charges is defined else none) or [] %}
+    {% if a.charges is defined and a.charges.data is not none %}
+    {% if rows %}
+    {% set gross = (a.positions.data or [])|sum(attribute="pnl") %}{% set total = rows|sum(attribute="total") %}
+    <div class="kv" style="margin-bottom:10px">
+      {% set v = gross %}<div><span>Gross P&amp;L</span><b class="{{ 'up' if v >= 0 else 'down' }}">{{ '+' if v >= 0 else '−' }}₹{{ "{:,.2f}".format(v|abs) }}</b></div>
+      <div><span>Total charges</span><b class="down">{{ money(total) }}</b></div>
+      {% set v = gross - total %}<div><span>Net P&amp;L</span><b class="{{ 'up' if v >= 0 else 'down' }}">{{ '+' if v >= 0 else '−' }}₹{{ "{:,.2f}".format(v|abs) }}</b></div>
+      <div><span>Executed orders</span><b>{{ rows|length }}</b></div>
+    </div>
+    <div class="tbl"><table>
+      <tr><th>Time</th><th>Symbol</th><th>Side</th><th class="num">Qty</th><th class="num">Avg</th><th class="num">Brokerage</th><th class="num">STT</th><th class="num">Exchange</th><th class="num">SEBI</th><th class="num">Stamp</th><th class="num">GST</th><th class="num">Total</th></tr>
+      {% for r in rows %}
+      <tr><td>{{ r.time }}</td><td><b>{{ r.symbol }}</b></td><td class="{{ 'up' if r.side == 'BUY' else 'down' }}">{{ r.side }}</td>
+        <td class="num">{{ r.qty }}</td><td class="num">{{ money(r.price) }}</td><td class="num">{{ money(r.brokerage) }}</td><td class="num">{{ money(r.stt) }}</td>
+        <td class="num">{{ money(r.exchange) }}</td><td class="num">{{ money(r.sebi) }}</td><td class="num">{{ money(r.stamp) }}</td><td class="num">{{ money(r.gst) }}</td><td class="num"><b>{{ money(r.total) }}</b></td></tr>
+      {% endfor %}
+      <tr><td colspan="5" class="muted">Total</td>{% for k in ["brokerage","stt","exchange","sebi","stamp","gst"] %}<td class="num">{{ money(rows|sum(attribute=k)) }}</td>{% endfor %}<td class="num"><b>{{ money(total) }}</b></td></tr>
+    </table></div>
+    <p class="muted" style="font-size:12px">Estimated by the broker for today; the contract note is final.</p>
+    {% else %}<p class="muted">No executed orders today, so no charges.</p>{% endif %}
+    {% endif %}
+  </section>
+
+  <section class="sec">
+    <h2>Holdings</h2>
+    {{ err("holdings") }}
+    {% set rows = a.holdings.data or [] %}
+    {% if a.holdings.data is not none %}
+    {% if rows %}
+    <div class="tbl"><table>
+      <tr><th>Symbol</th><th class="num">Qty</th><th class="num">Avg</th><th class="num">LTP</th><th class="num">Invested</th><th class="num">Current</th><th class="num">P&amp;L</th><th class="num">Day change</th></tr>
+      {% for r in rows %}
+      <tr><td><b>{{ r.tradingsymbol or r.trading_symbol }}</b> <span class="muted">{{ r.company_name }}</span></td><td class="num">{{ r.quantity }}</td>
+        <td class="num">{{ money(r.average_price) }}</td><td class="num">{{ money(r.last_price) }}</td>
+        <td class="num">{{ money((r.average_price or 0) * (r.quantity or 0)) }}</td><td class="num">{{ money((r.last_price or 0) * (r.quantity or 0)) }}</td>
+        <td class="num"><b>{{ pnl(r.pnl) }}</b></td><td class="num">{{ pnl(r.day_change) }} <span class="muted">{{ "{:+.2f}%".format(r.day_change_percentage) if r.day_change_percentage is number else "" }}</span></td></tr>
+      {% endfor %}
+      <tr><td colspan="6" class="muted">Total</td><td class="num"><b>{{ pnl(rows|sum(attribute="pnl")) }}</b></td><td></td></tr>
+    </table></div>
+    {% else %}<p class="muted">No holdings.</p>{% endif %}
     {% endif %}
   </section>
   {% endif %}
