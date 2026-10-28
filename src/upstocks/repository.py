@@ -387,7 +387,8 @@ class Repository:
             conn.execute("INSERT OR IGNORE INTO broker_accounts(user_id,broker,updated_at) VALUES (?,?,?)", (user_id, broker, utc_now()))
             if api_key is not None:
                 # A different app key invalidates the old login; saving the same key again keeps it.
-                conn.execute("UPDATE broker_accounts SET api_key=?,access_token='',token_issued=NULL,updated_at=? WHERE user_id=? AND broker=? AND api_key<>?",
+                conn.execute("UPDATE broker_accounts SET api_key=?,access_token='',token_issued=NULL,broker_user=NULL,profile='{}',updated_at=? "
+                             "WHERE user_id=? AND broker=? AND api_key<>?",
                              (api_key, utc_now(), user_id, broker, api_key))
             if api_secret_sealed is not None:
                 conn.execute("UPDATE broker_accounts SET api_secret=?,updated_at=? WHERE user_id=? AND broker=?",
