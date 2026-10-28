@@ -82,7 +82,7 @@
 const $ = id => document.getElementById(id);
 const LABELS = { ...{{ labels | tojson }}, ema25_vwap: "VWAP + EMA25", ema_pullback: "EMA pullback", smc_ema_combo: "SMC + EMA (1/day)" }, TODAY = "{{ today }}";
 const fmt = n => (Math.round(n * 100) / 100).toFixed(2);
-const money = n => `${n < 0 ? "−" : n > 0 ? "+" : ""}₹${Math.abs(Math.round(n)).toLocaleString("en-IN")}`;
+const money = n => `${n < 0 ? "−" : n > 0 ? "+" : ""}₹${Math.abs(n).toLocaleString("en-IN", {minimumFractionDigits:2, maximumFractionDigits:2})}`;
 const ampm = s => { if (!s) return "—"; let [h, m] = s.split(":").map(Number); const ap = h >= 12 ? "PM" : "AM"; h = h % 12 || 12; return `${h}:${String(m).padStart(2, "0")} ${ap}`; };
 const iso = d => d.toLocaleDateString("en-CA");
 let cur = new Date(TODAY); cur.setDate(1);
