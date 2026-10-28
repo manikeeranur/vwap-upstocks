@@ -56,8 +56,24 @@ body .scan-card,body .research-card { padding:20px; }
 .section-heading span { display:flex; align-items:center; gap:6px; font-size:11px; color:var(--muted); }
 .strategy-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
 .strat { container-type:inline-size; }
-.broker-live { display:flex; align-items:center; flex-wrap:wrap; gap:4px 12px; }
-.broker-live .lots { width:64px; }
+.heading-right { display:flex; align-items:center; gap:12px; } .settings-btn { min-height:32px; padding:5px 11px; }
+.mode-chip { display:inline-flex; align-items:center; font-size:11px; font-weight:500; padding:4px 9px; border-radius:999px; border:1px solid var(--border); background:var(--surface); color:var(--muted); }
+.mode-chip.on { color:var(--accent); border-color:color-mix(in srgb,var(--accent) 30%,var(--border)); }
+.mode-chip.live { color:var(--pe); border-color:color-mix(in srgb,var(--pe) 35%,var(--border)); }
+.strat-dialog { width:min(860px,calc(100% - 32px)); }
+.set-scroll { overflow:auto; max-height:calc(100dvh - 220px); }
+.set-table { width:100%; border-collapse:collapse; font-size:12px; }
+.set-table th { text-align:left; font-size:10px; letter-spacing:.8px; text-transform:uppercase; color:var(--muted); font-weight:500; padding:8px 10px; border-bottom:1px solid var(--border); white-space:nowrap; position:sticky; top:0; background:var(--card); }
+.set-table td { text-align:left; padding:10px; border-bottom:1px solid var(--border); vertical-align:middle; white-space:nowrap; }
+.set-table td b { display:block; font-size:13px; } .set-table td small { display:block; font-size:10px; color:var(--muted); white-space:normal; max-width:220px; }
+.set-cell { display:flex; align-items:center; gap:8px; } .set-cell .lots { width:58px; min-height:32px; padding:4px 8px; font-size:12px; } .set-cell span { font-size:10px; color:var(--muted); }
+@media (max-width:700px) {
+  .set-table thead { display:none; } .set-table, .set-table tbody, .set-table tr, .set-table td { display:block; width:100%; }
+  .set-table tr { padding:10px 0; border-bottom:1px solid var(--border); } .set-table td { border:0; padding:6px 0; display:flex; align-items:center; justify-content:space-between; }
+  .set-table td[data-label]::before { content:attr(data-label); font-size:11px; color:var(--muted); }
+}
+.strat-dialog .sub { margin:4px 0 0; font-size:12px; }
+.dialog-foot { display:flex; justify-content:flex-end; padding-top:16px; border-top:1px solid var(--border); }
 body .strat { padding:20px; } .strat.islive { border-color:var(--pe); }
 .strategy-top { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
 .strategy-title { display:flex; align-items:center; gap:10px; min-width:0; }
@@ -165,13 +181,18 @@ body .strat { padding:20px; } .strat.islive { border-color:var(--pe); }
       </section>
     </aside>
     <section class="strategy-region" aria-labelledby="strategy-heading">
-      <div class="section-heading"><h2 id="strategy-heading">Strategies</h2><span id="refreshHint" role="status">Live prices · 1s</span></div>
+      <div class="section-heading"><h2 id="strategy-heading">Strategies</h2><div class="heading-right"><span id="refreshHint" role="status">Live prices · 1s</span><button class="btn ghost settings-btn" type="button" id="settingsBtn" aria-haspopup="dialog" aria-controls="stratDialog"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg> Paper, live &amp; lots</button></div></div>
       <div id="strats" class="strategy-list" aria-busy="true"><div class="card loading-card">Loading strategy settings…</div></div>
     </section>
     <details class="card log-card"><summary>Execution activity</summary><pre id="log">Loading activity…</pre></details>
     <details class="how-it-works"><summary>Execution details</summary><p>Active strategies scan every minute from 09:16 to 15:30 IST on weekdays, using completed candles. Paper mode tracks simulated trades. Each broker has its own Live switch per strategy: Upstox Live sends Upstox orders for its lots × lot size, Kite Live sends Kite orders for its lots × the Kite lot size, and INDmoney Live sends INDmoney (INDstocks) orders the same way. Orders go only to brokers you have logged in to today (see My brokers), using signals no more than 3 minutes old. Open live positions are still exited if Live is switched off. Orders require the static IP registered with each broker. The scanner continues while this app is running, even when this page is closed. Past-day replays do not place orders. Replaying today uses your current trading settings.</p></details>
   </div>
 </main>
+<dialog id="stratDialog" class="nav-dialog strat-dialog" aria-labelledby="stratDialogTitle">
+  <div class="dialog-head"><div><h2 id="stratDialogTitle">Strategy settings</h2><p class="sub" id="stratDialogSub">Paper, live orders and lots for every strategy</p></div><button type="button" class="icon-btn" id="stratDialogClose" aria-label="Close settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6"/></svg></button></div>
+  <div id="stratDialogBody"></div>
+  <div class="dialog-foot"><button class="btn primary" type="button" id="stratDialogDone">Done</button></div>
+</dialog>
 <script>
 const $ = id => document.getElementById(id);
 const LABELS = { ...{{ labels | tojson }}, ema25_vwap: "VWAP + EMA25", ema_pullback: "EMA pullback", smc_ema_combo: "SMC + EMA (1/day)" }, PRESETS = {{ presets | tojson }};
@@ -325,7 +346,7 @@ function render() {
   $('pnlCaption').textContent = errorCount ? `Incomplete scan · ${errorCount} ${errorCount === 1 ? 'error' : 'errors'}` : 'Simulated · before charges';
   if (!$('strats').contains(document.activeElement)) {
     // Harmonic, then EMA pullback, then the rest; each card keeps its own icon (icons follow PRESETS order).
-    const FIRST = ['harmonic','ema_pullback'], shown = [...FIRST.filter(p => PRESETS.includes(p)), ...PRESETS.filter(p => !FIRST.includes(p))];
+    const shown = shownPresets();
     $('strats').innerHTML = shown.map(p => { const index = PRESETS.indexOf(p);
       const cfg = state.config[p], trades = view.results?.[p] || [], err = view.errors?.[p] || view.errors?.scan;
       const qty = paperLots(p) * state.lot_size, live = isLive(p), pts = trades.reduce((a,t) => a + t.pnl,0), open = trades.filter(t => t.open).length;
@@ -335,11 +356,9 @@ function render() {
       return `<section class="card strat ${live ? 'islive' : ''}" aria-label="${esc(LABELS[p])}">
         <div class="strategy-top"><div class="strategy-title"><span class="strategy-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="${STRATEGY_ICONS[index]}"/></svg></span><div><h3>${esc(LABELS[p])}</h3><p>${DESCRIPTIONS[p]}</p></div></div><div class="strategy-pnl"><span class="pnl-label">P&amp;L</span><b data-strategy-pnl="${p}" class="${pts >= 0 ? 'up' : 'down'}">${view.day ? money(pts * qty) : '—'}</b><small>${trades.length} trades${open ? ` · ${open} open` : ''}</small></div></div>
         <div class="strategy-controls">
-          <label class="check tog"><input type="checkbox" role="switch" aria-label="Paper scanning for ${esc(LABELS[p])}" data-on="${p}" ${cfg.on ? 'checked' : ''}><span class="sw"></span>Paper</label>
-          ${accounts().map(a => { const n = BROKER_NAMES[a.broker], pos = openLive(a.id,p), off = B && a.live[p] && !B[a.broker]?.logged_in;
-            return `<div class="broker-live"><label class="check tog livechk"><input type="checkbox" role="switch" aria-label="${n} live orders for ${esc(LABELS[p])}" data-live="${p}" data-broker="${a.broker}" ${a.live[p] ? 'checked' : ''}><span class="sw"></span>${n} Live${off ? ' <span class="err">· not logged in</span>' : ''}</label>
-            <label class="check">Lots <input type="number" class="lots" aria-label="${n} lots for ${esc(LABELS[p])}" data-lots="${p}" data-broker="${a.broker}" min="1" step="1" inputmode="numeric" value="${a.lots[p]}" required></label>
-            ${pos ? `<button class="btn ghost sq" type="button" data-sq="${p}" data-broker="${a.broker}">Square off ${pos}</button>` : ''}</div>`; }).join('')}
+          <span class="mode-chip ${cfg.on ? 'on' : ''}">Paper ${cfg.on ? 'on' : 'off'}</span>
+          ${accounts().filter(a => a.live[p]).map(a => `<span class="mode-chip live">${BROKER_NAMES[a.broker]} Live · ${a.lots[p]} ${a.lots[p] === 1 ? 'lot' : 'lots'}${B && !B[a.broker]?.logged_in ? ' · not logged in' : ''}</span>`).join('') || '<span class="mode-chip">Live off</span>'}
+          ${accounts().map(a => { const pos = openLive(a.id,p); return pos ? `<button class="btn ghost sq" type="button" data-sq="${p}" data-broker="${a.broker}">Square off ${pos} · ${BROKER_NAMES[a.broker]}</button>` : ''; }).join('')}
         </div>
         ${err ? `<p class="strategy-error" role="status">${esc(err)}</p>` : ''}
         ${trades.length ? `<div class="scroll trade-scroll" tabindex="0" role="region" aria-label="${esc(LABELS[p])} trades; scroll for more columns"><table><thead><tr><th>#</th><th>Entry</th><th>Option</th><th>Entry ₹</th><th>SL</th><th>Target</th><th>Max profit</th><th>Max loss</th><th>Status</th><th>Exit</th><th>Exit / LTP</th><th>P&amp;L pts</th><th>P&amp;L ₹</th><th>Live BUY</th><th>Live SELL</th></tr></thead><tbody>${rows}</tbody></table></div><div class="trade-cards">${trades.map(t => tradeCard(t,qty)).join('')}</div>` : `<div class="empty-state"><span class="empty-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/></svg></span><div><b>${!cfg.on && !live ? 'Strategy paused' : err ? 'Market data unavailable' : 'Awaiting signal'}</b><p>${!cfg.on && !live ? 'Enable Paper to start tracking signals.' : err ? 'Check the message above and try scanning again.' : view.day ? `No trades for ${esc(view.day)}.` : ''}</p></div></div>`}
@@ -347,10 +366,30 @@ function render() {
     }).join('');
   }
   $('strats').setAttribute('aria-busy','false');
+  renderSettings();
   $('log').textContent = (state.log || []).slice().reverse().join('\n') || 'No live orders yet.';
   updateLiveValues();
 }
-const editingConfig = () => S && document.activeElement?.matches('#lotsize, #strats input');
+const editingConfig = () => S && document.activeElement?.matches('#lotsize, #strats input, #stratDialog input');
+// Harmonic, then EMA pullback, then the rest — for the cards and the settings table.
+const shownPresets = () => { const first = ['harmonic','ema_pullback'].filter(p => PRESETS.includes(p)); return [...first, ...PRESETS.filter(p => !first.includes(p))]; };
+function renderSettings() {
+  if (!S || !$('stratDialog').open) return;
+  if (document.activeElement?.matches('#stratDialog input[type=number]')) return;   // don't wipe what is being typed
+  const accs = accounts();
+  $('stratDialogSub').textContent = `Paper, live orders and lots for every strategy · lot size ${S.state.lot_size}`;
+  const head = accs.map(a => `<th>${BROKER_NAMES[a.broker]} Live${B && !B[a.broker]?.logged_in ? ' <span class="err">· not logged in</span>' : ''}</th>`).join('');
+  const rows = shownPresets().map(p => {
+    const cfg = S.state.config[p];
+    return `<tr><td><b>${esc(LABELS[p])}</b><small>${DESCRIPTIONS[p]}</small></td>
+      <td data-label="Paper"><label class="check tog"><input type="checkbox" role="switch" aria-label="Paper scanning for ${esc(LABELS[p])}" data-on="${p}" ${cfg.on ? 'checked' : ''}><span class="sw"></span></label></td>
+      ${accs.map(a => { const n = BROKER_NAMES[a.broker];
+        return `<td data-label="${n} Live"><div class="set-cell"><label class="check tog livechk"><input type="checkbox" role="switch" aria-label="${n} live orders for ${esc(LABELS[p])}" data-live="${p}" data-broker="${a.broker}" ${a.live[p] ? 'checked' : ''}><span class="sw"></span></label>
+          <input type="number" class="lots" aria-label="${n} lots for ${esc(LABELS[p])}" title="Lots" data-lots="${p}" data-broker="${a.broker}" min="1" step="1" inputmode="numeric" value="${a.lots[p]}" required><span>lots</span></div></td>`; }).join('')}</tr>`;
+  }).join('');
+  $('stratDialogBody').innerHTML = `<div class="set-scroll"><table class="set-table"><thead><tr><th>Strategy</th><th>Paper</th>${head}</tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
 async function refresh() {
   if (refreshing || busy || saving || confirming || editingConfig()) return;
   refreshing = true; const version = refreshVersion;
@@ -420,7 +459,7 @@ $('strats').addEventListener('click',async e => {
   catch(err) { notifyUI(err.message,true); }
   finally { saving = false; button.disabled = false; await refresh(); }
 });
-$('strats').addEventListener('change',async e => {
+async function onConfigChange(e) {
   const input = e.target, {on,lots,live:lv,broker} = input.dataset;
   if(lv) {
     const enabled = input.checked, acc = account(broker), cfg = {live:!!acc?.live[lv], lots:acc?.lots[lv] || 1};
@@ -434,7 +473,17 @@ $('strats').addEventListener('change',async e => {
     saveConfig({preset:lv,broker,live:enabled,...(enabled ? {confirm:'LIVE'} : {})},input);
   } else if(on) saveConfig({preset:on,on:input.checked},input);
   else if(lots && input.reportValidity()) saveConfig({preset:lots,broker,lots:Number(input.value)},input);
+}
+$('strats').addEventListener('change',onConfigChange);
+$('stratDialogBody').addEventListener('change',onConfigChange);
+$('stratDialogBody').addEventListener('focusout',() => setTimeout(renderSettings,0));
+for (const id of ['stratDialogClose','stratDialogDone']) $(id).addEventListener('click',() => $('stratDialog').close());
+$('stratDialog').addEventListener('click',e => {   // a click on the backdrop, outside the box, closes it
+  if (e.target !== $('stratDialog')) return;
+  const r = $('stratDialog').getBoundingClientRect();
+  if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) $('stratDialog').close();
 });
+$('settingsBtn').addEventListener('click',() => { $('stratDialog').showModal(); renderSettings(); });
 $('strats').addEventListener('focusout',() => { setTimeout(() => { if(S && !saving && !confirming && !$('strats').contains(document.activeElement)) render(); },0); });
 document.addEventListener('visibilitychange',() => { if(!document.hidden) { refresh(); refreshQuotes(); } });
 refresh().then(refreshQuotes); loadBrokers(); refreshFills();
