@@ -69,20 +69,27 @@
     headerAccount.replaceChildren(pic); headerAccount.classList.add('has-profile'); headerAccount.title = name;
   }).catch(() => {});
   // Show every date as DD-MM-YYYY (data and inputs keep YYYY-MM-DD; only the text people read changes).
-  const ISO_DATE = /\b(\d{4})-(\d{2})-(\d{2})\b/g, HAS_DATE = /\b\d{4}-\d{2}-\d{2}\b/, SKIP = new Set(['SCRIPT', 'STYLE', 'TEXTAREA', 'INPUT', 'CODE', 'PRE']);
+  const ISO_DATE = /\b(\d{4})-(\d{2})-(\d{2})\b/g, HAS_DATE = /\b\d{4}-\d{2}-\d{2}\b/, SKIP = new Set(['SCRIPT', 'STYLE', 'TEXTAREA', 'INPUT']);
+  const DATE_ATTRS = ['title', 'aria-label', 'placeholder'];
+  const showAttrDates = el => { for (const a of DATE_ATTRS) { const v = el.getAttribute(a); if (v && HAS_DATE.test(v)) el.setAttribute(a, v.replace(ISO_DATE, '$3-$2-$1')); } };
   const showDates = root => {
+    if (!root) return;
     const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, { acceptNode: n =>
       n.parentElement && !SKIP.has(n.parentElement.tagName) && HAS_DATE.test(n.nodeValue) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT });
     const nodes = []; while (walk.nextNode()) nodes.push(walk.currentNode);
     for (const n of nodes) n.nodeValue = n.nodeValue.replace(ISO_DATE, '$3-$2-$1');
+    if (root.nodeType !== 1) return;
+    showAttrDates(root);
+    root.querySelectorAll('[title], [aria-label], [placeholder]').forEach(showAttrDates);
   };
   window.showDates = showDates;
   document.addEventListener('DOMContentLoaded', () => {
     showDates(document.body);
     new MutationObserver(records => { for (const r of records) {
       if (r.type === 'characterData') showDates(r.target.parentNode || document.body);
+      else if (r.type === 'attributes') showAttrDates(r.target);
       else r.addedNodes.forEach(n => showDates(n.nodeType === 3 ? n.parentNode : n));
-    } }).observe(document.body, { childList: true, subtree: true, characterData: true });
+    } }).observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: DATE_ATTRS });
   });
   const dateLabel = document.getElementById('workspace-date');
   const dateFormat = new Intl.DateTimeFormat('en-IN', {timeZone:'Asia/Kolkata',day:'2-digit',month:'short',year:'numeric'});
