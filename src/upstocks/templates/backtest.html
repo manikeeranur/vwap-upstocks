@@ -172,7 +172,7 @@ function render() {
         <td class="res ${r.result}">${r.result === "SL" ? "Stop-loss" : r.result === "TARGET" ? "Target hit" : "No hit"}${r.both ? '<div class="small">SL & target same candle</div>' : ""}</td>
         <td>${r.exitT.slice(5)}</td><td>${fmt(r.exit)}</td>
         <td class="${cls}">${p >= 0 ? "+" : ""}${fmt(p)}</td><td class="${cls}">${pct >= 0 ? "+" : ""}${fmt(pct)}%</td>
-        <td class="${cls}">${p >= 0 ? "+" : "−"}₹${Math.abs(p * qty).toLocaleString("en-IN", { maximumFractionDigits: 0 })}</td>
+        <td class="${cls}">${p >= 0 ? "+" : "−"}₹${Math.abs(p * qty).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
         <td class="small">${fmt(r.peak)} (+${fmt(peakPct)}%)</td>`;
     }
     return `<tr>
@@ -191,7 +191,7 @@ function render() {
     <div><span class="small">No hit</span><b>${nO}</b></div>
     <div><span class="small">Win rate</span><b>${nT + nSL ? fmt(nT / (nT + nSL) * 100) + "%" : "—"}</b></div>
     <div><span class="small">Total pts</span><b class="${pts >= 0 ? "up" : "down"}">${pts >= 0 ? "+" : ""}${fmt(pts)}</b></div>
-    <div><span class="small">Total ₹ (qty ${qty})</span><b class="${rupees >= 0 ? "up" : "down"}">${rupees >= 0 ? "+" : "−"}₹${Math.abs(rupees).toLocaleString("en-IN", { maximumFractionDigits: 0 })}</b></div>
+    <div><span class="small">Total ₹ (qty ${qty})</span><b class="${rupees >= 0 ? "up" : "down"}">${rupees >= 0 ? "+" : "−"}₹${Math.abs(rupees).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
   </div>` : "";
 }
 

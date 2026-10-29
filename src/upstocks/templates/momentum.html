@@ -166,7 +166,7 @@
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const inr = (n, d = 0) => n == null ? '—' : '₹' + Number(n).toLocaleString('en-IN', {maximumFractionDigits: d, minimumFractionDigits: d});
+const inr = (n, d = 2) => n == null ? '—' : '₹' + Number(n).toLocaleString('en-IN', {maximumFractionDigits: d, minimumFractionDigits: d});
 const pct = (n, d = 1) => n == null ? '—' : `${n > 0 ? '+' : ''}${Number(n).toFixed(d)}%`;
 const at = (d, t) => d ? `${d} <span class="flag">${t || ''}</span>` : '—';
 const cls = n => n > 0 ? 'up' : n < 0 ? 'down' : '';

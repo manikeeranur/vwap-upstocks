@@ -135,6 +135,9 @@ async def run_day(day: date, s: Settings, spot_bars: list, prev_spot: list | Non
         res.note = f"no {s.harm_fib:g} Fib pullback signal {s.entry_start}–{s.last_entry}"
         return res
     i, side, (p1, p2) = sig
+    if s.harm_min_leg and abs(p2 - p1) < s.harm_min_leg:
+        res.note = f"leg {abs(p2 - p1):.0f} pts is under {s.harm_min_leg:g} — no harmonic trade"
+        return res
     t, spot = cs[i][0], cs[i][4]
     atm = round(spot / 50) * 50
     strike = atm - s.harm_itm if side == "CE" else atm + s.harm_itm

@@ -119,6 +119,7 @@ class Settings:
     harm_tol: float = 0.06
     harm_itm: float = 400
     harm_skip_expiry: bool = True
+    harm_min_leg: float = 0             # skip the day when the signal's leg is smaller (NIFTY points); 0 = any
     trail_start: float = 0              # 0 = no trailing stop
     trail_giveback: float = 40
     slippage: float = 0.0
@@ -179,6 +180,20 @@ PRESETS["harmonic"] = {"strategy": "harmonic", "harm_fib": 0.58, "harm_zz": 0.25
                        "sl_pct": 50, "target_pct": 150, "trail_start": 40, "trail_giveback": 40,
                        "rev_exit": True, "ep_rev_activate": 30, "time_exit": "15:00", "max_trades": 1,
                        "live": False, "strong_green": False, "stagnant_hours": 0, "breakeven_pct": 0}
+# Harmonic Optimized — the same engine, one trade a day, chosen 2026-10-29 to be profitable in BOTH Oct 2024 –
+# Sep 2025 and Oct 2025 – Sep 2026 (the original preset above lost ₹68,211 in Oct 2024 – Sep 2025).
+# 0.20 % swings, 0.60 Fib pullback within 4 % of the leg, signals 09:45–14:30, ITM-400, no expiry days;
+# SL 20 %, target 150 %, trailing after +40 % (give back 30 %), reversal exit after +30 %, 15:20 exit.
+# 1 lot (65), after charges: +₹1,21,871 and +₹1,57,995 (₹2,79,866 over the two years), max drawdown
+# ₹44,858 (exits at 15:00 / 15:15 give almost the same). No weekday or signal hour lost in both years.
+# Skipping days whose leg is under 60 NIFTY points (small swings): +₹1,22,861 and +₹1,87,671, max drawdown
+# ₹37,082 (50–70 points all improve; a previous-day-range filter only worked at one exact value, so it isn't used). Neighbouring settings were profitable in both years too. Tried and not better: deeper ITM
+# (500–800), trading expiry days, EMA-trend / FVG / strong-candle filters.
+PRESETS["harmonic_2y"] = {**PRESETS["harmonic"], "harm_fib": 0.60, "harm_zz": 0.20, "harm_tol": 0.04,
+                          "entry_start": "09:45", "last_entry": "14:30",
+                          "sl_pct": 20, "target_pct": 150, "trail_start": 40, "trail_giveback": 30,
+                          "rev_exit": True, "ep_rev_activate": 30, "time_exit": "15:20", "max_trades": 1,
+                          "harm_min_leg": 60}
 # SMC + EMA9/26 pullback as one strategy (combo.py): one trade a day — whichever signals first.
 PRESETS["smc_ema_combo"] = {"strategy": "combo"}
 KITE_OFFSETS = [0, -50, 50, -100, 100, -150, 150]

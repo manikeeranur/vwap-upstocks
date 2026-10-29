@@ -4,12 +4,12 @@ from datetime import date, datetime, timedelta
 
 from . import combo, ema_pullback, harmonic, smc, upstox, vwap
 
-PRESETS = ["frontend_live", "smc_live", "ema25_vwap", "ema_pullback", "smc_tuned", "smc_ema_combo", "harmonic"]
+PRESETS = ["frontend_live", "smc_live", "ema25_vwap", "ema_pullback", "smc_tuned", "smc_ema_combo", "harmonic", "harmonic_2y"]
 
 
 LABELS = {"frontend_live": "VWAP 9:30", "smc_live": "SMC", "ema25_vwap": "VWAP + EMA25 + SuperTrend",
           "ema_pullback": "EMA9/EMA26 pullback (Mani)", "smc_tuned": "SMC Tuned",
-          "smc_ema_combo": "SMC + EMA pullback (1 trade a day)", "harmonic": "Harmonic"}
+          "smc_ema_combo": "SMC + EMA pullback (1 trade a day)", "harmonic": "Harmonic", "harmonic_2y": "Harmonic Optimized"}
 
 
 FRESH_MIN = 3

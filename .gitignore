@@ -24,3 +24,8 @@ logs/
 *.sqlite3.lock
 live_state.json
 paper_state.json
+
+# harmonic research: downloaded prices and results
+research/harmonic/ohlc/
+research/harmonic/*.json
+research/harmonic/*.log
