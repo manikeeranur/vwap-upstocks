@@ -127,7 +127,7 @@ def build(days: list[dict], *, title: str, subtitle: str, lots: int, lot_size: i
         if smc:
             sig = c(f"{t['type']} {t.get('score', 0)}/5", dir_c) + "  " + "  ".join(
                 c(x, CONCEPT_COLOR.get(x, SLATE)) for x in t.get("concepts", [])) + (c("  +EMA✓", UP) if t.get("trend_ok") else "")
-            strike = c(f"NIFTY {exp_short(t['expiry'])} {t['strike']:.0f} {t['type']}", dir_c, 6.8) + "<br/>" + c(f"spot {t.get('spot', 0):.0f}", MUTED, 5.4)
+            strike = c(f"{(t.get('symbol') or 'NIFTY').split()[0]} {exp_short(t['expiry'])} {t['strike']:.0f} {t['type']}", dir_c, 6.8) + "<br/>" + c(f"spot {t.get('spot', 0):.0f}", MUTED, 5.4)
         else:
             sig = c(t["type"], dir_c) + "  " + c(f"VWAP {money(t['vwap'])}", SLATE)
             if t.get("ema"):

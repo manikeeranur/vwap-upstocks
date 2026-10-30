@@ -65,6 +65,8 @@ class TradingService:
             for trades in (view.get("results") or {}).values():
                 for trade in trades:
                     trade["orders"] = {a: o for a, o in (trade.get("orders") or {}).items() if a in mine}
+        state["lot_sizes"] = {p: live.lot_size(p, state["lot_size"]) for p in live.PRESETS}
+        state["paper_only"] = [p for p in live.PRESETS if live.paper_only(p)]
         return {"state": state, "view": view, "market_open": live.market_open(),
                 "now": live.now_ist().strftime("%a %d %b %H:%M:%S"), "view_revision": self.view_revision}
 
@@ -238,7 +240,7 @@ class TradingService:
                         "results": results, "errors": errors, "running": False}
                 sessions = None
                 if is_today and live.market_open():
-                    sessions = {p: {"lots": 1, "lot_size": self.state["lot_size"],
+                    sessions = {p: {"lots": 1, "lot_size": live.lot_size(p, self.state["lot_size"]),
                                     "updated": f"{live.now_ist():%Y-%m-%d %H:%M}",
                                     "trades": [{**{k: t.get(k) for k in live.KEEP}, "id": t["id"], "open": t["open"],
                                                 "live": any(o.get("buy", {}).get("order_id") for o in t["orders"].values())}
@@ -275,7 +277,7 @@ class TradingService:
 
     async def _order(self, account, preset, tid, trade, side, why):
         acc = self.state["accounts"].get(account)
-        if acc is None:
+        if acc is None or live.paper_only(preset):
             return False
         async with self._config_lock:
             if side == "BUY" and (self.state["users"].get(acc["user"], {}).get("paused") or not acc["live"].get(preset)
@@ -292,7 +294,8 @@ class TradingService:
             buy = self.state["orders"].get(account, {}).get(tid, {}).get("buy", {})
             exit_qty = buy.get("qty") if side == "SELL" and buy.get("qty") else None
             lots = acc["lots"].get(preset, 1)
-            qty = exit_qty or lots * self.state["lot_size"]
+            lot_size = live.lot_size(preset, self.state["lot_size"])
+            qty = exit_qty or lots * lot_size
             client_id, holder = await asyncio.to_thread(self._holder, account)
             record = {"at": f"{live.now_ist():%H:%M:%S}", "qty": qty, "why": why, "symbol": trade.get("symbol", ""),
                       "broker": acc["broker"], "status": "pending",
@@ -300,14 +303,14 @@ class TradingService:
                       "client_id": client_id, "holder": holder,
                       # Kept so an exit (incl. manual square-off) can find the same contract at any broker.
                       "contract": {k: trade.get(k) for k in ("expiry", "strike", "type") if trade.get(k) is not None}}
-            context = {"trade": deepcopy(trade), "account": account, "lots": lots, "lot_size": self.state["lot_size"],
+            context = {"trade": deepcopy(trade), "account": account, "lots": lots, "lot_size": lot_size,
                        "revision": self.state["revision"]}
             if not await asyncio.to_thread(self.repository.reserve_order, tid, account, preset, side, record, context):
                 return False
             self.state["orders"].setdefault(account, {}).setdefault(tid, {})[side.lower()] = record
         # No transaction spans a network request. Unknown outcomes are never retried.
         try:
-            order_id, sent_qty, symbol = await brokers.place_order(creds, trade, lots, self.state["lot_size"], side,
+            order_id, sent_qty, symbol = await brokers.place_order(creds, trade, lots, lot_size, side,
                                                                    f"upstocks{preset[:6]}", qty=exit_qty)
             if not order_id:
                 raise RuntimeError("Broker did not return an order ID")

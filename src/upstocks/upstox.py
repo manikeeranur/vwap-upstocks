@@ -32,6 +32,15 @@ log = logging.getLogger(__name__)
 
 BASE = "https://api.upstox.com"
 NIFTY = "NSE_INDEX|Nifty 50"
+# Option underlyings: Upstox index key, strike step, contract lot size (SENSEX lot is 20 since 2025).
+INDEXES = {"NIFTY": NIFTY, "SENSEX": "BSE_INDEX|SENSEX"}
+STRIKE_STEP = {"NIFTY": 50, "SENSEX": 100}
+LOT_SIZE = {"NIFTY": 65, "SENSEX": 20}
+
+
+def _ck(key: str, index: str) -> str:
+    """Cache key; NIFTY keeps its original keys."""
+    return key if index == "NIFTY" else f"{key}:{index}"
 IST = timezone(timedelta(hours=5, minutes=30))
 
 # UI label -> (expired v2 interval, live v3 unit, live v3 interval)
@@ -248,37 +257,37 @@ def today_ist() -> date:
     return datetime.now(IST).date()
 
 
-async def expired_expiries() -> list[str]:
+async def expired_expiries(index: str = "NIFTY") -> list[str]:
     async def f():
-        return (await _get("/v2/expired-instruments/expiries", {"instrument_key": NIFTY}))["data"]
-    return await _cached("expired_expiries", 3600, f)
+        return (await _get("/v2/expired-instruments/expiries", {"instrument_key": INDEXES[index]}))["data"]
+    return await _cached(_ck("expired_expiries", index), 3600, f)
 
 
-async def live_contracts() -> list[dict]:
+async def live_contracts(index: str = "NIFTY") -> list[dict]:
     async def f():
-        return (await _get("/v2/option/contract", {"instrument_key": NIFTY}))["data"]
-    return await _cached("live_contracts", 3600, f)
+        return (await _get("/v2/option/contract", {"instrument_key": INDEXES[index]}))["data"]
+    return await _cached(_ck("live_contracts", index), 3600, f)
 
 
-async def expiries() -> list[dict]:
-    """All NIFTY expiries, newest first: [{date, expired}]."""
-    exp, live = await asyncio.gather(expired_expiries(), live_contracts())
+async def expiries(index: str = "NIFTY") -> list[dict]:
+    """All expiries of the index's options (NIFTY by default), newest first: [{date, expired}]."""
+    exp, live = await asyncio.gather(expired_expiries(index), live_contracts(index))
     out = {d: True for d in exp}
     for c in live:
         out.setdefault(c["expiry"], False)
     return [{"date": d, "expired": out[d]} for d in sorted(out, reverse=True)]
 
 
-async def contracts(expiry: str) -> list[dict]:
+async def contracts(expiry: str, index: str = "NIFTY") -> list[dict]:
     """Option contracts of one expiry, sorted by strike then CE/PE."""
-    exp = set(await expired_expiries())
+    exp = set(await expired_expiries(index))
     if expiry in exp:
         async def f():
             return (await _get("/v2/expired-instruments/option/contract",
-                               {"instrument_key": NIFTY, "expiry_date": expiry}))["data"]
-        rows = await _disk_cached(f"contracts:{expiry}", f)  # expired: never changes
+                               {"instrument_key": INDEXES[index], "expiry_date": expiry}))["data"]
+        rows = await _disk_cached(_ck(f"contracts:{expiry}", index), f)  # expired: never changes
     else:
-        rows = [c for c in await live_contracts() if c["expiry"] == expiry]
+        rows = [c for c in await live_contracts(index) if c["expiry"] == expiry]
     return sorted(rows, key=lambda c: (c["strike_price"], c["instrument_type"]))
 
 

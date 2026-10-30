@@ -119,7 +119,8 @@ class Settings:
     harm_tol: float = 0.06
     harm_itm: float = 400
     harm_skip_expiry: bool = True
-    harm_min_leg: float = 0             # skip the day when the signal's leg is smaller (NIFTY points); 0 = any
+    harm_min_leg: float = 0             # skip the day when the signal's leg is smaller (index points); 0 = any
+    underlying: str = "NIFTY"           # the index whose options are traded: "NIFTY" or "SENSEX" (harmonic engine)
     trail_start: float = 0              # 0 = no trailing stop
     trail_giveback: float = 40
     slippage: float = 0.0
@@ -194,6 +195,24 @@ PRESETS["harmonic_2y"] = {**PRESETS["harmonic"], "harm_fib": 0.60, "harm_zz": 0.
                           "sl_pct": 20, "target_pct": 150, "trail_start": 40, "trail_giveback": 30,
                           "rev_exit": True, "ep_rev_activate": 30, "time_exit": "15:20", "max_trades": 1,
                           "harm_min_leg": 60}
+# SENSEX Harmonic — the Harmonic engine on SENSEX options (lot 20, 100-point strikes), one trade a day,
+# paper only. Picked 2026-10-30 from a 2-year SENSEX test (Oct 2024 – Sep 2026, after charges, each
+# strategy paying its own brokerage); run together as 3 lots of sensex_swing + 2 lots of sensex_bigleg:
+# +₹3,38,160 and +₹2,77,435 (₹6,15,596), max drawdown ₹55,428; Oct 2026 (after the test, unseen) −₹17,400.
+# Every neighbouring setting was profitable in both years too. Only 2 years of SENSEX option data exist,
+# so treat these numbers as optimistic. Tried and worse: trend / EMA / previous-close filters, cutting lots
+# after losses, monthly stops or goals, earlier reversal exit, breakeven / profit locks, time stops,
+# partial booking, fixed ₹ targets, skipping or rolling near-expiry days, exiting when SENSEX breaks the
+# Fib level.
+PRESETS["sensex_swing"] = {**PRESETS["harmonic"], "underlying": "SENSEX", "harm_fib": 0.45, "harm_zz": 0.25,
+                           "harm_tol": 0.05, "harm_itm": 200, "harm_min_leg": 200, "entry_start": "09:30",
+                           "last_entry": "10:45", "sl_pct": 20, "target_pct": 150, "trail_start": 40,
+                           "trail_giveback": 30, "time_exit": "15:20"}
+PRESETS["sensex_bigleg"] = {**PRESETS["harmonic"], "underlying": "SENSEX", "harm_fib": 0.45, "harm_zz": 0.15,
+                            "harm_tol": 0.06, "harm_itm": 200, "harm_min_leg": 400, "entry_start": "09:30",
+                            "last_entry": "11:15", "sl_pct": 20, "target_pct": 150, "trail_start": 40,
+                            "trail_giveback": 30, "time_exit": "15:20"}
+SENSEX_PRESETS = ("sensex_swing", "sensex_bigleg")
 # SMC + EMA9/26 pullback as one strategy (combo.py): one trade a day — whichever signals first.
 PRESETS["smc_ema_combo"] = {"strategy": "combo"}
 KITE_OFFSETS = [0, -50, 50, -100, 100, -150, 150]
@@ -441,8 +460,8 @@ async def span_rows(instrument_key: str, day: date, expiry: str, expired: bool) 
     return await upstox.candles(instrument_key, "1m", span_start, span_end, expired)
 
 
-async def _nearest_expiry(day: date) -> str | None:
-    for e in sorted(x["date"] for x in await upstox.expiries()):
+async def _nearest_expiry(day: date, index: str = "NIFTY") -> str | None:
+    for e in sorted(x["date"] for x in await upstox.expiries(index)):
         if e >= day.isoformat():
             return e
     return None
@@ -716,9 +735,9 @@ async def run_day(day: date, s: Settings, spot_bars: list[Bar], prev_spot: list[
     return res
 
 
-async def trading_days_and_spot(start: date, end: date) -> dict[str, list[Bar]]:
-    """NIFTY index 1-min bars per trading day in [start, end]."""
-    rows = await upstox.candles(upstox.NIFTY, "1m", start, end, expired=False)
+async def trading_days_and_spot(start: date, end: date, index: str = "NIFTY") -> dict[str, list[Bar]]:
+    """The index's 1-min bars (NIFTY by default) per trading day in [start, end]."""
+    rows = await upstox.candles(upstox.INDEXES[index], "1m", start, end, expired=False)
     days: dict[str, list[Bar]] = {}
     for r in rows:
         t = r[0][11:16]

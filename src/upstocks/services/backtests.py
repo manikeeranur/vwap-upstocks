@@ -47,7 +47,8 @@ class BacktestService:
         token = request_id.set(None)
         try:
             last = min(settings.end, upstox.today_ist())
-            allspot = await vwap.trading_days_and_spot(settings.start - timedelta(days=7) if settings.index_trend else settings.start, last)
+            allspot = await vwap.trading_days_and_spot(settings.start - timedelta(days=7) if settings.index_trend else settings.start, last,
+                                                       settings.underlying)
             keys = sorted(allspot)
             prev_spot = {day: allspot[keys[i - 1]] if i else [] for i, day in enumerate(keys)}
             spot = {day: bars for day, bars in allspot.items() if settings.start.isoformat() <= day <= last.isoformat()}

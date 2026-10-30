@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, 
 
 from . import vwap
 
-Preset = Literal["frontend_live", "smc_live", "ema25_vwap", "ema_pullback", "smc_ema_combo", "smc_tuned", "harmonic", "harmonic_2y"]
+Preset = Literal["frontend_live", "smc_live", "ema25_vwap", "ema_pullback", "smc_ema_combo", "smc_tuned", "harmonic", "harmonic_2y", "sensex_swing", "sensex_bigleg"]
 Broker = Literal["upstox", "kite", "indmoney"]
 
 
@@ -32,6 +32,8 @@ class ConfigUpdate(Input):
             raise ValueError("preset is required for strategy changes")
         if (self.live is not None or self.lots is not None) and self.broker is None:
             raise ValueError("broker is required for live and lots")
+        if self.live is True and self.preset in vwap.SENSEX_PRESETS:
+            raise ValueError("SENSEX strategies are paper only for now")
         if (self.live is True or self.entries_paused is False) and self.confirm != "LIVE":
             raise ValueError("Enabling live orders or resuming entries needs confirm: LIVE")
         if all(v is None for v in (self.on, self.live, self.lots, self.lot_size, self.entries_paused)):

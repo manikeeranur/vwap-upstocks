@@ -10,7 +10,9 @@ import uuid
 from .database import Database, utc_now
 from .observability import clean, redact, request_id
 
-PRESETS = ("frontend_live", "smc_live", "ema25_vwap", "ema_pullback", "smc_tuned", "smc_ema_combo", "harmonic", "harmonic_2y")
+PRESETS = ("frontend_live", "smc_live", "ema25_vwap", "ema_pullback", "smc_tuned", "smc_ema_combo", "harmonic", "harmonic_2y", "sensex_swing", "sensex_bigleg")
+# Lots a newly added strategy starts with (others 1): the SENSEX pair runs as 3 + 2 lots.
+DEFAULT_LOTS = {"sensex_swing": 3, "sensex_bigleg": 2}
 BROKERS = ("upstox", "kite", "indmoney")
 
 
@@ -158,7 +160,8 @@ class Repository:
             _audit(conn, "migration", "Legacy migration completed", {"sources": list(sources), "orders": len(orders)})
 
     def ensure_presets(self):
-        """Give strategies (and people) added later a settings row: paper on; every broker switch off, 1 lot.
+        """Give strategies (and people) added later a settings row: paper on; every broker switch off, 1 lot
+        (DEFAULT_LOTS for the SENSEX pair).
         Existing rows are left as they are."""
         with self.db.connect(write=True) as conn:
             for preset in PRESETS:
@@ -166,7 +169,7 @@ class Repository:
             for (uid,) in conn.execute("SELECT id FROM users").fetchall():
                 for broker in BROKERS:
                     for preset in PRESETS:
-                        conn.execute("INSERT OR IGNORE INTO broker_strategy VALUES (?,?,?,0,1)", (uid, broker, preset))
+                        conn.execute("INSERT OR IGNORE INTO broker_strategy VALUES (?,?,?,0,?)", (uid, broker, preset, DEFAULT_LOTS.get(preset, 1)))
 
     def state(self):
         """Global strategy settings plus every person's broker switches and orders."""
@@ -390,7 +393,7 @@ class Repository:
                                (username, password_hash, utc_now())).lastrowid
             for broker in BROKERS:
                 for preset in PRESETS:
-                    conn.execute("INSERT OR IGNORE INTO broker_strategy VALUES (?,?,?,0,1)", (uid, broker, preset))
+                    conn.execute("INSERT OR IGNORE INTO broker_strategy VALUES (?,?,?,0,?)", (uid, broker, preset, DEFAULT_LOTS.get(preset, 1)))
             _audit(conn, "user", "Person added", {"user": uid, "username": username}, component="application")
             return uid
 

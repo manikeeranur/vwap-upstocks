@@ -102,7 +102,7 @@ function charges(entry, exit, qty) {
   return brokerage + stt + exchange + clearing + gst + sebi + stamp;
 }
 // Harmonic, then EMA pullback, then the rest — the Overview's order.
-const shownPresets = () => { const first = ['harmonic','harmonic_2y','ema_pullback'].filter(p => PRESETS.includes(p)); return [...first, ...PRESETS.filter(p => !first.includes(p))]; };
+const shownPresets = () => { const first = ['harmonic','harmonic_2y','ema_pullback','sensex_swing','sensex_bigleg'].filter(p => PRESETS.includes(p)); return [...first, ...PRESETS.filter(p => !first.includes(p))]; };
 // Same quantity as the Overview: the largest lots among live brokers for that strategy, else the Upstox lots.
 const paperLots = p => { const a = Object.values(S.state.accounts || {}), on = a.filter(x => x.live[p]); return on.length ? Math.max(...on.map(x => x.lots[p])) : a.find(x => x.broker === 'upstox')?.lots[p] || 1; };
 const signed = v => `<span class="${v >= 0 ? 'up' : 'down'}">${money(v)}</span>`;
@@ -131,7 +131,7 @@ function render() {
   for (const p of shownPresets()) {
     const trades = view.results?.[p] || [], err = view.errors?.[p];
     if (!trades.length && !err) continue;
-    const qty = paperLots(p) * state.lot_size, name = `<b>${esc(LABELS[p] || p)}</b>`;
+    const qty = paperLots(p) * (state.lot_sizes?.[p] ?? state.lot_size), name = `<b>${esc(LABELS[p] || p)}</b>`;
     if (err && !trades.length) { rows.push(`<tr class="first"><td>${name}</td><td colspan="9" class="err-cell">${esc(err)}</td></tr>`); continue; }
     trades.forEach((t, i) => {
       const st = t.open ? 'OPEN' : t.status, pnl = t.pnl * qty, fee = charges(t.entry, t.exit, qty);

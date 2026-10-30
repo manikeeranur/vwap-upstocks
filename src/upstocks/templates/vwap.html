@@ -121,7 +121,7 @@
   {% include "_research_nav.html" %}
 
   <div class="card">
-    <div class="card-title"><h2>Backtest configuration</h2><span>NIFTY options</span></div>
+    <div class="card-title"><h2>Backtest configuration</h2><span id="underlyingTag">NIFTY options</span></div>
     <label id="savedRunsLabel" hidden style="margin-bottom:16px">Saved runs
       <select id="savedRuns" aria-label="Saved backtest runs" style="max-width:100%;width:100%"><option value="">Choose a saved run</option></select>
     </label>
@@ -130,6 +130,8 @@
         <select id="preset">
           <option value="harmonic">Harmonic</option>
           <option value="harmonic_2y" selected>Harmonic Optimized</option>
+          <option value="sensex_swing">SENSEX Harmonic Swing</option>
+          <option value="sensex_bigleg">SENSEX Harmonic Big Leg</option>
           <option value="frontend_live">VWAP 9:30</option>
           <option value="smc_live">SMC</option>
           <option value="smc_tuned">SMC Tuned</option>
@@ -228,6 +230,8 @@ const NOTES = {
   smc_live: "Liquidity, fair value gap, and order-block setups with EMA20 confirmation. Entries use the nearest eligible ATM option; the strategy exits at its stop-loss, target, or configured time.",
   harmonic: "EXPIRY DAY: NO TRADES. Harmonic (Fibonacci pullback) on NIFTY 1-min swings (a swing counts once price reverses 0.25%): after a leg, price pulls back to the 0.58 Fib level (± 6% of the leg) and a candle closes back in the leg's direction → up-leg CE, down-leg PE, one trade a day 09:30–11:15, no trades on expiry days. Option 400 pts in the money, entry at the next minute's open. Safety stop-loss 50% (never hit in the tuning year — it guards against crash days); target 150%; trailing stop once +40% (gives back 40% of the gain); EMA9/26 reversal exit after +30%; 15:00 exit. Tuned on 1 Oct 2025 – 30 Sep 2026: net ₹3,10,815 for 1 lot after charges, 117 trades, every month profitable, max drawdown ₹37,664 — tuned on that same year, so expect less going forward. The rule fields below aren't used by this strategy except the dates.",
   harmonic_2y: "EXPIRY DAY: NO TRADES. Harmonic Optimized — the Harmonic engine, ONE trade a day, with settings chosen to be profitable in BOTH Oct 2024 – Sep 2025 and Oct 2025 – Sep 2026: NIFTY 1-min swings of 0.20%, pullback to the 0.60 Fib level (± 4% of the leg) and a candle closing back in the leg's direction → up-leg CE, down-leg PE, signals 09:45–14:30, no expiry days, and no trade when the leg is under 60 NIFTY points. Option 400 pts in the money, entry at the next minute's open. SL 20%, target 150%, trailing stop once +40% (gives back 30% of the gain), EMA9/26 reversal exit after +30%, 15:20 exit. Backtest, 1 lot (65) after charges: Oct 2024 – Sep 2025 +₹1,22,861, Oct 2025 – Sep 2026 +₹1,87,671 (₹3,10,532 over two years), max drawdown ₹37,082. Nearby settings were also profitable in both years. The rule fields below aren't used by this strategy except the dates.",
+  sensex_swing: "SENSEX OPTIONS (lot 20) · EXPIRY DAY: NO TRADES · PAPER ONLY. The Harmonic engine on SENSEX 1-min swings of 0.25%: pullback to the 0.45 Fib level (± 5% of the leg), legs of at least 200 points, signals 09:30–10:45, ITM-200 (100-point strikes), ONE trade a day; SL 20%, target 150%, trailing after +40% (give back 30%), reversal exit after +30%, time exit 15:20. Run as 3 lots with SENSEX Harmonic Big Leg at 2 lots: Oct 2024 – Sep 2025 +₹3,38,160, Oct 2025 – Sep 2026 +₹2,77,435 after charges, max drawdown ₹55,428 (only 2 years of SENSEX data exist).",
+  sensex_bigleg: "SENSEX OPTIONS (lot 20) · EXPIRY DAY: NO TRADES · PAPER ONLY. The Harmonic engine on SENSEX 1-min swings of 0.15%: pullback to the 0.45 Fib level (± 6% of the leg), only legs of at least 400 points, signals 09:30–11:15, ITM-200 (100-point strikes), ONE trade a day (about 40 a year); SL 20%, target 150%, trailing after +40% (give back 30%), reversal exit after +30%, time exit 15:20. Runs at 2 lots alongside SENSEX Harmonic Swing at 3 lots.",
   smc_tuned: "The SMC engine (Liquidity Grab / FVG / Order Block / Breaker / SMT trap on NIFTY 1-min, ≥2 needed) tuned for one trade a day on 1 Apr – 30 Sep 2026: entries 09:32–12:00, strike within ±20 strikes of ATM in the ₹100–800 band (nearest ATM; within 50 pts → premium nearest ₹450), entry at the option's last 1-min close, SL 50%, target 120%, SL to entry at +25%, reversal exit after +35% (the EMA9/26 pattern: price up & OI down at a 5-min candle's peak minute, volume ≥ 1.5× median, upper wick ≥ 40%, fresh 30-min high → out at the next minute's open), max 1 trade a day, 15:15 exit. Backtest 1 Apr – 30 Sep: net ₹1,56,361 for 1 lot after charges, 98 trades, max drawdown ₹35,028 — tuned on that same period, so expect less going forward.",
   smc_ema_combo: "SMC and EMA9/26 pullback as one strategy, ONE trade a day, 1 lot: both scan, and whichever signals first is traded (the other's trade that day is skipped; a tie goes to SMC). Settings from a joint search on 1 Apr – 30 Sep 2026 — SMC: entries 09:32–14:59, ₹100–800, SL 50%, target 150%, SL to entry at +25%, reversal exit after +35%, 15:15 exit; EMA9/26: premium ₹200–<300, SL 50%, target 100%, rest as Mani's rules. Trades are tagged [SMC] / [EMA9/26]. The rule fields below don't apply here. Backtest 1 Apr – 30 Sep 2026: net ₹2,05,873 for 1 lot after charges, 123 trades — tuned on that same period, so expect less going forward.",
   ema_pullback: "EMA9 / EMA26 pullbacks on completed NIFTY candles, with option volume and open-interest confirmation. Enters at the next minute’s open; one trade per day, with reversal and time exits.",
@@ -239,6 +243,12 @@ function applyPreset() {
   NUMS.forEach(k => { $(k).value = p[k]; });
   BOOLS.forEach(k => { $(k).checked = !!p[k]; });
   $("presetNote").textContent = NOTES[$("preset").value] || "";
+  const idx = p.underlying || "NIFTY";
+  $("underlyingTag").textContent = `${idx} options`;
+  // SENSEX lots are 20 qty (the pair runs 3 + 2 lots); switching back to NIFTY restores 65 × 1.
+  const sensexLots = {sensex_swing: 3, sensex_bigleg: 2}[$("preset").value];
+  if (sensexLots) { $("lotsize").value = 20; $("lots").value = sensexLots; }
+  else if ($("lotsize").value === "20") { $("lotsize").value = 65; $("lots").value = 1; }
 }
 $("preset").addEventListener("change", applyPreset);
 applyPreset();
@@ -309,7 +319,7 @@ function render() {
         + (t.st ? tag(`ST ₹${fmt(t.st)} ↑`, "#16a34a", "#16a34a14", "transparent") : "")
         + (t.nifty_trend ? tag(`NIFTY ${t.nifty_trend === "UP" ? "↑" : "↓"}`, t.nifty_trend === "UP" ? "#16a34a" : "#e11d48", "transparent", "transparent") : "");
     const strike = isSmc
-      ? `<div class="v10" style="color:${dir}">NIFTY ${fmtExp(t.expiry)} ${fmtStrike(t.strike)} ${t.type}</div><div class="s8 muted">spot ${t.spot ? t.spot.toFixed(0) : "—"}</div>`
+      ? `<div class="v10" style="color:${dir}">${(t.symbol || "NIFTY").split(" ")[0]} ${fmtExp(t.expiry)} ${fmtStrike(t.strike)} ${t.type}</div><div class="s8 muted">spot ${t.spot ? t.spot.toFixed(0) : "—"}</div>`
       : `<div class="v12" style="color:${dir}">${fmtStrike(t.strike)} ${t.type}</div><div class="s8 muted">${fmtExp(t.expiry)} · spot ${t.spot ? t.spot.toFixed(0) : "—"}</div>`;
     return `<tr>
       <td style="background:${bg}" class="s8 muted">${idx + 1}</td>

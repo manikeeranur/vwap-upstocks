@@ -16,7 +16,8 @@ router = APIRouter()
 PRESET_LABELS = {"frontend_live": "VWAP 9:30 — frontend LIVE rules", "smc_live": "SMC — frontend LIVE rules",
                  "ema25_vwap": "VWAP + EMA25 + SuperTrend", "ema_pullback": "EMA9/EMA26 pullback (Mani)",
                  "smc_ema_combo": "SMC + EMA9/26 pullback (combined, 1 trade a day)",
-                 "smc_tuned": "SMC Tuned (1 trade a day, reversal exit)", "harmonic": "Harmonic", "harmonic_2y": "Harmonic Optimized"}
+                 "smc_tuned": "SMC Tuned (1 trade a day, reversal exit)", "harmonic": "Harmonic", "harmonic_2y": "Harmonic Optimized",
+                 "sensex_swing": "SENSEX Harmonic Swing", "sensex_bigleg": "SENSEX Harmonic Big Leg"}
 
 
 async def _job(request, jid):
@@ -81,7 +82,7 @@ async def vwap_zip(request: Request, jid: str, qty: int = Query(65, ge=1, le=100
     with zipfile.ZipFile(mem, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("summary.csv", _summary_csv(days, qty))
         seen = set()
-        exp_set = set(await upstox.expired_expiries())
+        exp_set = set(await upstox.expired_expiries(st.underlying))
         for d in days:
             for t in d["trades"]:
                 name = csv_name(t["expiry"], t["strike"], t["type"], "1m", t["date"], t["date"])

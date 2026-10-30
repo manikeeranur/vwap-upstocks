@@ -1,6 +1,6 @@
 """Harmonic (Fibonacci pullback) — "Harmonic B-Pro", one trade a day.
 
-- NIFTY 1-min candles (previous session + today) → zigzag swings: a swing high/low
+- Index 1-min candles (NIFTY, or SENSEX for the sensex_* presets; previous session + today) → zigzag swings: a swing high/low
   counts only once price has reversed harm_zz % from it (no look-ahead).
 - Last confirmed leg P1→P2. Up-leg: once price has pulled back to within harm_tol
   of the leg around P2 − harm_fib·leg and a green candle closes back above that
@@ -113,7 +113,8 @@ def resolve(ob: list, ei: int, mark: str, s: Settings):
 
 
 async def run_day(day: date, s: Settings, spot_bars: list, prev_spot: list | None = None) -> DayResult:
-    expiry = await _nearest_expiry(day)
+    idx = s.underlying
+    expiry = await _nearest_expiry(day, idx)
     res = DayResult(day.isoformat(), expiry)
     if not expiry:
         res.note = "no expiry"
@@ -124,11 +125,11 @@ async def run_day(day: date, s: Settings, spot_bars: list, prev_spot: list | Non
         return res
     prev = list(prev_spot or [])
     if not prev:  # backtests pass only today's bars: fetch the previous session for the swings
-        days = await vwap_days(day)
+        days = await vwap_days(day, idx)
         prev = days
     cs = prev + list(spot_bars)
     if len(cs) < 3:
-        res.note = "not enough NIFTY candles"
+        res.note = f"not enough {idx} candles"
         return res
     sig = first_signal(cs, zigzag(cs, s.harm_zz), s.harm_fib, s.harm_tol, len(prev) + 1, s.entry_start, s.last_entry)
     if not sig:
@@ -139,10 +140,11 @@ async def run_day(day: date, s: Settings, spot_bars: list, prev_spot: list | Non
         res.note = f"leg {abs(p2 - p1):.0f} pts is under {s.harm_min_leg:g} — no harmonic trade"
         return res
     t, spot = cs[i][0], cs[i][4]
-    atm = round(spot / 50) * 50
+    step = upstox.STRIKE_STEP[idx]
+    atm = round(spot / step) * step
     strike = atm - s.harm_itm if side == "CE" else atm + s.harm_itm
-    expired = expiry in set(await upstox.expired_expiries())
-    c = next((c for c in await upstox.contracts(expiry)
+    expired = expiry in set(await upstox.expired_expiries(idx))
+    c = next((c for c in await upstox.contracts(expiry, idx)
               if c["strike_price"] == strike and c["instrument_type"] == side), None)
     if not c:
         res.note = f"no {strike:g} {side} contract"
@@ -168,10 +170,10 @@ async def run_day(day: date, s: Settings, spot_bars: list, prev_spot: list | Non
     return res
 
 
-async def vwap_days(day: date) -> list:
-    """The previous session's NIFTY 1-min bars (for the zigzag), from the cached span."""
+async def vwap_days(day: date, index: str = "NIFTY") -> list:
+    """The previous session's index 1-min bars (for the zigzag), from the cached span."""
     from datetime import timedelta
     from . import vwap
-    spot = await vwap.trading_days_and_spot(day - timedelta(days=10), day)
+    spot = await vwap.trading_days_and_spot(day - timedelta(days=10), day, index)
     keys = [k for k in sorted(spot) if k < day.isoformat()]
     return spot[keys[-1]] if keys else []
