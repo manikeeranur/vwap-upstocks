@@ -153,6 +153,14 @@ class ScheduleTests(unittest.TestCase):
         self.run_ticks(svc, [at("2026-11-02", "09:30"), at("2026-11-02", "12:00")], {"NSE_EQ|INECUPID": 320.0}, orders)
         self.assertEqual(svc.state["holding"]["symbol"], "CUPID")
 
+    def test_paused_does_nothing(self):
+        svc, _ = make_service([{"date": "2026-10-30", "failed": 0, "ranking": [_r(1, "AAA")]}])
+        svc.state["on"] = False
+        orders = []
+        self.run_ticks(svc, [at("2026-11-02", "09:30"), at("2026-11-02", "12:00")], {"NSE_EQ|INEAAA": 100.0}, orders)
+        self.assertIsNone(svc.state["plan"])
+        self.assertIsNone(svc.state["holding"])
+
     def test_missed_first_trading_day_skips_month(self):
         svc, _ = make_service([{"date": "2026-11-02", "failed": 0, "ranking": [_r(1, "AAA")]}])
         orders = []

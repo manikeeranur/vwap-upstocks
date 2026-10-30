@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 
 from .. import upstox
-from ..schemas import MomentumLive, MomentumRequest
+from ..schemas import MomentumLive, MomentumOn, MomentumRequest
 from ..services.momentum import MomentumBusy
 from .common import templates
 
@@ -47,6 +47,12 @@ async def momentum_tuned(request: Request):
 @router.post("/api/momentum/tuned/live")
 async def momentum_tuned_live(body: MomentumLive, request: Request):
     return await request.app.state.momentum_live.configure(body.broker, body.live)
+
+
+@router.post("/api/momentum/tuned/on")
+async def momentum_tuned_on(body: MomentumOn, request: Request):
+    """Switch Momentum Tuned on (decides and trades) or off (paused; a holding is kept)."""
+    return await request.app.state.momentum_live.set_on(body.on)
 
 
 @router.post("/api/momentum/tuned/preview")

@@ -41,6 +41,10 @@ class ConfigUpdate(Input):
         return self
 
 
+class MomentumOn(Input):
+    on: StrictBool
+
+
 class MomentumLive(Input):
     broker: Broker
     live: StrictBool

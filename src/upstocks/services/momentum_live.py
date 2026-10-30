@@ -11,6 +11,7 @@
   this strategy bought at that broker and still held there; switching live on mid-holding starts
   with the next buy.
 - No trade on a market holiday, or when the month's first trading day was missed.
+- Switched off ("on": false), it is paused: no decision, no paper or live order; a holding is kept.
 """
 import asyncio
 from copy import deepcopy
@@ -34,7 +35,7 @@ def settings(today: date) -> momentum.Settings:
 
 
 def default_state() -> dict:
-    return {"start": START.isoformat(), "capital": CAPITAL, "cash": CAPITAL, "holding": None,
+    return {"on": True, "start": START.isoformat(), "capital": CAPITAL, "cash": CAPITAL, "holding": None,
             "live": {b: False for b in brokers.BROKERS}, "positions": {}, "month": None, "plan": None,
             "history": [], "orders": [], "log": []}
 
@@ -107,6 +108,13 @@ class MomentumLiveService:
             await self._note(f"{brokers.LABELS[broker]} LIVE {'ON' if on else 'OFF'}", telegram=False)
         return self.snapshot()
 
+    async def set_on(self, on: bool):
+        async with self._lock:
+            self.state["on"] = on
+            await self._save()
+            await self._note(f"{'resumed' if on else 'paused — no decisions or orders until switched on'}", telegram=False)
+        return self.snapshot()
+
     async def preview(self) -> dict:
         """What the rules would do with the latest close (read-only)."""
         r = await self.app.state.momentum.live_ranking(settings(upstox.today_ist()))
@@ -128,7 +136,7 @@ class MomentumLiveService:
 
     async def tick(self, now=None):
         now = now or live.now_ist()
-        if now.date() < date.fromisoformat(self.state["start"]) or not live.market_open(now):
+        if not self.state["on"] or now.date() < date.fromisoformat(self.state["start"]) or not live.market_open(now):
             return
         month, t = now.strftime("%Y-%m"), now.strftime("%H:%M")
         plan = self.state["plan"] if self.state["month"] == month else None
