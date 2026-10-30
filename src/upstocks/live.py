@@ -5,13 +5,14 @@ from datetime import date, datetime, timedelta
 from . import combo, ema_pullback, harmonic, smc, upstox, vwap
 
 PRESETS = ["frontend_live", "smc_live", "ema25_vwap", "ema_pullback", "smc_tuned", "smc_ema_combo", "harmonic", "harmonic_2y",
-           "sensex_swing", "sensex_bigleg"]
+           "sensex_swing", "sensex_bigleg", "harmonic_power"]
 
 
 LABELS = {"frontend_live": "VWAP 9:30", "smc_live": "SMC", "ema25_vwap": "VWAP + EMA25 + SuperTrend",
           "ema_pullback": "EMA9/EMA26 pullback (Mani)", "smc_tuned": "SMC Tuned",
           "smc_ema_combo": "SMC + EMA pullback (1 trade a day)", "harmonic": "Harmonic", "harmonic_2y": "Harmonic Optimized",
-          "sensex_swing": "SENSEX Harmonic Swing", "sensex_bigleg": "SENSEX Harmonic Big Leg"}
+          "sensex_swing": "SENSEX Harmonic Swing", "sensex_bigleg": "SENSEX Harmonic Big Leg",
+          "harmonic_power": "Harmonic Power Trail"}
 
 
 FRESH_MIN = 3

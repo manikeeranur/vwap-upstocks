@@ -10,7 +10,7 @@ import uuid
 from .database import Database, utc_now
 from .observability import clean, redact, request_id
 
-PRESETS = ("frontend_live", "smc_live", "ema25_vwap", "ema_pullback", "smc_tuned", "smc_ema_combo", "harmonic", "harmonic_2y", "sensex_swing", "sensex_bigleg")
+PRESETS = ("frontend_live", "smc_live", "ema25_vwap", "ema_pullback", "smc_tuned", "smc_ema_combo", "harmonic", "harmonic_2y", "sensex_swing", "sensex_bigleg", "harmonic_power")
 # Lots a newly added strategy starts with (others 1): the SENSEX pair runs as 3 + 2 lots.
 DEFAULT_LOTS = {"sensex_swing": 3, "sensex_bigleg": 2}
 BROKERS = ("upstox", "kite", "indmoney")
