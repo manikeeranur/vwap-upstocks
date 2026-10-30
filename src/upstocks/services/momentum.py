@@ -173,6 +173,7 @@ class MomentumService:
         self.runs_dir = runs_dir
         self.task: asyncio.Task | None = None
         self.job = {"status": "idle"}
+        self.data_lock = asyncio.Lock()   # one price download at a time (backtest or Momentum Tuned live)
         legacy = runs_dir.parent / "momentum_last.json"  # single result kept before saved runs
         if legacy.exists() and not (runs_dir / "index.json").exists():
             try:
@@ -238,46 +239,53 @@ class MomentumService:
             self.task.cancel()
             await asyncio.gather(self.task, return_exceptions=True)
 
+    async def _prices(self, need_from: date, end: date, refresh_all: bool, job: dict):
+        """Every stock's cached daily prices, brought up to the latest published day (see the module note).
+        Returns (instruments, {key: arrays}, downloaded keys); progress goes into `job`."""
+        fetch_end = upstox.today_ist() - timedelta(days=1)
+        instruments = await self.store.instruments()
+        keys = [BENCHMARK] + [x["key"] for x in instruments]
+        job.update(phase="Checking cached prices", total=len(keys))
+        cached = await asyncio.to_thread(lambda: {k: self.store.load(k) for k in keys})
+        active = sorted((k for k, z in cached.items() if z is not None and len(z["d"])),
+                        key=lambda k: -_recent_turnover(cached[k]))[:ACTIVE]
+        # NIFTY's latest candle is the latest trading day Upstox has published; a stock whose
+        # data reaches it is current (weekends, holidays and early mornings need no download).
+        await self.store.refresh(BENCHMARK, need_from, fetch_end, cached[BENCHMARK])
+        cached[BENCHMARK] = await asyncio.to_thread(self.store.load, BENCHMARK)
+        latest = min(end.toordinal(), int(cached[BENCHMARK]["d"][-1]))
+        todo = []
+        for k in keys[1:]:
+            z = cached[k]
+            if z is None or int(z["frm"]) > need_from.toordinal():
+                todo.append(k)
+            elif max(int(z["thru"]), int(z["d"][-1]) if len(z["d"]) else 0) < latest and (
+                    refresh_all or k in active or int(z["thru"]) < latest - STALE_DAYS):
+                todo.append(k)
+        job.update(phase="Downloading daily prices from Upstox" if todo else "Prices up to date",
+                   done=0, total=len(todo), failed=[])
+        sem = asyncio.Semaphore(6)
+
+        async def one(k):
+            async with sem:
+                try:
+                    await self.store.refresh(k, need_from, fetch_end, cached[k])
+                    cached[k] = await asyncio.to_thread(self.store.load, k)
+                except upstox.UpstoxError as exc:
+                    job["failed"].append(k)
+                    log.warning("Price download failed for %s: %s", k, redact(str(exc)))
+                job["done"] += 1
+
+        await asyncio.gather(*(one(k) for k in todo))
+        return instruments, cached, todo
+
     async def _run(self, st: momentum.Settings, refresh_all: bool):
         try:
             today = upstox.today_ist()
             end = min(st.end, today - timedelta(days=1))
-            fetch_end = today - timedelta(days=1)
             need_from = momentum.history_start(st.start)
-            instruments = await self.store.instruments()
-            keys = [BENCHMARK] + [x["key"] for x in instruments]
-            self.job.update(phase="Checking cached prices", total=len(keys))
-            cached = await asyncio.to_thread(lambda: {k: self.store.load(k) for k in keys})
-            active = sorted((k for k, z in cached.items() if z is not None and len(z["d"])),
-                            key=lambda k: -_recent_turnover(cached[k]))[:ACTIVE]
-            # NIFTY's latest candle is the latest trading day Upstox has published; a stock whose
-            # data reaches it is current (weekends, holidays and early mornings need no download).
-            await self.store.refresh(BENCHMARK, need_from, fetch_end, cached[BENCHMARK])
-            cached[BENCHMARK] = await asyncio.to_thread(self.store.load, BENCHMARK)
-            latest = min(end.toordinal(), int(cached[BENCHMARK]["d"][-1]))
-            todo = []
-            for k in keys[1:]:
-                z = cached[k]
-                if z is None or int(z["frm"]) > need_from.toordinal():
-                    todo.append(k)
-                elif max(int(z["thru"]), int(z["d"][-1]) if len(z["d"]) else 0) < latest and (
-                        refresh_all or k in active or int(z["thru"]) < latest - STALE_DAYS):
-                    todo.append(k)
-            self.job.update(phase="Downloading daily prices from Upstox" if todo else "Prices up to date",
-                            done=0, total=len(todo), failed=[])
-            sem = asyncio.Semaphore(6)
-
-            async def one(k):
-                async with sem:
-                    try:
-                        await self.store.refresh(k, need_from, fetch_end, cached[k])
-                        cached[k] = await asyncio.to_thread(self.store.load, k)
-                    except upstox.UpstoxError as exc:
-                        self.job["failed"].append(k)
-                        log.warning("Price download failed for %s: %s", k, redact(str(exc)))
-                    self.job["done"] += 1
-
-            await asyncio.gather(*(one(k) for k in todo))
+            async with self.data_lock:
+                instruments, cached, todo = await self._prices(need_from, end, refresh_all, self.job)
             self.job.update(phase="Running the backtest", done=0, total=0)
             symbols = {x["key"]: x["symbol"] for x in instruments}
             result = await asyncio.to_thread(self._compute, cached, symbols, st, need_from, end)
@@ -293,8 +301,19 @@ class MomentumService:
             log.exception("Momentum backtest failed")
             self.job.update(status="error", error=redact(str(exc)))
 
+    async def live_ranking(self, st: momentum.Settings) -> dict:
+        """The full ranking after the latest published close (for Momentum Tuned's month-end decision):
+        {date, failed, ranking: [{symbol, key, rank, above_sma, close}] best first}."""
+        end = upstox.today_ist() - timedelta(days=1)
+        need_from = momentum.history_start(st.start)
+        job = {}
+        async with self.data_lock:
+            instruments, cached, _ = await self._prices(need_from, end, False, job)
+        return await asyncio.to_thread(self._rank_latest, cached, instruments, st, need_from, end, len(job["failed"]))
+
     @staticmethod
-    def _compute(cached, symbols, st, need_from, end):
+    def _arrays(cached, symbols, need_from, end):
+        """Aligned [day × stock] open / close / volume on NIFTY's trading calendar."""
         bench = cached.get(BENCHMARK)
         if bench is None or not len(bench["d"]):
             raise RuntimeError("No NIFTY 50 history from Upstox (used as the trading calendar)")
@@ -310,4 +329,20 @@ class MomentumService:
             idx = np.searchsorted(cal, z["d"])
             ok = (idx < len(cal)) & (cal[np.minimum(idx, len(cal) - 1)] == z["d"])
             o[idx[ok], j], c[idx[ok], j], v[idx[ok], j] = z["o"][ok], z["c"][ok], z["v"][ok]
-        return momentum.run(dates, [symbols[k] for k in cols], o, c, v, st, bench["c"][span])
+        return dates, cols, o, c, v, bench["c"][span]
+
+    @classmethod
+    def _rank_latest(cls, cached, instruments, st, need_from, end, failed):
+        symbols = {x["key"]: x["symbol"] for x in instruments}
+        dates, cols, _o, c, v, _b = cls._arrays(cached, symbols, need_from, end)
+        last = len(dates) - 1
+        f = momentum.features(c, v, [last], st.sma_days)
+        ranking = momentum.rank_day(f, 0, st.universe, st.score)
+        return {"date": dates[last].isoformat(), "failed": failed,
+                "ranking": [{"symbol": symbols[cols[r["col"]]], "key": cols[r["col"]], "rank": r["rank"],
+                             "above_sma": r["above_sma"], "close": round(r["close"], 2)} for r in ranking]}
+
+    @classmethod
+    def _compute(cls, cached, symbols, st, need_from, end):
+        dates, cols, o, c, v, bench = cls._arrays(cached, symbols, need_from, end)
+        return momentum.run(dates, [symbols[k] for k in cols], o, c, v, st, bench)

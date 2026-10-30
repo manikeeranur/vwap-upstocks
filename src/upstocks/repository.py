@@ -171,6 +171,16 @@ class Repository:
                     for preset in PRESETS:
                         conn.execute("INSERT OR IGNORE INTO broker_strategy VALUES (?,?,?,0,?)", (uid, broker, preset, DEFAULT_LOTS.get(preset, 1)))
 
+    def get_json(self, key, default=None):
+        """A JSON value kept in the settings table (e.g. Momentum Tuned's live state)."""
+        with self.db.connect() as conn:
+            row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+        return json.loads(row[0]) if row else default
+
+    def set_json(self, key, value):
+        with self.db.connect(write=True) as conn:
+            _setting(conn, key, value)
+
     def state(self):
         """Global strategy settings plus every person's broker switches and orders."""
         with self.db.connect() as conn:

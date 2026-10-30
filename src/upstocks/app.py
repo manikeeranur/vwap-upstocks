@@ -21,6 +21,7 @@ from .repository import ConfigurationConflict, Repository
 from .security import DashboardGuard, SessionAuth
 from .services.backtests import BacktestService
 from .services.momentum import MomentumService
+from .services.momentum_live import MomentumLiveService
 from .services.reminders import ReminderService
 from .services.trading import TradingService
 from .services.quotes import QuoteService
@@ -36,7 +37,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         lock = ProcessLock(settings.database_path)
         lock.acquire()
         handlers = []
-        trading_service = backtests = quotes = momentum_service = reminders = None
+        trading_service = backtests = quotes = momentum_service = reminders = momentum_live = None
         app.state.ready = False
         try:
             handlers = configure_logging(settings)
@@ -67,9 +68,13 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
             app.state.momentum = momentum_service
             reminders = ReminderService(app)
             app.state.reminders = reminders
+            momentum_live = MomentumLiveService(app)
+            await asyncio.to_thread(momentum_live.load)
+            app.state.momentum_live = momentum_live
             if settings.scanner_enabled:
                 trading_service.start()
                 reminders.start()
+                momentum_live.start()
             app.state.ready = True
             await asyncio.to_thread(repository.event, "startup", "Application started", details={"implementation": repository.implementation})
             log.info("Application started")
@@ -80,6 +85,8 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         finally:
             app.state.ready = False
             try:
+                if momentum_live:
+                    await momentum_live.stop()
                 if reminders:
                     await reminders.stop()
                 if trading_service:

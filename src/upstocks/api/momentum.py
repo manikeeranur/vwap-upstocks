@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 
 from .. import upstox
-from ..schemas import MomentumRequest
+from ..schemas import MomentumLive, MomentumRequest
 from ..services.momentum import MomentumBusy
 from .common import templates
 
@@ -29,6 +29,30 @@ async def momentum_run(body: MomentumRequest, request: Request):
     except MomentumBusy as exc:
         raise HTTPException(429, str(exc), headers={"Retry-After": "10"}) from exc
     return request.app.state.momentum.snapshot()
+
+
+@router.get("/api/momentum/tuned")
+async def momentum_tuned(request: Request):
+    """Momentum Tuned's live state; the holding is marked at its last traded price when available."""
+    state = request.app.state.momentum_live.snapshot()
+    h = state.get("holding")
+    if h:
+        try:
+            h["ltp"] = (await upstox.ltp_quotes([h["key"]])).get(h["key"])
+        except Exception:
+            h["ltp"] = None
+    return state
+
+
+@router.post("/api/momentum/tuned/live")
+async def momentum_tuned_live(body: MomentumLive, request: Request):
+    return await request.app.state.momentum_live.configure(body.broker, body.live)
+
+
+@router.post("/api/momentum/tuned/preview")
+async def momentum_tuned_preview(request: Request):
+    """What the rules would decide from the latest close (refreshes prices; read-only)."""
+    return await request.app.state.momentum_live.preview()
 
 
 @router.get("/api/momentum/job")

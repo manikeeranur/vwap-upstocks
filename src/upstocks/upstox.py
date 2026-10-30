@@ -384,14 +384,15 @@ async def daily_history(instrument_key: str, start: date, end: date) -> list[lis
 HFT = "https://api-hft.upstox.com"
 
 
-async def place_market_order(instrument_key: str, qty: int, side: str, tag: str, token: str | None = None) -> str:
-    """Intraday MARKET order (side BUY/SELL); returns the Upstox order id. `token` is the person's
-    daily access token — the app's long-lived data token is read-only and can't place orders."""
+async def place_market_order(instrument_key: str, qty: int, side: str, tag: str, token: str | None = None,
+                             product: str = "I") -> str:
+    """MARKET order (side BUY/SELL), intraday by default (product "D" = delivery); returns the Upstox order id.
+    `token` is the person's daily access token — the app's long-lived data token is read-only and can't place orders."""
     headers = {"Accept": "application/json", "Content-Type": "application/json",
                "Authorization": f"Bearer {token or _token()}"}
     await _throttle()
     r = await client().post(f"{HFT}/v2/order/place", headers=headers, json={
-        "quantity": qty, "product": "I", "validity": "DAY", "price": 0, "tag": tag[:20],
+        "quantity": qty, "product": product, "validity": "DAY", "price": 0, "tag": tag[:20],
         "instrument_token": instrument_key, "order_type": "MARKET", "transaction_type": side,
         "disclosed_quantity": 0, "trigger_price": 0, "is_amo": False,
     })

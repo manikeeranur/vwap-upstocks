@@ -20,6 +20,7 @@
 .live-total strong { font:600 22px/1.2 var(--font); letter-spacing:-.6px; } .live-total small { font-size:11px; color:var(--muted); }
 .live-brokers { display:flex; flex-wrap:wrap; gap:8px; margin-left:auto; }
 .live-broker { display:flex; align-items:baseline; gap:8px; padding:7px 12px; border:1px solid var(--border); border-radius:8px; background:var(--surface); font-size:12px; }
+.mom-plan { margin:12px 0 0; font-size:12px; color:var(--muted); }
 .live-broker span { color:var(--muted); } .live-broker b { font-weight:600; } .live-broker small { color:var(--muted); font-size:10px; }
 .metric { padding:20px; min-width:0; border:1px solid var(--border); border-radius:11px; background:var(--card); box-shadow:var(--shadow); }
 .metric.featured { background:var(--accent-soft); border-color:color-mix(in srgb,var(--accent) 18%,var(--border)); }
@@ -324,7 +325,7 @@ function render() {
         ${err ? `<p class="strategy-error" role="status">${esc(err)}</p>` : ''}
         ${trades.length ? `<div class="scroll trade-scroll" tabindex="0" role="region" aria-label="${esc(LABELS[p])} trades; scroll for more columns"><table><thead><tr><th>#</th><th>Entry</th><th>Option</th><th>Entry ₹</th><th>SL</th><th>Target</th><th>Max profit</th><th>Max loss</th><th>Status</th><th>Exit</th><th>Exit / LTP</th><th>P&amp;L pts</th><th>P&amp;L ₹</th><th>Live BUY</th><th>Live SELL</th></tr></thead><tbody>${rows}</tbody></table></div><div class="trade-cards">${trades.map(t => tradeCard(t,qty)).join('')}</div>` : `<div class="empty-state"><span class="empty-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/></svg></span><div><b>${!cfg.on && !live ? 'Strategy paused' : err ? 'Market data unavailable' : 'Awaiting signal'}</b><p>${!cfg.on && !live ? 'Enable Paper to start tracking signals.' : err ? 'Check the message above and try scanning again.' : view.day ? `No trades for ${esc(view.day)}.` : ''}</p></div></div>`}
       </section>`;
-    }).join('');
+    }).join('') + momCard();
   }
   $('strats').setAttribute('aria-busy','false');
   renderSettings();
@@ -348,7 +349,13 @@ function renderSettings() {
         return `<td data-label="${n} Live"><div class="set-cell ${a.live[p] ? 'on' : ''}">${brokerLogo(a.broker,20)}<label class="check tog livechk"><input type="checkbox" role="switch" aria-label="${n} live orders for ${esc(LABELS[p])}" data-live="${p}" data-broker="${a.broker}" ${a.live[p] ? 'checked' : ''} ${paperOnly(p) ? 'disabled title="Paper only for now"' : ''}><span class="sw"></span></label>
           <input type="number" class="lots" aria-label="${n} lots for ${esc(LABELS[p])}" title="Lots" data-lots="${p}" data-broker="${a.broker}" min="1" step="1" inputmode="numeric" value="${a.lots[p]}" required>${a.live[p] ? '<span class="live-dot" title="Live orders on">LIVE</span>' : ''}</div></td>`; }).join('')}</tr>`;
   }).join('');
-  $('stratDialogBody').innerHTML = `<div class="set-scroll"><table class="set-table"><thead><tr><th>Strategy</th><th>Paper</th>${head}</tr></thead><tbody>${rows}</tbody></table></div>`;
+  // Momentum Tuned: monthly stock rotation (delivery orders); paper always runs, ₹50,000 compounding instead of lots.
+  const mrow = M ? `<tr><td><b>Momentum Tuned</b><small>Monthly stock rotation · 1 holding · ₹50,000 compounding · delivery (CNC) · paper always on</small></td>
+      <td data-label="Paper"><span class="set-cell on" title="Always on">On</span></td>
+      ${accs.map(a => { const n = BROKER_NAMES[a.broker], on = !!M.live[a.broker];
+        return `<td data-label="${n} Live"><div class="set-cell ${on ? 'on' : ''}">${brokerLogo(a.broker,20)}<label class="check tog livechk"><input type="checkbox" role="switch" aria-label="${n} live orders for Momentum Tuned" data-mlive="${a.broker}" ${on ? 'checked' : ''}><span class="sw"></span></label>
+          <span class="flag" title="Order size">₹50k</span>${on ? '<span class="live-dot" title="Live orders on">LIVE</span>' : ''}</div></td>`; }).join('')}</tr>` : '';
+  $('stratDialogBody').innerHTML = `<div class="set-scroll"><table class="set-table"><thead><tr><th>Strategy</th><th>Paper</th>${head}</tr></thead><tbody>${rows}${mrow}</tbody></table></div>`;
 }
 
 async function refresh() {
@@ -408,7 +415,22 @@ $('strats').addEventListener('click',async e => {
   finally { saving = false; button.disabled = false; await refresh(); }
 });
 async function onConfigChange(e) {
-  const input = e.target, {on,lots,live:lv,broker} = input.dataset;
+  const input = e.target, {on,lots,live:lv,broker,mlive} = input.dataset;
+  if (mlive) {
+    const enabled = input.checked; input.checked = !!M?.live[mlive];
+    if (busy || saving || confirming) { notifyUI('Please wait for the current action to finish.'); return; }
+    if (enabled && !await confirmAction({
+      title:'Enable live orders?', message:`Momentum Tuned will send real delivery (CNC) market orders to ${BROKER_NAMES[mlive]} on each month's first trading day.`,
+      confirmText:'Enable live orders', danger:true,
+      facts:[['Strategy','Momentum Tuned'],['Broker',BROKER_NAMES[mlive]],['Order size','₹50,000 to start, compounding'],['When','Sell 11:00 → buy 12:00, first trading day of the month'],
+             ['Starts','With the next buy; shares bought before are never sold'],...(B && !B[mlive]?.logged_in ? [['Login','Not logged in today — orders will be skipped until you log in']] : [])]
+    })) return;
+    try {
+      M = await api('/api/momentum/tuned/live', {broker:mlive, live:enabled, ...(enabled ? {confirm:'LIVE'} : {})});
+      notifyUI(`Momentum Tuned · ${BROKER_NAMES[mlive]} live ${enabled ? 'on' : 'off'}.`);
+    } catch (x) { notifyUI(x.message, true); }
+    await loadMomentumTuned(); renderSettings(); return;
+  }
   if(lv) {
     const enabled = input.checked, acc = account(broker), cfg = {live:!!acc?.live[lv], lots:acc?.lots[lv] || 1};
     input.checked = cfg.live;
@@ -439,6 +461,34 @@ setInterval(() => { if(!document.hidden) refreshFills(); },20000);
 setInterval(() => { if(!document.hidden) loadBrokers(); },60000);
 setInterval(() => { if(!document.hidden) refresh(); },10000);
 setInterval(() => { if(!document.hidden) { updateLiveValues(); refreshQuotes(); } },1000);
+
+// Momentum Tuned (monthly stock rotation) — value, holding and which brokers are live.
+let M = null;
+// Momentum Tuned (monthly stock rotation): its card in the strategy list; live switches are in the settings dialog.
+function momCard() {
+  if (!M) return '';
+  const h = M.holding, px = h ? (h.ltp || h.entry) : 0, pnl = h ? h.qty * px - h.cost : 0, value = M.cash + (h ? h.qty * px : 0);
+  const live = BROKER_ORDER.filter(b => M.live[b]), p = M.plan, field = (l, v) => `<div><dt>${l}</dt><dd>${v}</dd></div>`;
+  const body = h
+    ? `<article class="trade-card"><div class="trade-card-head"><b>${esc(h.symbol)}</b><span class="st OPEN">HOLDING</span></div>
+        <dl>${field('Bought', `${esc(h.entry_date)} · ${ampm(h.entry_time)} · ₹${fmt(h.entry)}`)}${field('Last price', h.ltp ? `₹${fmt(h.ltp)}` : '—')}${field('Quantity', h.qty)}${field('Rank when bought', h.rank)}${field('Holding value', money(h.qty * px))}${field('Cash', money(M.cash))}</dl>
+        <div class="trade-net"><span class="muted">${fmt((px / h.entry - 1) * 100)}%</span><b class="${pnl >= 0 ? 'up' : 'down'}">${money(pnl)}</b></div></article>`
+    : `<div class="empty-state"><span class="empty-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/></svg></span><div><b>In cash · ${money(M.cash)}</b><p>${p && !p.skip && p.reason ? esc(p.reason) : `First buy at 12:00 on the first trading day from ${esc(M.start)}.`}</p></div></div>`;
+  const plan = p && !p.skip ? `<p class="mom-plan">${esc(p.day)}: ${esc(p.reason)}${p.sell ? ` · sell ${esc(p.sell.symbol)} 11:00${p.sell_done ? ' ✓' : ''}` : ''}${p.buy ? ` · buy ${esc(p.buy.symbol)} 12:00${p.buy_done ? ' ✓' : ''}` : ''}</p>` : '';
+  return `<section class="card strat ${live.length ? 'islive' : ''}" aria-label="Momentum Tuned" data-mom-card>
+    <div class="strategy-top"><div class="strategy-title"><span class="strategy-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l5-5 4 3 7-8M15 7h5v5"/></svg></span>
+      <div><h3>Momentum Tuned</h3><p>Monthly stock rotation · 1 holding · ₹50,000 compounding · sell 11:00 → buy 12:00 on the 1st trading day${live.length ? ` · LIVE: ${live.map(b => BROKER_NAMES[b]).join(', ')}` : ' · paper'}</p></div></div>
+      <div class="strategy-pnl"><span class="pnl-label">Value</span><b class="${value >= M.capital ? 'up' : 'down'}">${money(value)}</b><small>${fmt((value / M.capital - 1) * 100)}% · ${M.history.length} closed</small></div></div>
+    ${body}${plan}</section>`;
+}
+async function loadMomentumTuned() {
+  try {
+    M = await api('/api/momentum/tuned');
+    const el = document.querySelector('[data-mom-card]');
+    if (el) el.outerHTML = momCard(); else if (S) render();
+  } catch {}
+}
+loadMomentumTuned(); setInterval(loadMomentumTuned, 60000);
 </script>
 </body>
 </html>

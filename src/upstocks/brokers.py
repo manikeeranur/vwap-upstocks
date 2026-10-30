@@ -193,6 +193,88 @@ async def kite_place(creds: Credentials, tradingsymbol: str, qty: int, side: str
     return (body.get("data") or {}).get("order_id", "")
 
 
+# ── Delivery (CNC) stock orders — Momentum Tuned ────────────────────────────
+# A stock is named by its NSE symbol and ISIN (the Upstox key is NSE_EQ|<ISIN>).
+_kite_eq: dict[str, tuple[float, set]] = {}     # api key -> (time, NSE EQ tradingsymbols)
+_ind_eq: list = []                               # [(time, {ISIN: security_id})]
+
+
+async def kite_equity_symbols(creds: Credentials) -> set:
+    hit = _kite_eq.get(creds.api_key)
+    if hit and time.time() - hit[0] < 6 * 3600:
+        return hit[1]
+    async with httpx.AsyncClient(timeout=60) as c:
+        r = await c.get(f"{KITE_API}/instruments/NSE", headers=_kite_headers(creds.api_key, creds.access_token))
+    if r.status_code != 200:
+        raise BrokerError(f"Kite instruments {r.status_code}: {r.text[:200]}")
+    out = {row["tradingsymbol"] for row in csv.DictReader(io.StringIO(r.text)) if row.get("instrument_type") == "EQ"}
+    _kite_eq[creds.api_key] = (time.time(), out)
+    return out
+
+
+async def ind_equity_id(creds: Credentials, isin: str) -> str:
+    if not _ind_eq or time.time() - _ind_eq[0][0] > 6 * 3600:
+        async with httpx.AsyncClient(timeout=60) as c:
+            r = await c.get(f"{IND_API}/market/instruments", params={"source": "equity"}, headers=_ind_headers(creds.access_token))
+        if r.status_code != 200:
+            raise BrokerError(f"INDmoney instruments {r.status_code}: {r.text[:200]}")
+        ids = {row["ISIN"]: str(row["SECURITY_ID"]) for row in csv.DictReader(io.StringIO(r.text))
+               if row.get("EXCH") == "NSE" and row.get("ISIN")}
+        _ind_eq[:] = [(time.time(), ids)]
+    found = _ind_eq[0][1].get(isin)
+    if not found:
+        raise BrokerError(f"No INDmoney NSE stock for ISIN {isin}")
+    return found
+
+
+async def place_equity_order(creds: Credentials, symbol: str, isin: str, qty: int, side: str, tag: str) -> str:
+    """One delivery (CNC) MARKET order on NSE for `qty` shares; returns the broker's order id."""
+    if qty <= 0:
+        raise BrokerError("Quantity must be positive")
+    if creds.broker == "upstox":
+        return await upstox.place_market_order(f"NSE_EQ|{isin}", qty, side, tag, token=creds.access_token, product="D")
+    if creds.broker == "indmoney":
+        data = await _ind("POST", "/order", creds.access_token, json={
+            "txn_type": side, "exchange": "NSE", "segment": "EQUITY", "product": "CNC", "order_type": "MARKET",
+            "validity": "DAY", "security_id": await ind_equity_id(creds, isin), "qty": qty, "is_amo": False,
+            "algo_id": "99999", "remarks": tag[:100]})
+        return (data or {}).get("order_id", "")
+    if symbol not in await kite_equity_symbols(creds):
+        raise BrokerError(f"No Kite NSE stock {symbol}")
+    async with httpx.AsyncClient(timeout=20) as c:
+        r = await c.post(f"{KITE_API}/orders/regular", headers=_kite_headers(creds.api_key, creds.access_token), data={
+            "tradingsymbol": symbol, "exchange": "NSE", "transaction_type": side, "order_type": "MARKET",
+            "quantity": qty, "product": "CNC", "validity": "DAY", "market_protection": -1,
+            "tag": "".join(ch for ch in tag if ch.isalnum())[:20]})
+    body = await _json(r, "Kite")
+    if r.status_code != 200 or body.get("status") != "success":
+        raise BrokerError(f"Kite {r.status_code}: {body.get('message') or body}")
+    return (body.get("data") or {}).get("order_id", "")
+
+
+async def equity_held(creds: Credentials, isin: str) -> int:
+    """Shares of `isin` in the person's demat holdings (settled + T1)."""
+    if creds.broker == "upstox":
+        async with httpx.AsyncClient(timeout=20) as c:
+            r = await c.get(f"{UPSTOX_API}/v2/portfolio/long-term-holdings",
+                            headers={"Accept": "application/json", "Authorization": f"Bearer {creds.access_token}"})
+        body = await _json(r, "Upstox")
+        if r.status_code != 200 or body.get("status") != "success":
+            raise BrokerError(f"Upstox holdings {r.status_code}: {body.get('errors') or body}")
+        rows = [(h.get("isin"), (h.get("quantity") or 0) + (h.get("t1_quantity") or 0)) for h in body.get("data") or []]
+    elif creds.broker == "indmoney":
+        data = await _ind("GET", "/portfolio/holdings", creds.access_token)
+        rows = [(h.get("isin"), h.get("total_qty") or 0) for h in (data if isinstance(data, list) else (data or {}).get("holdings") or [])]
+    else:
+        async with httpx.AsyncClient(timeout=20) as c:
+            r = await c.get(f"{KITE_API}/portfolio/holdings", headers=_kite_headers(creds.api_key, creds.access_token))
+        body = await _json(r, "Kite")
+        if r.status_code != 200 or body.get("status") != "success":
+            raise BrokerError(f"Kite holdings {r.status_code}: {body.get('message') or body}")
+        rows = [(h.get("isin"), (h.get("quantity") or 0) + (h.get("t1_quantity") or 0)) for h in body.get("data") or []]
+    return int(sum(q for i, q in rows if i == isin))
+
+
 # ── Dispatch ────────────────────────────────────────────────────────────────
 async def place_order(creds: Credentials, trade: dict, qty_lots: int, lot_size: int, side: str, tag: str,
                       qty: int | None = None) -> tuple[str, int, str]:

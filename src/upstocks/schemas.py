@@ -41,6 +41,18 @@ class ConfigUpdate(Input):
         return self
 
 
+class MomentumLive(Input):
+    broker: Broker
+    live: StrictBool
+    confirm: Literal["LIVE"] | None = None
+
+    @model_validator(mode="after")
+    def confirmed(self):
+        if self.live and self.confirm != "LIVE":
+            raise ValueError("Turning live orders on needs confirm: LIVE")
+        return self
+
+
 class PresetRequest(Input):
     preset: Preset
     broker: Broker | None = None
