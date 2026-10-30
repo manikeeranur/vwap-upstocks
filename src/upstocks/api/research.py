@@ -17,7 +17,8 @@ PRESET_LABELS = {"frontend_live": "VWAP 9:30 — frontend LIVE rules", "smc_live
                  "ema25_vwap": "VWAP + EMA25 + SuperTrend", "ema_pullback": "EMA9/EMA26 pullback (Mani)",
                  "smc_ema_combo": "SMC + EMA9/26 pullback (combined, 1 trade a day)",
                  "smc_tuned": "SMC Tuned (1 trade a day, reversal exit)", "harmonic": "Harmonic", "harmonic_2y": "Harmonic Optimized",
-                 "sensex_swing": "SENSEX Harmonic Swing", "sensex_bigleg": "SENSEX Harmonic Big Leg"}
+                 "sensex_swing": "SENSEX Harmonic Swing", "sensex_bigleg": "SENSEX Harmonic Big Leg",
+                 "harmonic_power": "Harmonic Power Trail"}
 
 
 async def _job(request, jid):

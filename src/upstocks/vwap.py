@@ -121,6 +121,7 @@ class Settings:
     harm_skip_expiry: bool = True
     harm_min_leg: float = 0             # skip the day when the signal's leg is smaller (index points); 0 = any
     underlying: str = "NIFTY"           # the index whose options are traded: "NIFTY" or "SENSEX" (harmonic engine)
+    harm_elliott: bool = False          # Harmonic Power Trail: trail / book profit by Elliott waves (harmonic.resolve_elliott)
     trail_start: float = 0              # 0 = no trailing stop
     trail_giveback: float = 40
     slippage: float = 0.0
@@ -195,6 +196,9 @@ PRESETS["harmonic_2y"] = {**PRESETS["harmonic"], "harm_fib": 0.60, "harm_zz": 0.
                           "sl_pct": 20, "target_pct": 150, "trail_start": 40, "trail_giveback": 30,
                           "rev_exit": True, "ep_rev_activate": 30, "time_exit": "15:20", "max_trades": 1,
                           "harm_min_leg": 60}
+# Harmonic Power Trail — Harmonic Optimized's entry and stop-loss; profit is trailed and booked by
+# Elliott waves on NIFTY (harmonic.resolve_elliott) instead of the % trail and the reversal exit.
+PRESETS["harmonic_power"] = {**PRESETS["harmonic_2y"], "harm_elliott": True, "trail_start": 0, "rev_exit": False}
 # SENSEX Harmonic — the Harmonic engine on SENSEX options (lot 20, 100-point strikes), one trade a day,
 # paper only. Picked 2026-10-30 from a 2-year SENSEX test (Oct 2024 – Sep 2026, after charges, each
 # strategy paying its own brokerage); run together as 3 lots of sensex_swing + 2 lots of sensex_bigleg:

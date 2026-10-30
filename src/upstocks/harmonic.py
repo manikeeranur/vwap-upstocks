@@ -112,6 +112,58 @@ def resolve(ob: list, ei: int, mark: str, s: Settings):
     return "EOD", ob[-1][4], ob[-1][0], peak - entry, sl > sl0
 
 
+def resolve_elliott(ob: list, ei: int, s: Settings, spot: dict, side: str, p1: float, p2: float):
+    """Harmonic Power Trail exit: the option's SL, target cap and time exit as in resolve(); profit is
+    trailed and booked by Elliott waves on the index (decided on each completed index minute, out at
+    the option's next minute open). The signal leg is wave 1 and the entry pullback wave 2.
+    - Wave 3 runs from the entry; once it has passed wave 1's end, an index CLOSE back past wave 1's end
+      exits (wave 4 may not overlap wave 1) — a wick alone doesn't.
+    - Wave 4 is the first harm_zz % pullback from wave 3's extreme.
+    - Wave 5 starts when wave 3's extreme is broken: an index close past wave 4's extreme exits, and
+      profit is booked when wave 5 = wave 1 (wave 4's extreme ± the wave-1 length).
+    CE uses the index as is; PE mirrors it. Returns (status, exit price, exit minute, peak gain, trailed)."""
+    entry = ob[ei][1]
+    sl0, tg = entry * (1 - s.sl_pct / 100), entry * (1 + s.target_pct / 100)
+    sg = 1 if side == "CE" else -1                    # work in the trade's favour: x = sg × index
+    w1_end, w1 = sg * p2, abs(p2 - p1)
+    phase, h3, l4, w5_target, pending, peak = 3, None, None, None, None, entry
+    for k in range(ei, len(ob)):
+        t, o, h, l = ob[k][:4]
+        if t >= s.time_exit:
+            return "TIME_EXIT", o, t, peak - entry, phase >= 4
+        if pending:
+            return pending, o, t, peak - entry, phase >= 4
+        if l <= sl0:
+            return "SL", min(sl0, o), t, peak - entry, phase >= 4
+        if h >= tg:
+            return "TARGET", max(tg, o), t, peak - entry, phase >= 4
+        peak = max(peak, h)
+        b = spot.get(t)
+        if not b:
+            continue
+        hi, lo, cl = (b[2], b[3], b[4]) if sg > 0 else (-b[3], -b[2], -b[4])
+        h3 = hi if h3 is None else h3
+        if phase in (3, 4) and h3 > w1_end and cl < w1_end:
+            pending = "W4_OVERLAP"
+        elif phase == 3:
+            h3 = max(h3, hi)
+            if h3 > w1_end and h3 - lo >= abs(h3) * s.harm_zz / 100:
+                phase, l4 = 4, lo
+        elif phase == 4:
+            if hi > h3:
+                phase, w5_target = 5, l4 + w1
+                if hi >= w5_target:
+                    pending = "W5_TARGET"
+            else:
+                l4 = min(l4, lo)
+        elif phase == 5:
+            if cl < l4:
+                pending = "W4_BREAK"
+            elif hi >= w5_target:
+                pending = "W5_TARGET"
+    return "EOD", ob[-1][4], ob[-1][0], peak - entry, phase >= 4
+
+
 async def run_day(day: date, s: Settings, spot_bars: list, prev_spot: list | None = None) -> DayResult:
     idx = s.underlying
     expiry = await _nearest_expiry(day, idx)
@@ -156,7 +208,10 @@ async def run_day(day: date, s: Settings, spot_bars: list, prev_spot: list | Non
         res.note = f"no {strike:g} {side} candle at {mark}"
         return res
     entry = ob[ei][1]
-    status, exit_p, exit_t, peak, trailed = resolve(ob, ei, mark, s)
+    if s.harm_elliott:
+        status, exit_p, exit_t, peak, trailed = resolve_elliott(ob, ei, s, {b[0]: b for b in spot_bars}, side, p1, p2)
+    else:
+        status, exit_p, exit_t, peak, trailed = resolve(ob, ei, mark, s)
     pnl = _round2(exit_p - entry)
     res.trades.append(Trade(
         date=d, expiry=expiry, symbol=c["trading_symbol"], strike=c["strike_price"], type=side,
