@@ -293,6 +293,8 @@ class MomentumService:
                 self.job.update(phase="Fetching 11:00 / 12:00 prices for the switch days")
                 fills = await self._switch_prices(result, instruments)
                 result = await asyncio.to_thread(self._compute, cached, symbols, st, need_from, end, fills)
+            self.job.update(phase="Fetching each trade's high and low")
+            await self._peaks(result, instruments)
             result["data"] = {"stocks": len(instruments), "downloaded": len(todo), "failed": len(self.job["failed"]),
                               "through": result["equity"][-1][0] if result["equity"] else None}
             result["finished"] = datetime.now(upstox.IST).isoformat(timespec="seconds")
@@ -345,6 +347,27 @@ class MomentumService:
         return {"date": dates[last].isoformat(), "failed": failed,
                 "ranking": [{"symbol": symbols[cols[r["col"]]], "key": cols[r["col"]], "rank": r["rank"],
                              "above_sma": r["above_sma"], "close": round(r["close"], 2)} for r in ranking]}
+
+    async def _peaks(self, result: dict, instruments: list[dict]):
+        """Each trade's (and open holding's) peak high / low from its daily candles, buy day to sell day
+        (to the last close for a holding), and the P&L at those prices: max profit / max loss."""
+        key_of = {x["symbol"]: x["key"] for x in instruments}
+        last = result["equity"][-1][0] if result["equity"] else None
+        for t in result["trades"] + result["holdings"]:
+            key, end = key_of.get(t["symbol"]), t.get("exit_date") or last
+            if not key or not end:
+                continue
+            try:
+                await self.store.limiter.wait()
+                rows = await upstox.candles(key, "1d", date.fromisoformat(t["entry_date"]), date.fromisoformat(end), expired=False)
+            except upstox.UpstoxError as exc:
+                log.warning("Daily high/low unavailable for %s: %s", t["symbol"], redact(str(exc)))
+                continue
+            if not rows:
+                continue
+            hi, lo = max(rows, key=lambda r: r[2]), min(rows, key=lambda r: r[3])
+            t.update(peak_high=round(float(hi[2]), 2), peak_high_date=hi[0][:10], peak_low=round(float(lo[3]), 2), peak_low_date=lo[0][:10],
+                     max_profit=round((float(hi[2]) - t["entry"]) * t["qty"], 2), max_loss=round((float(lo[3]) - t["entry"]) * t["qty"], 2))
 
     async def _switch_prices(self, result: dict, instruments: list[dict]) -> dict:
         """{("sell"|"buy", key, ISO day): price} — each trade's minute price at 11:00 (sell) / 12:00 (buy).

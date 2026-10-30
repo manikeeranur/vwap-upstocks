@@ -29,7 +29,7 @@ SCORES = ("risk_adjusted", "12-1", "tuned")
 # "tuned" ranks like 12-1; the page fills these rule values for it (chosen 2026-10-18:
 # ₹50,000 from Nov 2019 → ₹1.75 crore in the backtest, worst drop −74%).
 TUNED = {"slots": 1, "exit_rank": 5, "sma_days": 150, "universe": 1000}
-# Fills use daily candles: the open price is set at 09:15:00 IST, the close at 15:30:00.
+# Fills use daily candles: the open price is set at 09:15:00 IST, the close at 15:30:00 (or `fills`, below).
 OPEN_TIME, CLOSE_TIME = "09:15:00", "15:30:00"
 # Momentum Tuned trades the switch day at these times (sell first, then buy with the proceeds); a backtest
 # given their minute prices (`fills`) uses them instead of the open.
@@ -227,7 +227,8 @@ def run(dates: list[date], symbols: list[str], open_: np.ndarray, close: np.ndar
                 costs += fee
                 pos[col] = {"qty": qty, "price": px, "date": dates[i], "time": at, "rank": b["rank"], "cost_basis": spend + fee}
                 bought.append({"symbol": symbols[col], "rank": b["rank"], "price": _r(px), "at": f"{dates[i]} {at}", "qty": qty, "amount": _r(spend)})
-            meta.update(executed=f"{dates[i]} {OPEN_TIME}", sold=sold, bought=bought, cash_after=_r(cash))
+            times = sorted({x["at"].split(" ")[1] for x in sold + bought if x.get("at")})
+            meta.update(executed=f"{dates[i]} {' / '.join(times) or OPEN_TIME}", sold=sold, bought=bought, cash_after=_r(cash))
         value = cash + sum(p["qty"] * last_close[i, c] for c, p in pos.items() if np.isfinite(last_close[i, c]))
         equity.append([dates[i].isoformat(), _r(value)])
         if i in decisions:

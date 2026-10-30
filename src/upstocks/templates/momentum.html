@@ -359,9 +359,9 @@ function now(res) {
     ? `<b>${esc(L.date)} is a month end — orders for the next open:</b> sell ${pend.planned_sells.map(s => `<span class="pill sell">${esc(s.symbol)}</span>`).join('') || 'nothing'} · buy ${pend.planned_buys.map(b => `<span class="pill buy">${esc(b.symbol)} #${b.rank}</span>`).join('') || 'nothing'}`
     : `${esc(L.date)} is not a month end, so this ranking is a preview — nothing changes until the month's last trading day.`;
   const h = res.holdings;
-  $('holdings').innerHTML = `<thead><tr><th><span class="sr-only">Chart</span></th><th class="l">Stock</th><th class="l">Bought (IST)</th><th>Entry ₹</th><th>Qty</th><th>Last close ₹</th><th>Value</th><th>P&amp;L</th><th>Entry rank</th></tr></thead><tbody>` +
-    (h.length ? h.map((x, k) => `<tr><td><button class="cbtn" type="button" data-hold="${k}" title="Open chart" aria-label="Open ${esc(x.symbol)} chart">{{ ui_icon("chart") }}</button></td><td class="l"><b>${esc(x.symbol)}</b></td><td class="l">${at(x.entry_date, x.entry_time)}</td><td>${inr(x.entry, 2)}</td><td>${x.qty}</td><td>${inr(x.close, 2)}</td><td>${inr(x.value)}</td><td class="${cls(x.pnl)}">${inr(x.pnl)} <span class="flag">${pct(x.pnl_pct)}</span></td><td>#${x.entry_rank}</td></tr>`).join('')
-      : `<tr><td colspan="9" class="muted">No holdings</td></tr>`) + `<tr><td></td><td colspan="5" class="muted l">Cash</td><td>${inr(res.cash)}</td><td colspan="2"></td></tr></tbody>`;
+  $('holdings').innerHTML = `<thead><tr><th><span class="sr-only">Chart</span></th><th class="l">Stock</th><th class="l">Bought (IST)</th><th>Entry ₹</th><th>Qty</th><th>Last close ₹</th><th>Value</th><th>Max profit</th><th>Max loss</th><th>P&amp;L</th><th>Entry rank</th></tr></thead><tbody>` +
+    (h.length ? h.map((x, k) => `<tr><td><button class="cbtn" type="button" data-hold="${k}" title="Open chart" aria-label="Open ${esc(x.symbol)} chart">{{ ui_icon("chart") }}</button></td><td class="l"><b>${esc(x.symbol)}</b></td><td class="l">${at(x.entry_date, x.entry_time)}</td><td>${inr(x.entry, 2)}</td><td>${x.qty}</td><td>${inr(x.close, 2)}</td><td>${inr(x.value)}</td>${peakCells(x)}<td class="${cls(x.pnl)}">${inr(x.pnl)} <span class="flag">${pct(x.pnl_pct)}</span></td><td>#${x.entry_rank}</td></tr>`).join('')
+      : `<tr><td colspan="11" class="muted">No holdings</td></tr>`) + `<tr><td></td><td colspan="5" class="muted l">Cash</td><td>${inr(res.cash)}</td><td colspan="4"></td></tr></tbody>`;
   $('ranking').innerHTML = `<thead><tr><th>Rank</th><th class="l">Stock</th><th>Score</th><th>6M return</th><th>12M return</th><th>12-1 return</th><th>Volatility</th><th>Close ₹</th><th>${res.settings.sma_days}-day avg ₹</th><th>Status</th></tr></thead><tbody>` +
     L.ranking.map(r => `<tr><td>#${r.rank}</td><td class="l"><b>${esc(r.symbol)}</b></td><td>${r.score.toFixed(2)}</td><td class="${cls(r.r6)}">${pct(r.r6)}</td><td class="${cls(r.r12)}">${pct(r.r12)}</td><td class="${cls(r.r12_1)}">${pct(r.r12_1)}</td><td>${r.vol.toFixed(1)}%</td><td>${inr(r.close, 2)}</td><td>${inr(r.sma, 2)}</td>` +
       `<td>${r.held ? '<span class="pill buy">Held</span>' : ''}${r.above_sma ? '' : '<span class="pill sell">Below average</span>'}</td></tr>`).join('') + '</tbody>';
@@ -377,12 +377,17 @@ function monthsTable(months) {
     }).join('') + '</tbody>';
 }
 
+// Max profit / max loss while held, like the Overview cards: P&L at the peak high / peak low (daily candles,
+// buy day to sell day — or to the last close for a holding) "@ that price", with its date.
+const peakCells = t => t.peak_high == null ? '<td>—</td><td>—</td>'
+  : `<td><b class="${cls(t.max_profit)}">${inr(t.max_profit)}</b> <span class="flag">@ ${inr(t.peak_high)}</span><br><span class="flag">${esc(t.peak_high_date)}</span></td>`
+  + `<td><b class="${cls(t.max_loss)}">${inr(t.max_loss)}</b> <span class="flag">@ ${inr(t.peak_low)}</span><br><span class="flag">${esc(t.peak_low_date)}</span></td>`;
 let tradeRows = [];
 function tradesTable(trades) {
   const rows = tradeRows = [...trades].reverse();
-  $('trades').innerHTML = `<thead><tr><th><span class="sr-only">Chart</span></th><th class="l">Stock</th><th>Bought (IST)</th><th>Sold (IST)</th><th>Entry ₹</th><th>Exit ₹</th><th>Qty</th><th>P&amp;L</th><th>Capital after</th><th>Return</th><th>Days</th><th>Rank in → out</th><th>Why sold</th></tr></thead><tbody>` +
-    (rows.length ? rows.map((t, k) => `<tr><td><button class="cbtn" type="button" data-trade="${k}" title="Open chart" aria-label="Open ${esc(t.symbol)} chart">{{ ui_icon("chart") }}</button></td><td class="l"><b>${esc(t.symbol)}</b></td><td>${at(t.entry_date, t.entry_time)}</td><td>${at(t.exit_date, t.exit_time)}</td><td>${inr(t.entry, 2)}</td><td>${inr(t.exit, 2)}</td><td>${t.qty}</td><td class="${cls(t.pnl)}">${inr(t.pnl)}</td><td><b>${inr(t.capital_after)}</b></td><td class="${cls(t.pnl_pct)}">${pct(t.pnl_pct)}</td><td>${t.days}</td><td>#${t.entry_rank} → ${t.exit_rank ? '#' + t.exit_rank : 'out'}</td><td style="text-align:left">${esc(t.reason)}</td></tr>`).join('')
-      : `<tr><td colspan="13" class="muted">No closed trades</td></tr>`) + '</tbody>';
+  $('trades').innerHTML = `<thead><tr><th><span class="sr-only">Chart</span></th><th class="l">Stock</th><th>Bought (IST)</th><th>Sold (IST)</th><th>Entry ₹</th><th>Exit ₹</th><th>Qty</th><th>Max profit</th><th>Max loss</th><th>P&amp;L</th><th>Capital after</th><th>Return</th><th>Days</th><th>Rank in → out</th><th>Why sold</th></tr></thead><tbody>` +
+    (rows.length ? rows.map((t, k) => `<tr><td><button class="cbtn" type="button" data-trade="${k}" title="Open chart" aria-label="Open ${esc(t.symbol)} chart">{{ ui_icon("chart") }}</button></td><td class="l"><b>${esc(t.symbol)}</b></td><td>${at(t.entry_date, t.entry_time)}</td><td>${at(t.exit_date, t.exit_time)}</td><td>${inr(t.entry, 2)}</td><td>${inr(t.exit, 2)}</td><td>${t.qty}</td>${peakCells(t)}<td class="${cls(t.pnl)}">${inr(t.pnl)}</td><td><b>${inr(t.capital_after)}</b></td><td class="${cls(t.pnl_pct)}">${pct(t.pnl_pct)}</td><td>${t.days}</td><td>#${t.entry_rank} → ${t.exit_rank ? '#' + t.exit_rank : 'out'}</td><td style="text-align:left">${esc(t.reason)}</td></tr>`).join('')
+      : `<tr><td colspan="15" class="muted">No closed trades</td></tr>`) + '</tbody>';
 }
 
 // ── Full-screen trade chart ──────────────────────────────────────────────
@@ -487,7 +492,7 @@ function drawTradeChart() {
   }
   candles.createPriceLine({ price: t.entry, color: BUY, lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'Entry' });
   candles.createPriceLine({ price: exitPx, color: t.pnl >= 0 ? UP : DOWN, lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: t.holding ? 'Last close' : 'Exit' });
-  // Markers on the fill candle: the order fills at that candle's open (09:15:00).
+  // Markers on the fill candle: the order fills at that candle's open (09:15, or 11:00 / 12:00 for Momentum Tuned).
   const markers = [];
   const showEntry = daily || view === 'entry', showExit = !t.holding && (daily || view === 'exit');
   const at = (d, clock) => daily ? d : istTs(d, clock.slice(0, 5));
@@ -497,7 +502,7 @@ function drawTradeChart() {
   legend.push(`<span><i style="border-color:${BUY};border-top-style:dashed"></i>Entry ₹${fmt2(t.entry)} · ${t.entry_date} ${t.entry_time} IST</span>`);
   legend.push(t.holding ? `<span><i style="border-color:${t.pnl >= 0 ? UP : DOWN};border-top-style:dashed"></i>Last close ₹${fmt2(exitPx)} · still held</span>`
                         : `<span><i style="border-color:${t.pnl >= 0 ? UP : DOWN};border-top-style:dashed"></i>Exit ₹${fmt2(exitPx)} · ${t.exit_date} ${t.exit_time} IST</span>`);
-  legend.push(`<span>${daily ? 'Daily candles · ▲ buy and ▼ sell fill at the marked candle\'s open' : `1-minute candles · ${view === 'entry' ? t.entry_date : t.exit_date} · the 09:15 candle's open is the fill`}</span>`);
+  legend.push(`<span>${daily ? 'Daily candles · ▲ buy and ▼ sell on the marked day, at the time shown above' : `1-minute candles · ${view === 'entry' ? t.entry_date : t.exit_date} · the ${(view === 'entry' ? t.entry_time : t.exit_time).slice(0, 5)} candle's open is the fill`}</span>`);
   $('clegend').innerHTML = legend.join('');
   // Daily: start ~6 months before the entry so the run-up is visible.
   if (daily) {
