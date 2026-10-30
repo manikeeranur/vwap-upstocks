@@ -289,6 +289,10 @@ class MomentumService:
             self.job.update(phase="Running the backtest", done=0, total=0)
             symbols = {x["key"]: x["symbol"] for x in instruments}
             result = await asyncio.to_thread(self._compute, cached, symbols, st, need_from, end)
+            if st.score == "tuned":   # Momentum Tuned's real switch-day times: sell 11:00, then buy 12:00
+                self.job.update(phase="Fetching 11:00 / 12:00 prices for the switch days")
+                fills = await self._switch_prices(result, instruments)
+                result = await asyncio.to_thread(self._compute, cached, symbols, st, need_from, end, fills)
             result["data"] = {"stocks": len(instruments), "downloaded": len(todo), "failed": len(self.job["failed"]),
                               "through": result["equity"][-1][0] if result["equity"] else None}
             result["finished"] = datetime.now(upstox.IST).isoformat(timespec="seconds")
@@ -342,7 +346,38 @@ class MomentumService:
                 "ranking": [{"symbol": symbols[cols[r["col"]]], "key": cols[r["col"]], "rank": r["rank"],
                              "above_sma": r["above_sma"], "close": round(r["close"], 2)} for r in ranking]}
 
+    async def _switch_prices(self, result: dict, instruments: list[dict]) -> dict:
+        """{("sell"|"buy", key, ISO day): price} — each trade's minute price at 11:00 (sell) / 12:00 (buy).
+        Upstox has stock minute candles only from 2022; earlier switch days keep the open."""
+        key_of = {x["symbol"]: x["key"] for x in instruments}
+        wanted = {("buy", t["symbol"], t["entry_date"]) for t in result["trades"] + result["holdings"]}
+        wanted |= {("sell", t["symbol"], t["exit_date"]) for t in result["trades"]}
+        out = {}
+        for kind, sym, day in sorted(wanted):
+            key = key_of.get(sym)
+            if not key or day < "2022-01-01":
+                continue
+            try:
+                await self.store.limiter.wait()
+                rows = await upstox.candles(key, "1m", date.fromisoformat(day), date.fromisoformat(day), expired=False)
+            except upstox.UpstoxError as exc:
+                log.warning("Minute prices unavailable for %s %s: %s", sym, day, redact(str(exc)))
+                continue
+            at = (momentum.SELL_TIME if kind == "sell" else momentum.BUY_TIME)[:5]
+            hit = next((r for r in rows if r[0][11:16] >= at), None)
+            if hit:
+                out[(kind, key, day)] = float(hit[1])
+        return out
+
     @classmethod
-    def _compute(cls, cached, symbols, st, need_from, end):
+    def _compute(cls, cached, symbols, st, need_from, end, fills=None):
         dates, cols, o, c, v, bench = cls._arrays(cached, symbols, need_from, end)
-        return momentum.run(dates, [symbols[k] for k in cols], o, c, v, st, bench)
+        arrays = None
+        if fills:
+            row = {d.isoformat(): i for i, d in enumerate(dates)}
+            col = {k: j for j, k in enumerate(cols)}
+            arrays = {"sell": np.full(o.shape, np.nan), "buy": np.full(o.shape, np.nan)}
+            for (kind, key, day), px in fills.items():
+                if day in row and key in col:
+                    arrays[kind][row[day], col[key]] = px
+        return momentum.run(dates, [symbols[k] for k in cols], o, c, v, st, bench, arrays)

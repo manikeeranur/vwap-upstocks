@@ -31,6 +31,9 @@ SCORES = ("risk_adjusted", "12-1", "tuned")
 TUNED = {"slots": 1, "exit_rank": 5, "sma_days": 150, "universe": 1000}
 # Fills use daily candles: the open price is set at 09:15:00 IST, the close at 15:30:00.
 OPEN_TIME, CLOSE_TIME = "09:15:00", "15:30:00"
+# Momentum Tuned trades the switch day at these times (sell first, then buy with the proceeds); a backtest
+# given their minute prices (`fills`) uses them instead of the open.
+SELL_TIME, BUY_TIME = "11:00:00", "12:00:00"
 
 
 @dataclass(frozen=True)
@@ -154,8 +157,10 @@ def _r(x, nd=2):
 
 
 def run(dates: list[date], symbols: list[str], open_: np.ndarray, close: np.ndarray, volume: np.ndarray,
-        st: Settings, benchmark: np.ndarray | None = None) -> dict:
-    """Backtest over aligned [day × stock] arrays (NaN = no trade that day)."""
+        st: Settings, benchmark: np.ndarray | None = None, fills: dict | None = None) -> dict:
+    """Backtest over aligned [day × stock] arrays (NaN = no trade that day). `fills` = {"sell": arr, "buy": arr}
+    of the same shape: where finite, a sale fills at SELL_TIME / a purchase at BUY_TIME at that price."""
+    fill = lambda kind, i, col: (fills[kind][i, col] if fills and np.isfinite(fills[kind][i, col]) else None)
     cost = st.cost_pct / 100
     lo = next((i for i, d in enumerate(dates) if d >= st.start), len(dates))
     hi = max((i for i, d in enumerate(dates) if d <= st.end), default=-1)
@@ -187,6 +192,8 @@ def run(dates: list[date], symbols: list[str], open_: np.ndarray, close: np.ndar
                 while j <= hi and not np.isfinite(open_[j, col]):
                     j += 1  # no trade at this open: sell at the stock's next open
                 px, when, at = (open_[j, col], dates[j], OPEN_TIME) if j <= hi else (last_close[hi, col], dates[hi], CLOSE_TIME)
+                if j <= hi and fill("sell", j, col) is not None:
+                    px, at = fill("sell", j, col), SELL_TIME
                 gross = p["qty"] * px
                 fee = gross * cost
                 cash += gross - fee
@@ -196,7 +203,7 @@ def run(dates: list[date], symbols: list[str], open_: np.ndarray, close: np.ndar
                 k = min(j, hi)
                 capital = cash + sum(q["qty"] * (open_[k, c] if np.isfinite(open_[k, c]) else last_close[k, c])
                                      for c, q in pos.items() if np.isfinite(last_close[k, c]))
-                trades.append({"symbol": symbols[col], "entry_date": p["date"].isoformat(), "entry_time": OPEN_TIME, "entry": _r(p["price"]),
+                trades.append({"symbol": symbols[col], "entry_date": p["date"].isoformat(), "entry_time": p["time"], "entry": _r(p["price"]),
                                "exit_date": when.isoformat(), "exit_time": at, "exit": _r(px), "qty": p["qty"], "pnl": _r(pnl),
                                "capital_after": _r(capital), "pnl_pct": _r(pnl / p["cost_basis"] * 100), "days": (when - p["date"]).days,
                                "entry_rank": p["rank"], "exit_rank": s["rank"], "reason": s["reason"]})
@@ -205,6 +212,9 @@ def run(dates: list[date], symbols: list[str], open_: np.ndarray, close: np.ndar
             amount = cash / free if free > 0 else 0
             for b in buys:
                 col, px = b["col"], open_[i, b["col"]]
+                at = OPEN_TIME
+                if fill("buy", i, col) is not None:
+                    px, at = fill("buy", i, col), BUY_TIME
                 if not np.isfinite(px) or px <= 0:
                     bought.append({"symbol": symbols[col], "rank": b["rank"], "skipped": "No opening price"})
                     continue
@@ -215,8 +225,8 @@ def run(dates: list[date], symbols: list[str], open_: np.ndarray, close: np.ndar
                 spend, fee = qty * px, qty * px * cost
                 cash -= spend + fee
                 costs += fee
-                pos[col] = {"qty": qty, "price": px, "date": dates[i], "rank": b["rank"], "cost_basis": spend + fee}
-                bought.append({"symbol": symbols[col], "rank": b["rank"], "price": _r(px), "at": f"{dates[i]} {OPEN_TIME}", "qty": qty, "amount": _r(spend)})
+                pos[col] = {"qty": qty, "price": px, "date": dates[i], "time": at, "rank": b["rank"], "cost_basis": spend + fee}
+                bought.append({"symbol": symbols[col], "rank": b["rank"], "price": _r(px), "at": f"{dates[i]} {at}", "qty": qty, "amount": _r(spend)})
             meta.update(executed=f"{dates[i]} {OPEN_TIME}", sold=sold, bought=bought, cash_after=_r(cash))
         value = cash + sum(p["qty"] * last_close[i, c] for c, p in pos.items() if np.isfinite(last_close[i, c]))
         equity.append([dates[i].isoformat(), _r(value)])
@@ -236,7 +246,7 @@ def run(dates: list[date], symbols: list[str], open_: np.ndarray, close: np.ndar
                 meta["pending"] = True
 
     # Open positions at the end, marked at the last close (not sold).
-    holdings = [{"symbol": symbols[c], "qty": p["qty"], "entry_date": p["date"].isoformat(), "entry_time": OPEN_TIME, "entry": _r(p["price"]),
+    holdings = [{"symbol": symbols[c], "qty": p["qty"], "entry_date": p["date"].isoformat(), "entry_time": p["time"], "entry": _r(p["price"]),
                  "close": _r(last_close[hi, c]), "value": _r(p["qty"] * last_close[hi, c]),
                  "pnl": _r(p["qty"] * last_close[hi, c] - p["cost_basis"]),
                  "pnl_pct": _r((p["qty"] * last_close[hi, c] / p["cost_basis"] - 1) * 100), "entry_rank": p["rank"]}
