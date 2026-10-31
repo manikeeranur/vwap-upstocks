@@ -10,7 +10,7 @@ import time
 
 import httpx
 
-from .. import brokers, live
+from .. import brokers, live, upstox
 
 log = logging.getLogger(__name__)
 REMIND_AT = ("08:30", "08:45", "09:00", "09:10")
@@ -68,7 +68,14 @@ class ReminderService:
                 out.setdefault(acc["user"], []).append(acc["broker"])
         return out
 
-    async def tick(self, hhmm):
+    async def tick(self, hhmm, now=None):
+        now = (now or live.now_ist()).astimezone(upstox.IST)
+        if now.weekday() >= 5 or hhmm not in (*REMIND_AT, FINAL_AT):
+            return
+        calendar = self.app.state.exchange_calendar
+        await calendar.refresh(now)
+        if not calendar.day(now.date())["login_alerts_required"]:
+            return
         from ..api.accounts import request_upstox_approval
         missing = await asyncio.to_thread(self._needs_login)
         base = self.app.state.settings.public_url
@@ -96,6 +103,6 @@ class ReminderService:
             hhmm = nxt.strftime("%H:%M")
             if nxt.weekday() < 5 and (hhmm in REMIND_AT or hhmm == FINAL_AT):
                 try:
-                    await self.tick(hhmm)
+                    await self.tick(hhmm, nxt)
                 except Exception:
                     log.exception("Login reminder failed")

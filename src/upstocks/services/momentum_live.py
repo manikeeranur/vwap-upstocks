@@ -65,6 +65,7 @@ class MomentumLiveService:
         portfolios = await asyncio.to_thread(self.store.snapshot, user_id)
         return {
             "portfolios": portfolios,
+            "market_calendar": self.app.state.trading.calendar.day(live.now_ist().date()),
             "worker": self.worker_health(),
             "global_entries_paused": self.app.state.trading.state["users"]
             .get(user_id, {})

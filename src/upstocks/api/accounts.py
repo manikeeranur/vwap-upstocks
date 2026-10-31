@@ -7,7 +7,7 @@ import time
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
-from .. import accounts, brokers
+from .. import accounts, brokers, upstox
 from ..observability import redact
 from ..schemas import BrokerKeys, IndTotp, IndToken, Login, TelegramSetting
 from .common import templates
@@ -85,7 +85,8 @@ def _status(request, user_id):
                   "valid_until": until.isoformat(timespec="minutes") if until else None,
                   "broker_user": row.get("broker_user") or "", "profile": _profile_of(row)}
     user = repo.user(user_id) or {}
-    return {"brokers": out, "telegram": bool(user.get("telegram_chat_id")), "username": user.get("username"),
+    return {"market_calendar": request.app.state.exchange_calendar.day(upstox.today_ist()),
+            "brokers": out, "telegram": bool(user.get("telegram_chat_id")), "username": user.get("username"),
             "urls": _urls(request), "telegram_bot": bool(request.app.state.settings.telegram_bot_token)}
 
 

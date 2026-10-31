@@ -33,6 +33,14 @@
   .day.has { cursor: pointer; } .day.has:hover { outline: 2px solid var(--accent); }
   .day.sel { outline: 2px solid var(--accent); }
   .day.out { opacity: .35; } .day.wk { background: transparent; }
+  .day.holiday { border-color: color-mix(in srgb, #b87824 65%, var(--border)); background: color-mix(in srgb, #b87824 8%, var(--card)); }
+  .day.special { border-color: var(--accent); }
+  .session-badge { font-size: 10px; color:var(--muted); overflow-wrap:anywhere; line-height:1.3; }
+  .holiday .session-badge { color:#a86717; }
+  .special .session-badge { color:var(--accent); }
+  .session-name { font-size:11px; color:var(--muted); line-height:1.3; }
+  .calendar-legend { display:flex; flex-wrap:wrap; gap:6px 16px; margin:12px 0 0; color:var(--muted); font-size:12px; }
+  @media(max-width:700px) { .session-name { display:none; } .session-badge { font-size:8.5px; overflow-wrap:normal; } .day.wk .session-badge { letter-spacing:-.15px; } .day { min-height:78px; } }
   .day .n { font-size: 12px; color: var(--muted); font-weight: 600; }
   .day .pl { font-size: 16px; font-weight: 700; margin-top: auto; }
   .day .tc { font-size: 11px; color: var(--muted); }
@@ -71,24 +79,30 @@
     <div class="mnav"><button id="prev" type="button" aria-label="Previous month">‹</button><h2 id="mon"></h2><button id="next" type="button" aria-label="Next month">›</button></div>
   </div>
   <p class="page-status" id="pageStatus" role="status">Loading your calendar…</p>
+  <p class="small muted" id="calendarStatus" role="status"></p>
   <div class="tiles" id="tiles"></div>
   <div class="broker-tiles" id="brokerTiles" hidden></div>
   <div class="card">
     <div class="cal" id="cal"></div>
+    <p class="calendar-legend"><span>Weekend</span><span>Holiday · exchange closed</span><span>Special session · limited hours</span><span>Dates and session times: IST</span></p>
   </div>
   <div class="card" id="detail" hidden></div>
 <p class="small">Live totals include only fully closed trades with confirmed quantities, fill prices and reported broker charges. Open, partial and unresolved trades are excluded.</p>
 </main>
 <script src="/static/portfolio-pnl.js"></script>
+<script src="/static/exchange-calendar.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const LABELS = { ...{{ labels | tojson }}, ema25_vwap: "VWAP + EMA25", ema_pullback: "EMA pullback", smc_ema_combo: "SMC + EMA (1/day)" }, TODAY = "{{ today }}";
 const fmt = n => (Math.round(n * 100) / 100).toFixed(2);
 const money = n => `${n < 0 ? "−" : n > 0 ? "+" : ""}₹${Math.abs(n).toLocaleString("en-IN", {minimumFractionDigits:2, maximumFractionDigits:2})}`;
 const ampm = s => { if (!s) return "—"; let [h, m] = s.split(":").map(Number); const ap = h >= 12 ? "PM" : "AM"; h = h % 12 || 12; return `${h}:${String(m).padStart(2, "0")} ${ap}`; };
-const iso = d => d.toLocaleDateString("en-CA");
-let cur = new Date(TODAY); cur.setDate(1);
-let J = null, sel = null, loadVersion = 0;
+const iso = ExchangeCalendar.iso;
+const EXCHANGES = {{ exchanges | tojson }};
+const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const session = key => ExchangeCalendar.session(key, C?.days?.[key], EXCHANGES[$("strat").value]);
+let cur = new Date(TODAY + "T12:00:00"); cur.setDate(1);
+let J = null, C = null, sel = null, loadVersion = 0;
 const mode = () => $("mode").value;   // "paper", "live" or "live:<broker>"
 const BROKERS = { upstox: "Upstox", kite: "Kite", indmoney: "INDmoney" };
 // Paper: every trade at the journal's quantity. Live: only trades a broker bought, at the quantity sent
@@ -114,10 +128,23 @@ async function load() {
   const status = $("pageStatus"); status.hidden = false; status.className = "page-status"; status.textContent = "Loading your calendar…";
   $("cal").setAttribute("aria-busy", "true");
   try {
-    const response = await appFetch(`/api/journal?start=${iso(a)}&end=${iso(b)}`);
-    if (!response.ok) throw new Error("Couldn't load the calendar. Change the month to try again.");
-    const result = await response.json(); if (version !== loadVersion) return;
-    J = result; status.hidden = true; render();
+    const [journal, calendar] = await Promise.allSettled([
+      appFetch(`/api/journal?start=${iso(a)}&end=${iso(b)}`).then(async r => {
+        if (!r.ok) throw new Error("Couldn't load the calendar. Change the month to try again.");
+        return r.json();
+      }),
+      appFetch(`/api/market/calendar?year=${cur.getFullYear()}&month=${cur.getMonth() + 1}`).then(async r => {
+        if (!r.ok) throw new Error("Holiday calendar unavailable");
+        return r.json();
+      })
+    ]);
+    if (version !== loadVersion) return;
+    if (journal.status === "rejected") throw journal.reason;
+    J = journal.value; C = calendar.status === "fulfilled" ? calendar.value : null;
+    $("calendarStatus").textContent = !C?.verified
+      ? "Holiday dates are unavailable for this year. Weekends are marked; recorded P&L is still shown."
+      : C.warning || "NSE / BSE exchange schedule · select a day for holiday names and session times.";
+    status.hidden = true; render();
   } catch (error) {
     if (version !== loadVersion) return;
     J = null; $("cal").innerHTML = ""; $("tiles").innerHTML = ""; $("detail").hidden = true;
@@ -196,10 +223,13 @@ function render() {
   for (let i = 0; i < lead; i++) cells.push(`<div class="day out wk"></div>`);
   for (let d = 1; d <= last.getDate(); d++) {
     const dt = new Date(y, m, d), k = iso(dt), v = pl[k], wk = dt.getDay() === 0 || dt.getDay() === 6;
+    const schedule = session(k);
     const a = v && v.n ? Math.min(0.85, 0.12 + Math.abs(v.rs) / maxAbs * 0.5) : 0;
     const bg = v && v.n ? `background: color-mix(in srgb, ${v.rs >= 0 ? "var(--ok)" : "var(--pe)"} ${Math.round(a * 100)}%, var(--card));` : "";
-    cells.push(`<button type="button" aria-label="${k}${v && v.n ? `, ${money(v.rs)}, ${v.n} trades` : ", no trades"}" aria-pressed="${k === sel}" class="day ${v && v.n ? "has" : ""} ${wk ? "wk" : ""} ${k === TODAY ? "today" : ""} ${k === sel ? "sel" : ""}" data-d="${k}" style="${bg}">
+    cells.push(`<button type="button" aria-label="${k}, ${esc([schedule.badge, schedule.label].filter((x, i, a) => x && a.indexOf(x) === i).join(", "))}${v && v.n ? `, ${money(v.rs)}, ${v.n} trades` : ", no trades"}" aria-pressed="${k === sel}" class="day ${schedule.kind} ${v && v.n ? "has" : ""} ${wk ? "wk" : ""} ${k === TODAY ? "today" : ""} ${k === sel ? "sel" : ""}" data-d="${k}" style="${bg}">
       <span class="n">${d}</span>
+      ${schedule.badge ? `<span class="session-badge">${schedule.kind === "weekend" ? `<span class="cal-full">Weekend</span><span class="cal-compact">Closed</span>` : esc(schedule.badge)}</span>` : ""}
+      ${["holiday","special","mixed"].includes(schedule.kind) ? `<span class="session-name">${esc(schedule.label)}</span>` : ""}
       ${v && v.n ? `<span class="pl ${v.rs >= 0 ? "up" : "down"}" style="${a > .45 ? "color:#fff" : ""}">${`<span class="cal-full">${money(v.rs)}</span><span class="cal-compact">${v.rs < 0 ? "−" : v.rs > 0 ? "+" : ""}₹${new Intl.NumberFormat("en-IN", {notation:"compact",maximumFractionDigits:1}).format(Math.abs(v.rs))}</span>`}</span><span class="tc" style="${a > .45 ? "color:#fffc" : ""}">${v.n} trade${v.n > 1 ? "s" : ""}</span>`
         : v ? `<span class="tc" style="margin-top:auto">no trade</span>` : ""}
     </button>`);
@@ -210,9 +240,12 @@ function render() {
 
 function renderDetail() {
   if (!sel) { $("detail").hidden = true; return; }
-  const ts = dayTrades(sel), net = ts.reduce((a, t) => a + t.rs, 0);
+  const ts = dayTrades(sel), net = ts.reduce((a, t) => a + t.rs, 0), schedule = session(sel);
+  const sessionNames = {NSE:"NSE equities", NFO:"NSE F&O", BSE:"BSE equities", BFO:"BSE F&O"};
+  const marketInfo = schedule.sessions.map(s => `${sessionNames[s.code]}: ${s.kind === "holiday" || s.kind === "weekend" ? "Closed · " : s.kind === "open" || s.kind === "special" ? "Open · " : ""}${esc(s.label)}${s.session ? " · " + esc(s.session) : ""}`).join("<br>");
   $("detail").hidden = false;
-  $("detail").innerHTML = `<h3>${new Date(sel).toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" })} · <span class="${net >= 0 ? "up" : "down"}">${money(net)}</span></h3>
+  $("detail").innerHTML = `<h3>${new Date(sel + "T12:00:00").toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" })} · ${ts.length ? `<span class="${net >= 0 ? "up" : "down"}">${money(net)}</span>` : "No trades"}</h3>
+    <p class="small muted">${marketInfo}</p>
     <div class="scroll"><table><thead><tr><th>Strategy</th><th>In → out</th><th>Option</th><th>Signal entry</th><th>Signal exit</th><th>Status</th><th>Signal pts</th><th>P&amp;L ₹</th>${mode() !== "paper" ? "<th>Charges</th><th>Net</th><th>Live at</th>" : ""}<th>Note</th></tr></thead><tbody>${
     ts.map(t => `<tr><td>${LABELS[t.preset]}</td><td>${ampm(t.entry_time)} → ${t.open ? "…" : ampm(t.exit_time)}</td>
       <td><b style="color:${t.type === "CE" ? "var(--ce)" : "var(--pe)"}">${t.symbol}</b></td><td>₹${fmt(t.entry)}</td><td>₹${fmt(t.exit)}</td>

@@ -18,6 +18,7 @@ from ..stocks.domain import TERMINAL, PortfolioError
 from ..order_evidence import current_attempt, apply_evidence, combine
 from ..observability import redact
 from ..repository import account_id
+from .exchange_calendar import ExchangeCalendar
 
 log = logging.getLogger(__name__)
 
@@ -25,6 +26,7 @@ log = logging.getLogger(__name__)
 class TradingService:
     def __init__(self, repository, vault=None):
         self.repository = repository
+        self.calendar = ExchangeCalendar(repository)
         self.vault = vault
         self.state = repository.state()
         self.view = repository.get_view()
@@ -94,9 +96,16 @@ class TradingService:
         state["lot_sizes"] = {p: live.lot_size(p, state["lot_size"]) for p in live.PRESETS}
         state["paper_only"] = [p for p in live.PRESETS if live.paper_only(p)]
         return {"state": state, "view": view, "market_open": live.market_open(),
+                "market_calendar": self.calendar.day(live.now_ist().date()),
                 "now": live.now_ist().strftime("%a %d %b %H:%M:%S"), "view_revision": self.view_revision,
-                "reconciliation": {a: {"error": self._fills_errors.get(a) or ("Unresolved orders block new entries; reconnect and reconcile with the broker" if self._unresolved(a) else None), "age_seconds": round(time.monotonic() - self._fills_cache[a][0]) if a in self._fills_cache else None}
+                "reconciliation": {a: {"error": self._reconciliation_error(a), "age_seconds": round(time.monotonic() - self._fills_cache[a][0]) if a in self._fills_cache else None}
                                    for a in state["accounts"]}}
+
+    def _reconciliation_error(self, account):
+        error = self._fills_errors.get(account)
+        if error == "Broker login expired; reconciliation unavailable" and not self.calendar.day(live.now_ist().date())["login_alerts_required"]:
+            error = None
+        return error or ("Unresolved orders block new entries; verified broker evidence is required" if self._unresolved(account) else None)
 
     async def _activity(self, message):
         message = redact(f"{live.now_ist():%Y-%m-%d %H:%M:%S} {message}")

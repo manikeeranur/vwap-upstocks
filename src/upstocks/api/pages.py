@@ -30,6 +30,7 @@ async def journal_page(request: Request):
 @router.get("/calendar", response_class=HTMLResponse)
 async def calendar_page(request: Request):
     return templates.TemplateResponse(request, "calendar.html", {"labels": live.LABELS, "presets": live.PRESETS,
+                                                                 "exchanges": {p: "BSE" if live.underlying(p) == "SENSEX" else "NSE" for p in live.PRESETS},
                                                                  "today": upstox.today_ist().isoformat()})
 
 

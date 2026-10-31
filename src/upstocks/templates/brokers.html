@@ -48,7 +48,7 @@
 
   <section class="card sec">
     <h2>Telegram morning reminder</h2>
-    <p class="meta" style="margin:0 0 12px">On weekdays at 08:30, 08:45, 09:00 and 09:10 you get one-tap login links if a broker with Live ON isn't logged in yet, and a final warning at 09:15. At 08:30 Upstox also sends an Approve request to your Upstox app. Find your chat ID by messaging <b>@userinfobot</b> on Telegram, and start a chat with this app's bot first.</p>
+    <p class="meta" style="margin:0 0 12px">On trading weekdays (excluding exchange holidays) at 08:30, 08:45, 09:00 and 09:10 you get one-tap login links if a broker with Live ON isn't logged in yet, and a final warning at 09:15. At 08:30 Upstox also sends an Approve request to your Upstox app. No login reminders are sent on weekends, including special weekend sessions. Find your chat ID by messaging <b>@userinfobot</b> on Telegram, and start a chat with this app's bot first.</p>
     <form class="tg" id="tg"><label>Telegram chat ID <input name="chat_id" inputmode="numeric" pattern="-?[0-9]*" placeholder="e.g. 123456789"></label><button class="btn primary" type="submit">Save</button></form>
     <p class="meta" id="tgState"></p>
   </section>
@@ -83,10 +83,10 @@ function profileCard(p) {
   return `<div class="profile">${pic}<div><b>${esc(p.name || p.user_id)}</b>${p.user_id ? `<span>Client ID · ${esc(p.user_id)}</span>` : ''}</div></div>`;
 }
 // INDstocks has no login page: paste the day's token, or generate one from MPIN + authenticator code.
-function indCard(x) {
+function indCard(x, s) {
   const b = 'indmoney';
   return `<section class="card broker" id="indmoney" aria-label="${NAMES[b]}">
-      <div class="broker-head"><h2>${brokerLogo(b,26)}${NAMES[b]}</h2><span class="status ${x.logged_in ? 'ok' : 'bad'}">${x.logged_in ? 'Logged in today' : 'Not logged in'}</span></div>
+      <div class="broker-head"><h2>${brokerLogo(b,26)}${NAMES[b]}</h2><span class="status ${x.logged_in ? 'ok' : s.market_calendar?.login_alerts_required ? 'bad' : ''}">${x.logged_in ? 'Logged in today' : 'Not logged in'}</span></div>
       ${profileCard(x.profile)}
       <form data-indtoken>
         <label>Today's access token <input name="token" type="password" autocomplete="off" spellcheck="false" placeholder="Paste the token from indstocks.com"></label>
@@ -109,9 +109,9 @@ function indCard(x) {
 }
 function render(s) {
   last = s;
-  $('grid').innerHTML = Object.entries(s.brokers).map(([b,x]) => b === 'indmoney' ? indCard(x) : `
+  $('grid').innerHTML = Object.entries(s.brokers).map(([b,x]) => b === 'indmoney' ? indCard(x, s) : `
     <section class="card broker" aria-label="${NAMES[b]}">
-      <div class="broker-head"><h2>${brokerLogo(b,26)}${NAMES[b]}</h2><span class="status ${x.logged_in ? 'ok' : x.has_key ? 'bad' : ''}">${x.logged_in ? 'Logged in today' : x.has_key ? 'Not logged in' : 'Not set up'}</span></div>
+      <div class="broker-head"><h2>${brokerLogo(b,26)}${NAMES[b]}</h2><span class="status ${x.logged_in ? 'ok' : x.has_key && s.market_calendar?.login_alerts_required ? 'bad' : ''}">${x.logged_in ? 'Logged in today' : x.has_key ? 'Not logged in' : 'Not set up'}</span></div>
       ${profileCard(x.profile)}
       ${x.has_key && x.has_secret && !editing.has(b) ? `<div class="saved-keys"><div><span>API key</span><b>******</b></div><div><span>API secret</span><b>******</b></div><button class="btn ghost" type="button" data-edit="${b}">Change keys</button></div>` : `<form data-keys="${b}">
         <label>API key <input name="api_key" autocomplete="off" spellcheck="false" placeholder="${x.has_key ? '****** (saved)' : 'Paste your API key'}"></label>

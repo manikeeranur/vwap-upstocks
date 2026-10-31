@@ -157,3 +157,30 @@ paper holding or a fresh saved tuned backtest. The Exit recovery panel replaces
 only confirmed cancelled/rejected exits for the verified remaining quantity.
 Historical fills and final charges use an account-scoped CSV preview/apply flow;
 broker fee estimates never count as exact net P&L. These additions use schema 8.
+
+## Exchange calendar and login reminders
+
+The P&L calendar marks weekends, NSE/BSE trading holidays, and special sessions.
+Selecting a day shows its holiday name and equity/F&O hours in IST. Strategy
+filters select the relevant exchange. Recorded trades and P&L remain visible
+regardless of a date's calendar classification.
+
+The shared calendar service reads the public
+[Upstox holiday feed](https://upstox.com/developer/api-documentation/get-market-holidays/)
+without broker credentials. A verified 2026 snapshot ships with the app.
+Successful refreshes are saved under exchange_calendar in SQLite settings;
+the current year refreshes on calendar requests and scheduled reminder checks,
+at most once every six hours. Failed refreshes retain the last good snapshot
+and back off for 15 minutes. Missing years are explicitly shown as unavailable;
+weekends can still be displayed. Unknown calendars suppress automated login
+reminders until verified data becomes available.
+
+Telegram login reminders and automatic Upstox approval requests run only on
+trading weekdays. Weekends stay quiet even when a special session is scheduled.
+Settlement-only holidays with open equity/derivative exchanges still count as
+trading days. Overview and stock pages suppress expired-login nags on closed
+days, while unresolved-order and other operational problems remain visible.
+Explicit broker login and reconciliation controls remain available.
+
+Calendar metadata does not enable special-session trading or change execution,
+order ownership, holdings, fill accounting, or the existing market-data checks.

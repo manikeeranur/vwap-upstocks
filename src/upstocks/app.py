@@ -64,6 +64,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
             app.state.export_lock = asyncio.Lock()
             app.state.audit_failures = 0
             app.state.trading = trading_service
+            app.state.exchange_calendar = trading_service.calendar
             quotes = QuoteService(trading_service)
             app.state.quotes = quotes
             app.state.backtests = backtests

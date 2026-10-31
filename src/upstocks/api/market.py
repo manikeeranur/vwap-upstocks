@@ -75,6 +75,15 @@ async def account_page(request: Request, broker: str = "upstox"):
                                                                 "login_needed": False, "now": now})
 
 
+@router.get("/api/market/calendar")
+async def market_calendar(request: Request, year: int = Query(..., ge=2001, le=2100),
+                          month: int = Query(..., ge=1, le=12)):
+    calendar = request.app.state.exchange_calendar
+    if year == upstox.today_ist().year:
+        await calendar.refresh()
+    return calendar.month(year, month)
+
+
 @router.get("/api/account")
 async def api_account():
     return await upstox.account()

@@ -129,7 +129,7 @@ function render() {
     ' · Paper simulations and confirmed broker execution are reported separately.';
   showBrokerErrors();
   const liveCount = PRESETS.filter(isLive).length;
-  const missing = B ? accounts().filter(a => PRESETS.some(p => a.live[p]) && !B[a.broker]?.logged_in).map(a => BROKER_NAMES[a.broker]) : [];
+  const missing = B && S.market_calendar?.login_alerts_required ? accounts().filter(a => PRESETS.some(p => a.live[p]) && !B[a.broker]?.logged_in).map(a => BROKER_NAMES[a.broker]) : [];
   $('loginBanner').hidden = !missing.length;
   $('loginText').textContent = missing.length ? `Live is ON but you are not logged in to ${missing.join(' and ')} today — those orders will be skipped.` : '';
   $('modeBadge').textContent = liveCount ? `Live enabled · ${liveCount} ${liveCount === 1 ? 'strategy' : 'strategies'}` : 'Paper mode';
@@ -178,7 +178,7 @@ function renderSettings() {
   if (document.activeElement?.matches('#stratDialog input[type=number]')) return;   // don't wipe what is being typed
   const accs = accounts();
   $('stratDialogSub').textContent = `Paper, live orders and lots for every strategy · lot size ${S.state.lot_size} (SENSEX ${lotSize('sensex_swing')})`;
-  const head = accs.map(a => `<th><span class="th-broker">${brokerLogo(a.broker,16)}${BROKER_NAMES[a.broker]} Live · lots</span>${B && !B[a.broker]?.logged_in ? '<small class="th-warn">Not logged in today</small>' : ''}</th>`).join('');
+  const head = accs.map(a => `<th><span class="th-broker">${brokerLogo(a.broker,16)}${BROKER_NAMES[a.broker]} Live · lots</span>${S.market_calendar?.login_alerts_required && B && !B[a.broker]?.logged_in ? '<small class="th-warn">Not logged in today</small>' : ''}</th>`).join('');
   const rows = shownPresets().map(p => {
     const cfg = S.state.config[p];
     return `<tr><td><b>${esc(LABELS[p])}</b><small>${DESCRIPTIONS[p]}</small></td>
@@ -258,7 +258,7 @@ async function onConfigChange(e) {
     if(enabled && !await confirmAction({
       title:'Enable live orders?', message:`New signals will send real buy orders to ${BROKER_NAMES[broker]}. Positions will be sold when the strategy exits.`,
       confirmText:'Enable live orders', danger:true,
-      facts:[['Strategy',LABELS[lv]],['Broker',BROKER_NAMES[broker]],['Order size',`${cfg.lots} ${cfg.lots === 1 ? 'lot' : 'lots'}`],...(B && !B[broker]?.logged_in ? [['Login','Not logged in today — orders will be skipped until you log in']] : [])]
+      facts:[['Strategy',LABELS[lv]],['Broker',BROKER_NAMES[broker]],['Order size',`${cfg.lots} ${cfg.lots === 1 ? 'lot' : 'lots'}`],...(S.market_calendar?.login_alerts_required && B && !B[broker]?.logged_in ? [['Login','Not logged in today — orders will be skipped until you log in']] : [])]
     })) return;
     saveConfig({preset:lv,broker,live:enabled,...(enabled ? {confirm:'LIVE'} : {})},input);
   } else if(on) saveConfig({preset:on,on:input.checked},input);

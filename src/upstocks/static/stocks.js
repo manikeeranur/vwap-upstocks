@@ -56,7 +56,9 @@
     }
     const h = p.position;
     el('stock-position').textContent = h ? h.symbol + ' · ' + h.qty + ' confirmed shares · recorded cost ' + money(h.cost) : 'No strategy-owned holding';
-    const issue = p.blocked || p.last_error || state.worker.error || (!state.worker.running || state.worker.stale ? 'Automation worker is unavailable; scheduled trading is stopped.' : '');
+    const loginError = 'Broker login expired. Reconnect this account to reconcile.';
+    const visibleIssue = value => value === loginError && !state.market_calendar?.login_alerts_required ? '' : value;
+    const issue = (p.blocked === loginError && !state.market_calendar?.login_alerts_required ? 'Unresolved orders need verified broker evidence before new entries.' : p.blocked) || visibleIssue(p.last_error) || state.worker.error || (!state.worker.running || state.worker.stale ? 'Automation worker is unavailable; scheduled trading is stopped.' : '');
     el('stock-plan').textContent = issue || (p.alignment_pending ? 'Current-holding entry is pending · source: ' + p.entry_source + '. Requires a fresh ranking, verified session and entries enabled.' : '') || (p.plan ? p.plan.reason + ' · Decision date ' + p.plan.day : 'Awaiting the first eligible monthly session');
     el('stock-plan').setAttribute('role', issue ? 'alert' : 'status');
     el('stock-orders').innerHTML = p.orders.length ? p.orders.slice().reverse().map(o => '<tr><td>' + esc(new Date(o.created_at).toLocaleString('en-IN',{timeZone:'Asia/Kolkata'})) +
