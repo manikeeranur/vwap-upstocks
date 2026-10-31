@@ -21,7 +21,7 @@ class FrontendTests(unittest.TestCase):
             settings = AppSettings(database_path=root / "test.sqlite3", log_dir=root / "logs", legacy_dir=root,
                                    cache_dir=root / "cache", scanner_enabled=False)
             with TestClient(create_app(settings)) as client, patch("upstocks.upstox.expiries", new=AsyncMock(return_value=[])), patch("upstocks.upstox.account", new=AsyncMock(return_value={"profile": {"data": None, "error": "static IP required"}})):
-                for page in ("paper", "stocks", "session", "momentum", "brokers", "login", "vwap", "journal", "calendar", "backtest", "data", "account", "activity"):
+                for page in ("paper", "stocks", "settings", "session", "momentum", "brokers", "login", "vwap", "journal", "calendar", "backtest", "data", "account", "activity"):
                     html = client.get(f"/{page}").text
                     for number, script in enumerate(re.findall(r"<script(?:\s[^>]*)?>(.*?)</script>", html, re.S)):
                         path = root / f"{page}-{number}.js"

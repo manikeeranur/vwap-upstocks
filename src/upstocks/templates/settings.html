@@ -1,0 +1,44 @@
+<!doctype html>
+{% from "_loading.html" import skeleton %}
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>upstocks — trading settings</title>
+{% include "_style.html" %}
+<link rel="stylesheet" href="/static/settings.css?v=20261031-settings-2">
+</head>
+<body>
+{% set active = "settings" %}{% include "_nav.html" %}
+<main id="main" tabindex="-1">
+  <header class="settings-head">
+    <div><h1>Trading settings</h1><p class="sub">Choose what runs as a simulation and what sends real orders. Changes save immediately; turning on real orders always asks for confirmation.</p></div>
+    <span class="save-state" id="saveState" role="status">Loading…</span>
+  </header>
+  <div class="connection" id="loadError" role="alert" hidden><span id="loadErrorText"></span><button type="button" class="btn ghost" id="retryBtn">Retry</button></div>
+  <div class="mode-tabs" role="tablist" aria-label="Settings mode">
+    <button type="button" role="tab" id="tab-paper" data-tab="paper" aria-controls="panel-paper" aria-selected="true"><span class="tab-dot paper" aria-hidden="true"></span><span><b>Paper trading</b><small id="paperTabNote">Simulated orders</small></span></button>
+    <button type="button" role="tab" id="tab-live" data-tab="live" aria-controls="panel-live" aria-selected="false" tabindex="-1"><span class="tab-dot live" aria-hidden="true"></span><span><b>Live trading</b><small id="liveTabNote">Real broker orders</small></span></button>
+  </div>
+
+  <section class="mode-panel" id="panel-paper" role="tabpanel" aria-labelledby="tab-paper">
+    <div class="settings-card summary" id="paperSummary" aria-busy="true">{{ skeleton('rows',1) }}</div>
+    <div class="settings-section-head"><div><h2>Intraday strategies</h2><p>Each signal is simulated with 1 lot at the strategy's entry price. P&amp;L is before charges.</p></div><div class="bulk" id="paperBulk"></div></div>
+    <div id="paperIntraday" aria-busy="true">{{ skeleton('cards',4) }}</div>
+    <div class="settings-section-head"><div><h2>Stock portfolio</h2><p>Simulated Momentum 12–1 tuned portfolio. Capital and entry source are set on <a href="/stocks">Stock portfolios</a>.</p></div></div>
+    <div id="paperStocks"></div>
+  </section>
+
+  <section class="mode-panel" id="panel-live" role="tabpanel" aria-labelledby="tab-live" hidden>
+    <div class="settings-card master" id="master" aria-busy="true">{{ skeleton('rows',1) }}</div>
+    <div class="settings-section-head"><div><h2>Intraday strategies</h2><p>Live sends real option orders to each broker. Each broker has its own lot count. Paper-only strategies cannot go live.</p></div><div class="settings-counts" id="liveCounts"></div></div>
+    <div id="liveIntraday" aria-busy="true">{{ skeleton('cards',3) }}</div>
+    <div class="settings-section-head"><div><h2>Stock portfolios</h2><p>Real limit orders on monthly decisions. Capital and entry source are set on <a href="/stocks">Stock portfolios</a>.</p></div></div>
+    <div id="liveStocks"></div>
+  </section>
+</main>
+<script>window.SETTINGS_CONFIG = {labels: {{ labels | tojson }}, presets: {{ presets | tojson }}};</script>
+<script src="/static/strategy-meta.js?v=20261031-settings-1"></script>
+<script src="/static/settings.js?v=20261031-settings-2"></script>
+</body>
+</html>

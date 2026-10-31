@@ -1,0 +1,7 @@
+// Display names, one-line descriptions and icons for intraday strategies, shared by the trading and settings pages.
+window.STRATEGY_META = {
+  labels: { ema25_vwap: "VWAP + EMA25", ema_pullback: "EMA pullback", smc_ema_combo: "SMC + EMA (1/day)" },
+  descriptions: { frontend_live:'Opening range · VWAP signals', smc_live:'Smart money concepts', ema25_vwap:'Trend confirmation · EMA25', ema_pullback:'Momentum pullback · EMA9 / EMA26', smc_tuned:'SMC · tuned, 1 trade a day', smc_ema_combo:'SMC or EMA pullback · first signal, 1 trade a day', harmonic:'0.58 Fib pullback · ITM-400 · 1 trade a day · no trades on expiry day', harmonic_2y:'0.60 Fib pullback · 0.20% swings · ITM-400 · 1 trade a day 09:45–14:30 · SL 20% · profitable in both test years', sensex_swing:'SENSEX · 0.45 Fib · 0.25% swings · ITM-200 · leg ≥ 200 · 09:30–10:45 · paper only', sensex_bigleg:'SENSEX · 0.45 Fib · 0.15% swings · ITM-200 · leg ≥ 400 · 09:30–11:15 · paper only', harmonic_power:'Harmonic Optimized entry · Elliott-wave trail: exit if wave 4 overlaps wave 1, book at wave 5 = wave 1' },
+  // Indexed by the order of the configured presets.
+  icons: ['M3 17l5-7 5 4 8-10M16 4h5v5','M4 8h16M4 16h16M8 4v8m8 0v8','M3 16l5-5 5 2 8-8M3 20h18','M3 8l5 7 5-4 4 3 4-9','M4 8h16M4 16h16M8 4v8m8 0v8M18 3l3 3-3 3','M4 7h7v10H4zM13 7h7v10h-7z','M3 18l5-12 4 8 3-5 6 9', 'M3 17l4-9 4 6 3-4 4 7M15 5h6v6', 'M3 12h4l3-7 4 14 3-7h4', 'M3 19l6-14 4 9 3-5 5 10', 'M3 18l4-8 3 4 4-9 3 6 4-5']
+};

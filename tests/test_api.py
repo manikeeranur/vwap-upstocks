@@ -53,7 +53,7 @@ class ApiTests(unittest.TestCase):
     def test_routes_headers_readiness_and_no_network(self):
         with TestClient(self.app) as client, patch("upstocks.upstox.expiries", new=AsyncMock(return_value=[])), patch("upstocks.upstox.account", new=AsyncMock(return_value={"profile": {"data": None, "error": "static IP required"}})):
             self.assertEqual(client.get("/").status_code, 200)
-            for path in ("/paper", "/journal", "/calendar", "/vwap", "/backtest", "/account", "/data", "/activity"):
+            for path in ("/paper", "/settings", "/journal", "/calendar", "/vwap", "/backtest", "/account", "/data", "/activity"):
                 response = client.get(path)
                 self.assertEqual(response.status_code, 200, path)
                 self.assertEqual(response.headers["cache-control"], "no-store")

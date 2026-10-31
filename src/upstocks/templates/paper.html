@@ -8,7 +8,7 @@
 <title>upstocks — trading overview</title>
 {% from "_icons.html" import ui_icon %}
 {% include "_style.html" %}
-<link rel="stylesheet" href="/static/paper.css?v=20261031-compact-trades-2">
+<link rel="stylesheet" href="/static/paper.css?v=20261031-no-dialog-1">
 </head>
 <body>
 {% set active = "paper" %}{% include "_nav.html" %}
@@ -38,7 +38,7 @@
       <div class="metric" data-view-only="live"><span class="metric-label">Open valuation · estimated</span><strong class="metric-value" id="liveOpen"><span class="skeleton-line" aria-hidden="true"></span></strong><small id="openValuation">Confirmed positions, current quotes</small></div>
       <div class="metric" data-view-only="live"><span class="metric-label">Execution status</span><strong class="metric-value" id="livePending"><span class="skeleton-line" aria-hidden="true"></span></strong><small id="pendingCaption">Orders requiring reconciliation</small></div>
       <div class="metric" data-view-only="paper"><div class="metric-heading"><span class="metric-label">Paper trades</span>{{ ui_icon("trades", "metric-icon") }}</div><strong class="metric-value" id="totalTrades"><span class="skeleton-line" aria-hidden="true"></span></strong><small id="tradeCaption">Latest scan</small></div>
-      <div class="metric" data-view-only="paper"><div class="metric-heading"><span class="metric-label">Open paper positions</span>{{ ui_icon("activity", "metric-icon") }}</div><strong class="metric-value" id="openTrades"><span class="skeleton-line" aria-hidden="true"></span></strong><small>Across all strategies</small></div>
+      <div class="metric" data-view-only="paper"><div class="metric-heading"><span class="metric-label">Open paper positions</span>{{ ui_icon("activity", "metric-icon") }}</div><strong class="metric-value" id="openTrades"><span class="skeleton-line" aria-hidden="true"></span></strong><small id="openCaption">Across all strategies</small></div>
       <div class="metric" data-view-only="paper"><div class="metric-heading"><span class="metric-label">Intraday strategies</span>{{ ui_icon("layers", "metric-icon") }}</div><strong class="metric-value" id="activeStrats"><span class="skeleton-line" aria-hidden="true"></span></strong><small id="activeCaption">Loading available strategies</small></div>
     </section>
     <div id="liveBrokers" class="live-brokers" data-view-only="live"></div>
@@ -49,18 +49,14 @@
       <button class="btn ghost" type="button" id="clear-trade-filters">Clear filters</button>
     </div><p class="filter-summary" id="trade-filter-summary" role="status"></p>
     <section class="strategy-region" aria-labelledby="strategy-heading">
-      <div class="section-heading"><h2 id="strategy-heading">Strategies</h2><div class="heading-right"><span id="refreshHint" role="status">Market prices · 1s</span><a class="btn ghost settings-btn" href="/session" data-view-only="paper">Scan &amp; replay</a><button class="btn ghost settings-btn" type="button" id="settingsBtn" aria-haspopup="dialog" aria-controls="stratDialog"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg> <span id="settingsLabel">Paper settings</span></button></div></div>
+      <div class="section-heading"><h2 id="strategy-heading">Strategies</h2><div class="heading-right"><span id="refreshHint" role="status">Market prices · 1s</span><a class="btn ghost settings-btn" href="/session" data-view-only="paper">Scan &amp; replay</a><a class="btn ghost settings-btn" href="/settings#paper" id="settingsBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg> <span id="settingsLabel">Paper settings</span></a></div></div>
       <div id="strats" class="strategy-list" aria-busy="true">{{ skeleton('cards',4) }}</div>
     </section>
   </div>
 </main>
-<dialog id="stratDialog" class="nav-dialog strat-dialog" aria-labelledby="stratDialogTitle">
-  <div class="dialog-head"><div><h2 id="stratDialogTitle">Strategy settings</h2><p class="sub" id="stratDialogSub">Settings for the selected mode</p></div><button type="button" class="icon-btn" id="stratDialogClose" aria-label="Close settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6"/></svg></button></div>
-  <p><span id="settingsHelp">Changes save immediately.</span> <span id="settingsSaveState" role="status">All changes saved</span></p><div id="stratDialogBody"></div>
-  <div class="dialog-foot"><button class="btn primary" type="button" id="stratDialogDone">Close</button></div>
-</dialog>
 <script>window.PAPER_CONFIG = {labels: {{ labels | tojson }}, presets: {{ presets | tojson }}};</script>
+<script src="/static/strategy-meta.js?v=20261031-settings-1"></script>
 <script src="/static/intraday-view.js?v=20261031-intraday-session-1"></script>
-<script src="/static/portfolio-pnl.js?v=20261031-loading"></script><script src="/static/paper.js?v=20261031-compact-trades-2"></script>
+<script src="/static/portfolio-pnl.js?v=20261031-loading"></script><script src="/static/paper.js?v=20261031-no-dialog-1"></script>
 </body>
 </html>

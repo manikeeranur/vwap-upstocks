@@ -16,6 +16,11 @@ async def paper_page(request: Request):
     return templates.TemplateResponse(request, "paper.html", {"labels": live.LABELS, "presets": live.PRESETS})
 
 
+@router.get("/settings", response_class=HTMLResponse)
+async def settings_page(request: Request):
+    return templates.TemplateResponse(request, "settings.html", {"labels": live.LABELS, "presets": live.PRESETS})
+
+
 @router.get("/session", response_class=HTMLResponse)
 async def session_page(request: Request):
     return templates.TemplateResponse(request, "session.html", {"labels": live.LABELS, "presets": live.PRESETS})
