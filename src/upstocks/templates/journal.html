@@ -1,4 +1,5 @@
 <!doctype html>
+{% from "_loading.html" import skeleton %}
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -81,7 +82,7 @@
 <button class="btn ghost" type="button" id="clear-history-filters">Clear filters</button></div>
 <p class="filter-summary">P&amp;L totals follow the selected mode, broker, strategy and filters. Stock portfolio activity is on the Stocks page.</p>
   <p class="page-status" id="pageStatus" role="status">Loading your journal…</p>
-  <div class="tiles" id="tiles"></div>
+  <div class="tiles" id="tiles" data-skeleton-kind="metrics" aria-busy="true">{{ skeleton("metrics",4) }}</div>
   <div class="broker-tiles" id="brokerTiles" hidden></div>
 
   <p class="mode-summary-note" id="historyScope"></p>
@@ -92,10 +93,10 @@
 
   <details class="performance-detail"><summary>More performance metrics</summary><div class="tiles" id="extraTiles"></div></details>
   <p class="small" id="noteStatus" role="status">Notes autosave.</p>
-  <div id="trades"></div>
+  <div id="trades" aria-busy="true">{{ skeleton("rows",4) }}</div>
 <p class="small" data-view-only="live">Net P&amp;L deducts saved charges. Broker-calculated charges are labeled estimated; a reconciled contract note makes them final. When charges are unavailable, gross P&amp;L is shown. Open, partial and unresolved trades are in Overview → Live.</p>
 </main>
-<script src="/static/portfolio-pnl.js?v=20261031-broker-fees"></script>
+<script src="/static/portfolio-pnl.js?v=20261031-loading"></script>
 <script>
 const $ = id => document.getElementById(id);
 const LABELS = { ...{{ labels | tojson }}, ema25_vwap: "VWAP + EMA25", ema_pullback: "EMA pullback", smc_ema_combo: "SMC + EMA (1/day)" }, PRESETS = {{ presets | tojson }};
@@ -104,7 +105,7 @@ const money = n => `${n < 0 ? "−" : n > 0 ? "+" : ""}₹${Math.abs(n).toLocale
 const ampm = s => { if (!s) return "—"; let [h, m] = s.split(":").map(Number); const ap = h >= 12 ? "PM" : "AM"; h = h % 12 || 12; return `${h}:${String(m).padStart(2, "0")} ${ap}`; };
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const t0 = new Date("{{ today }}T12:00:00"); $("from").value = new Date(t0.getFullYear(), t0.getMonth(), 1).toLocaleDateString("en-CA");
-let J = null, loadVersion = 0, lastCurve = [];
+let J = null, loadVersion = 0, lastCurve = [], loadController;
 const BROKERS = { upstox: "Upstox", kite: "Kite", indmoney: "INDmoney" };
 // A broker account: which broker, and whose login it was when the order went (Client ID + name).
 const holderName = h => (h || "").split(/\s+/).filter(Boolean).map(w => w[0] + w.slice(1).toLowerCase()).join(" ");
@@ -127,15 +128,18 @@ async function load() {
   const start = $("from").value, end = $("to").value;
   if (!start || !end || start > end) { status.hidden = false; status.className = "page-status error"; status.textContent = "Choose a valid date range. From must be on or before To."; return; }
   status.hidden = false; status.className = "page-status"; status.textContent = "Loading your journal…";
+  loadController?.abort();loadController=new AbortController();
+  const done=LoadingUI.begin(["#tiles","#trades"],{initial:!J,retry:load});
   try {
-    const response = await appFetch(`/api/journal?start=${start}&end=${end}`);
+    const response = await appFetch(`/api/journal?start=${start}&end=${end}`,{signal:loadController.signal});
     if (!response.ok) throw new Error("Couldn't load the journal. Change the date range to try again.");
     const result = await response.json(); if (version !== loadVersion) return;
     J = result; status.hidden = true; render();
   } catch (error) {
     if (version !== loadVersion) return;
-    status.className = "page-status error"; status.textContent = error.message + " Previous results have been kept.";
-  }
+    done(error);
+    status.className = "page-status error"; status.textContent = error.message + (J ? " Previous results have been kept." : "");
+  } finally {done();}
 }
 
 function rows() {

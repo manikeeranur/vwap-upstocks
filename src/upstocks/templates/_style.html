@@ -1,5 +1,5 @@
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
+
 :root {
   color-scheme:light; --bg:#fafafa; --card:#fff; --surface:#f4f4f5; --text:#18181b; --muted:#71717a;
   --border:#e4e4e7; --accent:#047857; --accent-hover:#065f46; --accent-soft:#ecfdf5; --accent-ink:#fff; --ce:#2563eb; --pe:#e11d48; --ok:#047857;
@@ -180,5 +180,11 @@ body .mhead .seg2 button,body .cbtn { min-height:40px; min-width:40px; }
 @media(prefers-reduced-motion:reduce) { *,*::before,*::after { animation:none !important; transition:none !important; scroll-behavior:auto !important; } }
 </style>
 
-<link rel="stylesheet" href="/static/workspace-view.css">
-<link rel="stylesheet" href="/static/workspace-ui.css">
+<link rel="stylesheet" href="/static/workspace-view.css?v=20261031-loading">
+<link rel="stylesheet" href="/static/workspace-ui.css?v=20261031-loading">
+
+<link rel="stylesheet" href="/static/loading.css?v=20261031-loading">
+<link rel="preload" as="script" href="/static/workspace-view.js?v=20261031-loading">
+<link rel="preload" as="script" href="/static/stable-dom.js?v=20261031-loading">
+<link rel="preload" as="script" href="/static/workspace-ui.js?v=20261031-loading">
+<link rel="preload" as="script" href="/static/loading.js?v=20261031-loading">

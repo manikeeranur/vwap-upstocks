@@ -48,9 +48,10 @@
   {{ links() }}
 </dialog>
 {% include "_dialogs.html" %}
-<script src="/static/workspace-view.js"></script>
-<script src="/static/stable-dom.js"></script>
-<script src="/static/workspace-ui.js"></script>
+<script src="/static/workspace-view.js?v=20261031-loading"></script>
+<script src="/static/stable-dom.js?v=20261031-loading"></script>
+<script src="/static/workspace-ui.js?v=20261031-loading"></script>
+<script src="/static/loading.js?v=20261031-loading"></script>
 <script>
 (() => {
   const dashboardToken = {{ request.app.state.dashboard_token | default('') | tojson }};
@@ -61,7 +62,7 @@
     if (url.origin !== location.origin) throw new Error('Dashboard requests must use the same origin');
     const headers = new Headers(options.headers);
     if (!['GET','HEAD','OPTIONS'].includes((options.method || 'GET').toUpperCase())) headers.set('X-App-Token', dashboardToken);
-    return fetch(url, {...options, headers, signal:options.signal || AbortSignal.timeout(20000)}).then(response => {
+    return LoadingUI.request(url, {...options, headers}).then(response => {
       if (response.status === 401) {
         const notice = document.getElementById('auth-expired') || document.body.appendChild(Object.assign(document.createElement('div'), {id:'auth-expired'}));
         notice.setAttribute('role','alert');
@@ -72,7 +73,7 @@
   };
   // Show the logged-in broker account's photo (Kite first, then Upstox) in the header.
   const headerAccount = document.querySelector('.header-account');
-  if (headerAccount) fetch('/api/brokers').then(r => r.ok ? r.json() : null).then(s => {
+  if (headerAccount) appFetch('/api/brokers', {quiet:true}).then(r => r.ok ? r.json() : null).then(s => {
     const p = s && ['kite','upstox','indmoney'].map(b => s.brokers[b]?.profile).find(p => p && (p.name || p.user_id));
     if (!p) return;
     const name = p.name || p.user_id, pic = document.createElement(p.avatar ? 'img' : 'span');

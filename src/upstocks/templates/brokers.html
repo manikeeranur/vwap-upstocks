@@ -1,4 +1,5 @@
 <!doctype html>
+{% from "_loading.html" import skeleton %}
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -47,7 +48,7 @@
   <div class="filter-bar"><label>Broker<select id="broker-filter"><option value="">All brokers</option><option value="upstox">Upstox</option><option value="kite">Kite</option><option value="indmoney">INDmoney</option></select></label><label>Connection<select id="connection-filter"><option value="">All connections</option><option value="connected">Connected</option><option value="disconnected">Not connected</option></select></label><button type="button" class="btn ghost" id="clear-broker-filters">Clear filters</button></div>
   <p class="filter-summary" id="broker-filter-summary" role="status"></p>
   <div id="flash" role="status"></div>
-  <div class="broker-grid" id="grid"><div class="card broker">Loading…</div></div>
+  <div class="broker-grid" id="grid">{{ skeleton('cards',3) }}</div>
 
   <details class="card sec">
     <summary>Login reminders</summary>
@@ -138,8 +139,8 @@ function render(s) {
   filterBrokers();
   $('tgState').textContent = !s.telegram_bot ? 'Telegram bot is not configured on this server yet.' : s.telegram ? 'Reminders are on for your saved chat.' : 'No chat saved — reminders are off.';
 }
-async function load() { try { render(await api('/api/brokers')); } catch (e) { notifyUI(e.message, true); } }
-$('grid').addEventListener('submit', async e => {
+async function load() { const done=LoadingUI.begin('#grid',{initial:!last,kind:'cards',retry:load});try { render(await api('/api/brokers')); } catch (e) { done(e);notifyUI(e.message, true); } finally {done();} }
+LoadingUI.on($('grid'),'submit', async e => {
   e.preventDefault();
   const f = e.target;
   if (f.matches('[data-indtoken],[data-indtotp]')) {
@@ -158,7 +159,7 @@ $('grid').addEventListener('submit', async e => {
   if (last?.brokers[body.broker]?.has_key && !await confirmUI({title:'Replace saved keys?', message:'The saved key or secret will be replaced. If the API key changes, today\'s login is cleared.', confirmText:'Replace', danger:true})) return;
   try { editing.delete(body.broker); render(await api('/api/brokers/keys', body)); notifyUI('Keys saved. They stay saved — only the daily login expires.'); } catch (x) { notifyUI(x.message, true); }
 });
-$('grid').addEventListener('click', async e => {
+LoadingUI.on($('grid'),'click', async e => {
   const ed = e.target.closest('[data-edit],[data-cancel]');
   if (ed) { ed.dataset.edit ? editing.add(ed.dataset.edit) : editing.delete(ed.dataset.cancel); render(last); return; }
   const b = e.target.closest('[data-approve]'); if (!b) return;
@@ -166,7 +167,7 @@ $('grid').addEventListener('click', async e => {
   try { await api('/api/brokers/upstox/request', {}); notifyUI('Approval sent. Tap Approve in your Upstox app; this page updates once it arrives.'); setTimeout(load, 20000); }
   catch (x) { notifyUI(x.message, true); } finally { b.disabled = false; }
 });
-$('tg').addEventListener('submit', async e => {
+LoadingUI.on($('tg'),'submit', async e => {
   e.preventDefault();
   try { render(await api('/api/brokers/telegram', {chat_id:e.target.chat_id.value.trim()})); notifyUI('Telegram setting saved.'); e.target.reset(); } catch (x) { notifyUI(x.message, true); }
 });

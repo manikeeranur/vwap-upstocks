@@ -6,6 +6,7 @@ import sqlite3
 
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.gzip import GZipMiddleware
 from pathlib import Path
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -113,6 +114,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
     app.state.settings = settings
     app.state.ready = False
+    app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=5)
     app.add_middleware(SessionAuth)
     app.add_middleware(DashboardGuard, allowed_hosts=settings.allowed_hosts)
     app.add_middleware(RequestLoggingMiddleware)

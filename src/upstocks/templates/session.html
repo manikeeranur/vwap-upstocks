@@ -1,4 +1,5 @@
 <!doctype html>
+{% from "_loading.html" import skeleton %}
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -90,7 +91,7 @@
     <div class="result-head"><h2 id="result-title">Trades</h2><span id="resultDay">—</span></div>
     <div class="tbl-wrap"><table class="trades">
       <thead><tr><th>Strategy</th><th>Option</th><th>Entry</th><th>Exit</th><th>Status</th><th class="num">Max profit</th><th class="num">Max loss</th><th class="num">P&amp;L</th><th class="num">Charges</th><th class="num">Net</th></tr></thead>
-      <tbody id="results"><tr><td colspan="10" class="empty">Loading…</td></tr></tbody>
+      <tbody id="results" data-skeleton-kind="table" aria-busy="true">{{ skeleton("table",5) }}</tbody>
     </table></div>
     <p class="foot-note">P&amp;L uses one simulated lot per trade, matching Overview and the paper journal. Max profit / max loss are the P&amp;L at the option's highest / lowest price between entry and exit.</p>
   </section>
@@ -119,7 +120,7 @@ const peak = (price, t, qty) => price == null ? '<span class="muted">—</span>'
 let S = null, busy = false;
 $('replay').max = todayIST();
 async function api(path, body) {
-  const r = await appFetch(path, body === undefined ? {} : {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+  const r = await appFetch(path, body === undefined ? {} : {method:'POST',timeout:120000,headers:{'content-type':'application/json'},body:JSON.stringify(body)});
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(typeof j.detail === 'string' ? j.detail : `Request failed (${r.status}). Please try again.`);
   return j;
@@ -163,21 +164,25 @@ function render() {
   $('tradeCount').textContent = count;
   $('winRate').textContent = count ? `${won} won · ${count - won} lost · ${Math.round(won / count * 100)}% win rate` : '—';
 }
+let loading=false;
 async function load() {
-  if (busy) return;
-  try { S = await api('/api/paper'); render(); } catch (e) { info('Unable to update. ' + e.message); }
+  if (busy || loading) return;loading=true;
+  const done=LoadingUI.begin('#results',{initial:!S,kind:'table',retry:load});
+  try { S = await api('/api/paper'); render(); } catch (e) {done(e); info('Unable to update. ' + e.message); }
+  finally{done();loading=false;}
 }
 async function scan(day) {
   if (busy || !S) return;
+  const done=LoadingUI.begin('#results',{label:day?'Replaying…':'Scanning…'});
   busy = true; $('scanBtn').disabled = $('replayBtn').disabled = true;
   $('scanBtn').textContent = day ? 'Scan now' : 'Scanning…'; $('replayBtn').textContent = day ? 'Replaying…' : 'Replay day';
   info(day ? `Replaying ${day}… The first request can take a minute.` : 'Scanning completed candles…');
   try { await api(`/api/paper/scan${day ? '?day=' + encodeURIComponent(day) : ''}`, {}); notifyUI(day ? 'Replay complete.' : 'Scan complete.'); }
   catch (e) { notifyUI(e.message, true); }
-  finally { busy = false; $('scanBtn').textContent = 'Scan now'; $('replayBtn').textContent = 'Replay day'; await load(); }
+  finally { done();busy = false; $('scanBtn').textContent = 'Scan now'; $('replayBtn').textContent = 'Replay day'; await load(); }
 }
-$('scanBtn').addEventListener('click', () => scan());
-$('replayBtn').addEventListener('click', () => { const input = $('replay'); if (!input.value) { notifyUI('Choose a date to replay.', true); input.focus(); return; } input.max = todayIST(); if (input.reportValidity()) scan(input.value); });
+LoadingUI.on($('scanBtn'),'click',()=>scan());
+LoadingUI.on($('replayBtn'),'click', () => { const input = $('replay'); if (!input.value) { notifyUI('Choose a date to replay.', true); input.focus(); return; } input.max = todayIST(); if (input.reportValidity()) return scan(input.value); });
 
 document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
 load();

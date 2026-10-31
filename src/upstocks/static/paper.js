@@ -21,9 +21,8 @@ const openLive = (acc,p) => Object.entries(S.state.orders?.[acc] || {}).filter((
 async function loadBrokers() { try { B = (await api('/api/brokers')).brokers; brokerError = ''; if (S && !confirming) render(); } catch(e) { brokerError = 'Broker status unavailable: ' + e.message; } finally { showBrokerErrors(); } }
 let S = null, busy = false, saving = false, confirming = false, refreshing = false, refreshVersion = 0;
 let Q = null, quoting = false, quoteFailed = false;
-async function refreshFills() { try { await api('/api/paper/fills'); fillsError = ''; updateLiveValues(); } catch(e) { fillsError = 'Fill reconciliation unavailable: ' + e.message; } finally { showBrokerErrors(); } }
 async function api(path, body) {
-  const r = await appFetch(path, body === undefined ? {} : {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+  const r = await appFetch(path, body === undefined ? {quiet:!!S} : {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
   const j = await r.json().catch(() => ({}));
   if (!r.ok) { const error = new Error(typeof j.detail === 'string' ? j.detail : j.error || `Request failed (${r.status}). Please try again.`); error.state = j.state; throw error; }
   return j;
@@ -240,9 +239,10 @@ function renderSettings() {
 async function refresh() {
   if (refreshing || busy || saving || confirming || editingConfig()) return;
   refreshing = true; const version = refreshVersion;
+  const done=LoadingUI.begin('#strats',{initial:!S,kind:'cards',label:'Updating…',retry:refresh});
   try { const next = await api('/api/paper'); if (version !== refreshVersion || confirming || editingConfig()) return; S = next; $('connection').hidden = true; render(); }
-  catch (e) { if (version !== refreshVersion) return; $('connectionText').textContent = 'Unable to update. Showing the last available data. ' + e.message; $('connection').hidden = false; $('refreshHint').textContent = 'Connection interrupted'; }
-  finally { refreshing = false; if (version !== refreshVersion && !busy && !saving) refresh(); }
+  catch (e) { done(e); if (version !== refreshVersion) return; $('connectionText').textContent = 'Unable to update. Showing the last available data. ' + e.message; $('connection').hidden = false; $('refreshHint').textContent = 'Connection interrupted'; }
+  finally { done(); refreshing = false; if (version !== refreshVersion && !busy && !saving) refresh(); }
 }
 async function confirmAction(options) {
   if (confirming) return false;
@@ -259,6 +259,7 @@ function restore(body, input) {
 async function saveConfig(body, input) {
   if (!S) return;
   if (saving || confirming || (busy && body.entries_paused === undefined)) { restore(body,input); notifyUI('Please wait for the current action to finish.'); return; }
+  const done=LoadingUI.button(input || $('pauseEntries'));
   saving = true; refreshVersion++; $('settingsSaveState').textContent = 'Saving…';
   try {
     const result = await api('/api/paper/config', {...body, revision:S.state.revision}); if (S) S.state = result.state;
@@ -270,9 +271,9 @@ async function saveConfig(body, input) {
     restore(body,input);
     $('settingsSaveState').textContent = 'Not saved: ' + e.message;
     notifyUI(e.message,true);
-  } finally { saving = false; if (S) render(); }
+  } finally { done();saving = false; if (S) render(); }
 }
-$('pauseEntries').addEventListener('click', async () => {
+LoadingUI.on($('pauseEntries'),'click', async () => {
   if (!S || saving || confirming) return;
   const paused = !S.state.entries_paused;
   const enabled = PRESETS.filter(anyLive);
@@ -280,10 +281,10 @@ $('pauseEntries').addEventListener('click', async () => {
     title:'Resume live entries?', message:'Enabled intraday and stock portfolios can place new real orders again. Existing exits continue.',
     confirmText:'Resume entries', danger:true, facts:[['Strategies',enabled.map(p => LABELS[p]).join(', ')]]
   })) return;
-  saveConfig({entries_paused:paused, ...(!paused ? {confirm:'LIVE'} : {})});
+  await saveConfig({entries_paused:paused, ...(!paused ? {confirm:'LIVE'} : {})});
 });
 $('retryBtn').addEventListener('click',refresh);
-$('strats').addEventListener('click',async e => {
+LoadingUI.on($('strats'),'click', async e => {
   const button = e.target.closest('[data-sq]'); if(!button || busy || saving || confirming) return;
   const p = button.dataset.sq, broker = button.dataset.broker, positions = openLive(account(broker)?.id,p);
   if(!await confirmAction({
@@ -322,8 +323,8 @@ $('stratDialog').addEventListener('click',e => {   // a click on the backdrop, o
 $('settingsBtn').addEventListener('click',() => { $('stratDialog').showModal(); renderSettings(); });
 $('strats').addEventListener('focusout',() => { setTimeout(() => { if(S && !saving && !confirming && !$('strats').contains(document.activeElement)) render(); },0); });
 document.addEventListener('visibilitychange',() => { if(!document.hidden) { refresh(); refreshQuotes(); } });
-refresh().then(refreshQuotes); loadBrokers(); refreshFills();
-setInterval(() => { if(!document.hidden) refreshFills(); },20000);
+refresh().then(refreshQuotes); loadBrokers();
+
 setInterval(() => { if(!document.hidden) loadBrokers(); },60000);
 setInterval(() => { if(!document.hidden) refresh(); },10000);
 setInterval(() => { if(!document.hidden) { updateLiveValues(); refreshQuotes(); } },1000);

@@ -1,4 +1,5 @@
 <!doctype html>
+{% from "_loading.html" import skeleton %}
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -106,7 +107,8 @@
     Uses stocks <b>listed today</b> — companies that delisted or merged are missing, which flatters past results (survivorship bias). Decisions use month-end closes; orders fill at the next open. Data runs up to yesterday's close.</p>
   </div>
 
-  <div id="results" hidden data-tabs="momentum" data-default-tab="performance">
+  <div id="result-loading" aria-busy="true">{{ skeleton("chart",1) }}</div>
+<div id="results" hidden data-tabs="momentum" data-default-tab="performance">
 <nav class="workspace-sections" role="tablist" aria-label="Backtest result sections"><button type="button" data-tab="performance">Performance</button><button type="button" data-tab="holdings">Holdings &amp; ranking</button><button type="button" data-tab="decisions">Decisions</button><button type="button" data-tab="trades">Closed trades</button></nav>
 <p class="section-intro">Simulated results from the selected saved run. Performance and CSV export cover the full run.</p>
     <div class="stack">
@@ -165,7 +167,7 @@
     <div id="tchart"></div>
   </div>
 </div>
-<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<script>const CHART_LIBRARY="https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js";</script>
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -212,7 +214,10 @@ function showJob(j) {
   }
 }
 
+let pollingMomentum=false;
 async function poll() {
+  if(pollingMomentum || document.hidden)return;pollingMomentum=true;
+  try {
   const j = await appFetch('/api/momentum/job').then(r => r.json()).catch(() => null);
   if (!j) return;
   showJob(j);
@@ -220,6 +225,7 @@ async function poll() {
     clearInterval(timer); timer = null;
     if (j.status === 'done') { await loadRuns(); await loadResult(j.run_id); }
   }
+  } finally{pollingMomentum=false;}
 }
 
 async function run() {
@@ -230,7 +236,7 @@ async function run() {
   showJob(j);
   if (!timer) timer = setInterval(poll, 1500);
 }
-$('run').addEventListener('click', run);
+LoadingUI.on($('run'),'click',run);
 
 async function loadRuns() {
   const r = await appFetch('/api/momentum/runs').catch(() => null);
@@ -243,15 +249,23 @@ async function loadRuns() {
   $('savedRunsLabel').hidden = !runs.length;
 }
 
+let resultVersion=0;
 async function loadResult(id) {
-  const q = id ? `?id=${encodeURIComponent(id)}` : '';
-  const r = await appFetch(`/api/momentum/result${q}`);
-  if (!r.ok) return;
-  result = await r.json();
-  if (result.id) { $('savedRuns').value = result.id; $('tradesCsv').href = `/api/momentum/trades.csv?id=${encodeURIComponent(result.id)}`; }
-  render(result);
+  const version=++resultVersion,q=id?`?id=${encodeURIComponent(id)}`:'';
+  $('result-loading').hidden=false;
+  const done=LoadingUI.begin('#result-loading',{initial:true,kind:'chart',retry:()=>loadResult(id)});
+  try {
+    const r=await appFetch(`/api/momentum/result${q}`);
+    if(version!==resultVersion)return;
+    if(r.status===404){$('result-loading').textContent='No saved results yet. Run a backtest to get started.';return;}
+    if(!r.ok)throw new Error('Saved result could not load. Please retry.');
+    const next=await r.json();if(version!==resultVersion)return;result=next;
+    if(result.id){$('savedRuns').value=result.id;$('tradesCsv').href=`/api/momentum/trades.csv?id=${encodeURIComponent(result.id)}`;}
+    render(result);$('result-loading').hidden=true;
+  }catch(error){if(version===resultVersion)done(error);}
+  finally{done();}
 }
-$('savedRuns').addEventListener('change', e => loadResult(e.target.value));
+LoadingUI.on($('savedRuns'),'change', e => loadResult(e.target.value));
 
 function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
 
@@ -272,7 +286,11 @@ function render(res) {
     k('Avg holding', s.avg_days == null ? '—' : `${s.avg_days} days`, 'calendar days'),
     k('Costs paid', inr(s.costs), `${st.cost_pct}% per side`),
   ].join('');
-  drawCharts(res);
+  if(window.LightweightCharts)drawCharts(res);
+  else {
+    $('eqChart').innerHTML=LoadingUI.skeleton('chart',1);$('ddChart').innerHTML=LoadingUI.skeleton('chart',1);
+    LoadingUI.loadScript(CHART_LIBRARY).then(()=>{if(result)drawCharts(result);}).catch(error=>{$('eqChart').textContent=error.message;$('ddChart').textContent='';});
+  }
   heatmap(res.monthly);
   now(res);
   monthsTable(res.months);
@@ -282,6 +300,7 @@ function render(res) {
 }
 
 function drawCharts(res) {
+  if(!window.LightweightCharts)return;
   charts.forEach(c => c.remove()); charts = [];
   const text = css('--muted'), grid = css('--border'), s1 = css('--s1'), s2 = css('--s2'), down = css('--pe');
   const base = el => LightweightCharts.createChart(el, {
@@ -450,7 +469,7 @@ async function loadView() {
   const t = ctrade, view = cview;
   if (!cdata[view]) {
     if (tchart) { tchart.remove(); tchart = null; }
-    $('tchart').innerHTML = '<p class="muted" style="padding:16px">Loading candles from Upstox…</p>';
+    $('tchart').innerHTML=LoadingUI.skeleton('chart',1);
     const q = new URLSearchParams({ symbol: t.symbol, entry: t.entry_date });
     if (t.exit_date) q.set('exit', t.exit_date);
     if (view !== '1d') q.set('day', view === 'entry' ? t.entry_date : t.exit_date);
@@ -460,10 +479,12 @@ async function loadView() {
     if (!r?.ok) { $('tchart').innerHTML = `<p class="err" style="padding:16px">${esc(body.detail || 'Unable to load candles')}</p>`; return; }
     cdata[view] = body.candles;
   }
-  drawTradeChart();
+  try {await LoadingUI.loadScript(CHART_LIBRARY);if(ctrade===t && cview===view)drawTradeChart();}
+  catch(error){$('tchart').textContent=error.message;}
 }
 
 function drawTradeChart() {
+  if(!window.LightweightCharts)return;
   const t = ctrade, view = cview, rows = cdata[view], el = $('tchart');
   if (tchart) { tchart.remove(); tchart = null; }
   el.innerHTML = '';
@@ -558,11 +579,12 @@ addEventListener('resize', () => { if (!$('cmodal').hidden && cdata[cview]) draw
 
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { result && drawCharts(result); if (!$('cmodal').hidden && cdata[cview]) drawTradeChart(); });
 (async () => {
+  const ready=Promise.all([loadRuns(),loadResult()]);
   const j = await appFetch('/api/momentum/job').then(r => r.json()).catch(() => null);
   if (j) showJob(j);
   if (j?.status === 'running') timer = setInterval(poll, 1500);
-  await loadRuns();
-  await loadResult();
+  await ready;
+  if(result?.id)$('savedRuns').value=result.id;
 })();
 </script>
 </body>

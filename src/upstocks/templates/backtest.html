@@ -1,4 +1,5 @@
 <!doctype html>
+{% from "_loading.html" import skeleton %}
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -122,7 +123,9 @@ function parseCsv(text) {
 }
 
 async function addFiles(list) {
-  for (const file of list) {
+  const done=LoadingUI.begin("#summary",{initial:!files.length,kind:"rows",label:"Reading CSV files…"});
+  try { for (const file of list) {
+    await new Promise(resolve=>requestAnimationFrame(()=>setTimeout(resolve,0)));
     const rec = { id: crypto.randomUUID(), name: file.name, meta: metaFromName(file.name), candles: [], dates: [], entryDate: "", entryTime: "", entryPrice: "", error: null };
     try {
       rec.candles = parseCsv(await file.text());
@@ -132,6 +135,7 @@ async function addFiles(list) {
     files.push(rec);
   }
   render();
+  } finally {done();}
 }
 
 // ─── Backtest ─────────────────────────────────────────────────────────────────

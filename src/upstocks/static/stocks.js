@@ -101,15 +101,20 @@
   async function refresh(clearError = false) {
     if (refreshing || saving) return;
     refreshing = true;
-    try { [state,intraday] = await Promise.all([api('/api/stocks'),api('/api/paper')]); if (clearError) error(''); render(); }
-    catch (e) { error('Status refresh failed: ' + e.message + ' Previously shown data may be stale.'); }
-    finally { refreshing = false; }
+    const done=LoadingUI.begin(['#portfolio-summary','#stock-position'],{initial:!state,kind:'metrics',label:'Updating…',retry:()=>refresh(true)});
+    try {
+      state = await api('/api/stocks'); if (clearError) error(''); render(); done();
+      try { intraday = await api('/api/paper'); renderRecovery(selected()); }
+      catch(e) { el('intraday-recoveries').textContent='Intraday recovery status unavailable. Refresh to try again.'; }
+    }
+    catch (e) { done(e); error('Status refresh failed: ' + e.message + ' Previously shown data may be stale.'); }
+    finally { done(); refreshing = false; }
   }
   el('stock-settings').addEventListener('input', () => {
     if (!dirty) draftRevision = selected()?.revision;
     dirty = true; el('reconcile-stocks').disabled = true; el('stock-save-status').textContent = 'Unsaved changes'; el('save-stock-settings').disabled = false;
   });
-  el('stock-settings').addEventListener('submit', async event => {
+  LoadingUI.on(el('stock-settings'),'submit', async event => {
     event.preventDefault(); if (saving || !selected()) return;
     const p = selected();
     const body = {broker:p.broker,revision:draftRevision ?? p.revision,usable_capital:Number(el('usable-capital').value),
@@ -126,14 +131,14 @@
     catch (e) { error(e.message); el('stock-save-status').textContent = 'Not saved'; }
     finally { saving = false; el('portfolio').disabled = false; render(); }
   });
-  el('reconcile-stocks').addEventListener('click', async () => {
+  LoadingUI.on(el('reconcile-stocks'),'click', async () => {
     if (saving || dirty || !selected()) return;
     saving = true; el('portfolio').disabled = true; render();
     try { state = await api('/api/stocks/reconcile',{broker:selected().broker}); dirty = false; error(''); el('stock-save-status').textContent = 'Reconciled; entries remain paused'; }
     catch(e) { error(e.message); }
     finally { saving = false; el('portfolio').disabled = false; render(); }
   });
-  el('preview-stocks').addEventListener('click', async () => {
+  LoadingUI.on(el('preview-stocks'),'click', async () => {
     const button = el('preview-stocks'); button.disabled = true; el('ranking-preview').textContent = 'Refreshing completed daily history…';
     try {
       const result = await api('/api/momentum/tuned/preview',{});
@@ -142,7 +147,7 @@
     } catch(e) { el('ranking-preview').textContent = e.message; }
     finally { button.disabled = false; }
   });
-  el('refresh-stocks').addEventListener('click', async () => {
+  LoadingUI.on(el('refresh-stocks'),'click', async () => {
     if (dirty && !await confirmUI({title:'Reload saved settings?',message:'This discards the unsaved settings in this portfolio.',confirmText:'Reload settings'})) return;
     dirty = false; draftRevision = null; el('stock-save-status').textContent = 'No unsaved changes'; await refresh(true);
   });
@@ -164,7 +169,7 @@
     for (const b of el('execution-recovery').querySelectorAll('button')) b.disabled = saving || dirty;
     el('preview-statement').disabled = saving || dirty || p.broker === 'paper';
   }
-  el('execution-recovery').addEventListener('click', async event => {
+  LoadingUI.on(el('execution-recovery'),'click', async event => {
     const button = event.target.closest('button'); if (!button || saving || dirty) return;
     const p = selected(), stock = button.dataset.stockRecovery, cancel = button.dataset.cancelRecovery, tid = button.dataset.intradayRecovery;
     if (!stock && !cancel && !tid) return;
@@ -186,7 +191,7 @@
     finally { saving = false; el('portfolio').disabled = false; render(); }
   });
   el('statement-form').addEventListener('input', () => { statement = null; el('apply-statement').hidden = true; el('statement-preview').textContent = ''; });
-  el('statement-form').addEventListener('submit', async event => {
+  LoadingUI.on(el('statement-form'),'submit', async event => {
     event.preventDefault(); if (saving || dirty || selected()?.broker === 'paper') return;
     const file = el('statement-file').files[0];
     if (!file || file.size > 262144) { error('Choose a CSV file no larger than 256 KB.'); return; }
@@ -201,7 +206,7 @@
     } catch(e) { statement = null; el('apply-statement').hidden = true; error(e.message); }
     finally { saving = false; el('portfolio').disabled = false; render(); }
   });
-  el('apply-statement').addEventListener('click', async () => {
+  LoadingUI.on(el('apply-statement'),'click', async () => {
     if (!statement || saving || dirty) return;
     if (!await confirmUI({title:'Apply reviewed broker evidence?',message:'Confirm that every previewed row matches your broker statement. This changes recorded fills and charges, leaves stock entries paused, and keeps an audit record.',confirmText:'Apply evidence',danger:true})) return;
     saving = true; el('portfolio').disabled = true; el('apply-statement').disabled = true; render();

@@ -1,0 +1,231 @@
+{% from "_icons.html" import ui_icon %}
+{% set bname = {"kite":"Kite (Zerodha)","indmoney":"INDmoney"}.get(broker,"Upstox") %}
+  {% if login_needed %}
+  <section class="card account-empty">
+    <span class="upload-icon">{{ ui_icon("lock") }}</span>
+    <h2>{{ bname }} is not logged in today</h2>
+    <p>Log in to {{ bname }} on My brokers to see your funds, positions, orders and trades here.</p>
+    <a class="btn primary" href="/brokers">Go to My brokers {{ ui_icon("arrow") }}</a>
+  </section>
+  {% endif %}
+
+  {% if blocked %}
+  <section class="card account-empty">
+    <span class="upload-icon">{{ ui_icon("lock") }}</span>
+    <h2>Account access restricted</h2>
+    {% if broker != "upstox" %}<p>{{ bname }} refused every request: {{ a.profile.error }}</p>{% else %}<p>Upstox account data is available from your registered IP.<br>You can still use market data and research tools.</p>{% endif %}
+    <a class="btn ghost" href="/data">Explore market data {{ ui_icon("arrow") }}</a>
+    <details><summary>Connection details</summary><p>Register this computer’s public IP in Upstox Developer Console → your app → Static IP, or open the app on your registered machine.</p></details>
+  </section>
+  {% endif %}
+
+  {% macro err(sec) %}{% if a[sec].error %}<div class="secerr">{{ a[sec].error }}</div>{% endif %}{% endmacro %}
+  {% macro money(v) %}{% if v is number %}₹{{ "{:,.2f}".format(v) }}{% else %}—{% endif %}{% endmacro %}
+  {% macro pnl(v) %}{% if v is number %}<span class="{{ 'up' if v >= 0 else 'down' }}">{{ '+' if v >= 0 else '−' }}₹{{ "{:,.2f}".format(v|abs) }}</span>{% else %}—{% endif %}{% endmacro %}
+
+  {% if a and not blocked %}
+  <div data-tabs="account" data-default-tab="summary">
+  <nav class="workspace-sections" role="tablist" aria-label="Broker account sections">
+  <button type="button" data-tab="summary">Summary</button><button type="button" data-tab="positions">Positions</button><button type="button" data-tab="holdings">Holdings</button><button type="button" data-tab="orders">Orders</button><button type="button" data-tab="trades">Trades &amp; charges</button>
+  </nav>
+  <div class="filter-bar" id="account-filters" hidden>
+    <label class="search-filter">Search broker records<input type="search" id="account-search" placeholder="Symbol, product or order reference" maxlength="100"></label>
+    <label id="account-status-label">Order status<select id="account-status"><option value="">All statuses</option><option value="complete">Complete</option><option value="pending">Pending / unresolved</option><option value="cancelled">Cancelled</option><option value="rejected">Rejected</option></select></label>
+    <button type="button" class="btn ghost" id="clear-account-filters">Clear filters</button>
+  </div><p class="filter-summary" id="account-filter-summary" role="status"></p>
+
+  <section class="sec" data-panel="summary">
+    <h2>Profile</h2>
+    {{ err("profile") }}
+    {% set p = a.profile.data %}
+    {% if p %}
+    <div class="kv kv4">
+      <div><span>Name</span><b>{{ p.user_name or "—" }}</b></div>
+      <div><span>Client ID</span><b>{{ p.user_id or "—" }}</b></div>
+      <div><span>Email</span><b>{{ p.email or "—" }}</b></div>
+      <div><span>Broker</span><b>{{ p.broker or "—" }}</b></div>
+      <div><span>User type</span><b>{{ p.user_type or "—" }}</b></div>
+      <div><span>Active</span><b>{{ "Yes" if p.is_active else "No" }}</b></div>
+      <div><span>Exchanges</span><b>{{ (p.exchanges or [])|join(", ") or "—" }}</b></div>
+      <div><span>Products</span><b>{{ (p.products or [])|join(", ") or "—" }}</b></div>
+    </div>
+    {% endif %}
+  </section>
+
+  <section class="sec" data-panel="summary">
+    <h2>Funds &amp; margin</h2>
+    {{ err("funds") }}
+    {% set f = a.funds.data %}
+    {% if f %}
+    {% for seg, label in [("equity", "Equity / F&O"), ("commodity", "Commodity")] %}{% set x = f[seg] %}{% if x %}
+    {% if x.fields is defined %}
+    <div class="kv" style="margin-bottom:10px">
+      {% for name, value, cls in x.fields %}<div><span>{{ label ~ " · " ~ name|lower if loop.first else name }}</span><b class="{{ cls }}">{{ money(value) }}</b></div>{% endfor %}
+    </div>
+    {% else %}
+    <div class="kv" style="margin-bottom:10px">
+      <div><span>{{ label }} · available</span><b class="up">{{ money(x.available_margin) }}</b></div>
+      <div><span>Used margin</span><b>{{ money(x.used_margin) }}</b></div>
+      <div><span>Pay-in today</span><b>{{ money(x.payin_amount) }}</b></div>
+      <div><span>SPAN margin</span><b>{{ money(x.span_margin) }}</b></div>
+      <div><span>Exposure margin</span><b>{{ money(x.exposure_margin) }}</b></div>
+      <div><span>Notional cash</span><b>{{ money(x.notional_cash) }}</b></div>
+    </div>
+    {% endif %}
+    {% endif %}{% endfor %}
+    {% endif %}
+  </section>
+
+  <section class="sec" data-panel="positions">
+    <h2>Today’s positions</h2><p class="small muted">Broker-reported positions include manual and strategy activity. These P&amp;L figures are before charges; strategy net P&amp;L is in Overview, Journal and Calendar.</p>
+    {{ err("positions") }}
+    {% set rows = a.positions.data or [] %}
+    {% if a.positions.data is not none %}
+    {% if rows %}
+    <div class="tbl"><table>
+      <tr><th>Symbol</th><th>Product</th><th class="num">Qty</th><th class="num">Avg</th><th class="num">LTP</th><th class="num">Buy value</th><th class="num">Sell value</th><th class="num">Realised gross</th><th class="num">Unrealised gross</th><th class="num">Gross P&amp;L</th></tr>
+      {% for r in rows %}
+      <tr data-account-row data-order-status="{{ (r.status or '')|lower }}"><td><b>{{ r.trading_symbol or r.tradingsymbol }}</b> <span class="muted">{{ r.exchange }}</span></td><td>{{ r.product }}</td><td class="num">{{ r.quantity }}</td>
+        <td class="num">{{ money(r.average_price) }}</td><td class="num">{{ money(r.last_price) }}</td><td class="num">{{ money(r.buy_value) }}</td><td class="num">{{ money(r.sell_value) }}</td>
+        <td class="num">{{ pnl(r.realised) }}</td><td class="num">{{ pnl(r.unrealised) }}</td><td class="num"><b>{{ pnl(r.pnl) }}</b></td></tr>
+      {% endfor %}
+      <tr data-account-total><td colspan="9" class="muted">Total</td><td class="num"><b>{{ pnl(rows|map(attribute="pnl")|select("number")|sum) }}</b></td></tr>
+    </table></div>
+    {% else %}<p class="muted">No positions today.</p>{% endif %}
+    {% endif %}
+  </section>
+
+
+  <section class="sec" data-panel="orders">
+    <h2>Today’s orders</h2>
+    {{ err("orders") }}
+    {% set rows = a.orders.data or [] %}
+    {% if a.orders.data is not none %}
+    {% if rows %}
+    <div class="tbl"><table>
+      <tr><th>Time</th><th>Symbol</th><th>Side</th><th>Type</th><th>Product</th><th class="num">Qty</th><th class="num">Filled</th><th class="num">Price</th><th class="num">Trigger</th><th class="num">Avg</th><th>Status</th><th>Message</th></tr>
+      {% for r in rows|sort(attribute="order_timestamp", reverse=True) %}
+      <tr data-account-row data-order-status="{{ (r.status or '')|lower }}"><td>{{ (r.order_timestamp or "")[11:19] }}</td><td><b>{{ r.trading_symbol or r.tradingsymbol }}</b></td>
+        <td class="{{ 'up' if r.transaction_type == 'BUY' else 'down' }}">{{ r.transaction_type }}</td><td>{{ r.order_type }}</td><td>{{ r.product }}</td>
+        <td class="num">{{ r.quantity }}</td><td class="num">{{ r.filled_quantity }}</td><td class="num">{{ money(r.price) }}</td><td class="num">{{ money(r.trigger_price) }}</td><td class="num">{{ money(r.average_price) }}</td>
+        <td><b>{{ r.status }}</b></td><td class="muted">{{ r.status_message or "" }}</td></tr>
+      {% endfor %}
+    </table></div>
+    {% else %}<p class="muted">No orders today.</p>{% endif %}
+    {% endif %}
+  </section>
+
+  <section class="sec" data-panel="trades">
+    <h2>Today’s trades</h2>
+    {{ err("trades") }}
+    {% set rows = a.trades.data or [] %}
+    {% if a.trades.data is not none %}
+    {% if rows %}
+    <div class="tbl"><table>
+      <tr><th>Time</th><th>Symbol</th><th>Side</th><th class="num">Qty</th><th class="num">Price</th><th>Product</th><th>Order ID</th><th>Trade ID</th></tr>
+      {% for r in rows %}
+      <tr data-account-row data-order-status="{{ (r.status or '')|lower }}"><td>{{ (r.exchange_timestamp or r.order_timestamp or "")[11:19] }}</td><td><b>{{ r.trading_symbol or r.tradingsymbol }}</b></td>
+        <td class="{{ 'up' if r.transaction_type == 'BUY' else 'down' }}">{{ r.transaction_type }}</td><td class="num">{{ r.quantity }}</td>
+        <td class="num">{{ money(r.average_price) }}</td><td>{{ r.product }}</td><td class="muted">{{ r.order_id }}</td><td class="muted">{{ r.trade_id }}</td></tr>
+      {% endfor %}
+    </table></div>
+    {% else %}<p class="muted">No trades today.</p>{% endif %}
+    {% endif %}
+  </section>
+  <section class="sec" data-panel="trades">
+    <h2>Today’s charges</h2>
+    {{ err("charges") }}
+    {% set rows = (a.charges.data if a.charges is defined else none) or [] %}
+    {% if a.charges is defined and a.charges.data is not none %}
+    {% if rows %}
+    {% set gross = (a.positions.data or [])|map(attribute="pnl")|select("number")|sum %}{% set total = rows|map(attribute="total")|select("number")|sum %}
+    <div class="kv" style="margin-bottom:10px">
+      {% set v = gross %}<div><span>Gross P&amp;L</span><b class="{{ 'up' if v >= 0 else 'down' }}">{{ '+' if v >= 0 else '−' }}₹{{ "{:,.2f}".format(v|abs) }}</b></div>
+      <div><span>Total charges</span><b class="down">{{ money(total) }}</b></div>
+      {% set v = gross - total %}<div><span>Net P&amp;L</span><b class="{{ 'up' if v >= 0 else 'down' }}">{{ '+' if v >= 0 else '−' }}₹{{ "{:,.2f}".format(v|abs) }}</b></div>
+      <div><span>Executed orders</span><b>{{ a.charges.orders if a.charges.orders is defined else rows|length }}</b></div>
+    </div>
+    <div class="tbl"><table>
+      <tr><th>Time</th><th>Symbol</th><th>Side</th><th class="num">Qty</th><th class="num">Avg</th><th class="num">Brokerage</th><th class="num">STT</th><th class="num">Exchange</th><th class="num">SEBI</th><th class="num">Stamp</th><th class="num">GST</th><th class="num">Total</th></tr>
+      {% for r in rows %}
+      <tr data-account-row data-order-status="{{ (r.status or '')|lower }}"><td>{{ r.time }}</td><td><b>{{ r.symbol }}</b></td><td class="{{ 'up' if r.side == 'BUY' else 'down' }}">{{ r.side }}</td>
+        <td class="num">{{ r.qty }}</td><td class="num">{{ money(r.price) }}</td><td class="num">{{ money(r.brokerage) }}</td><td class="num">{{ money(r.stt) }}</td>
+        <td class="num">{{ money(r.exchange) }}</td><td class="num">{{ money(r.sebi) }}</td><td class="num">{{ money(r.stamp) }}</td><td class="num">{{ money(r.gst) }}</td><td class="num"><b>{{ money(r.total) }}</b></td></tr>
+      {% endfor %}
+      <tr data-account-total><td colspan="5" class="muted">Total</td>{% for k in ["brokerage","stt","exchange","sebi","stamp","gst"] %}<td class="num">{{ money(rows|map(attribute=k)|select("number")|sum) }}</td>{% endfor %}<td class="num"><b>{{ money(total) }}</b></td></tr>
+    </table></div>
+    <p class="muted" style="font-size:12px">{{ a.charges.note ~ " " if a.charges.note is defined else "" }}Estimated by the broker for today; the contract note is final.</p>
+    {% else %}<p class="muted">No executed orders today, so no charges.</p>{% endif %}
+    {% endif %}
+  </section>
+
+  <section class="sec" data-panel="holdings">
+    <h2>Holdings</h2>
+    {{ err("holdings") }}
+    {% set rows = a.holdings.data or [] %}
+    {% if a.holdings.data is not none %}
+    {% if rows %}
+    <div class="tbl"><table>
+      <tr><th>Symbol</th><th class="num">Qty</th><th class="num">Avg</th><th class="num">LTP</th><th class="num">Invested</th><th class="num">Current</th><th class="num">P&amp;L</th><th class="num">Day change</th></tr>
+      {% for r in rows %}
+      <tr data-account-row data-order-status="{{ (r.status or '')|lower }}"><td><b>{{ r.tradingsymbol or r.trading_symbol }}</b> <span class="muted">{{ r.company_name }}</span></td><td class="num">{{ r.quantity }}</td>
+        <td class="num">{{ money(r.average_price) }}</td><td class="num">{{ money(r.last_price) }}</td>
+        <td class="num">{{ money((r.average_price or 0) * (r.quantity or 0)) }}</td><td class="num">{{ money((r.last_price or 0) * (r.quantity or 0)) }}</td>
+        <td class="num"><b>{{ pnl(r.pnl) }}</b></td><td class="num">{{ pnl(r.day_change) }} <span class="muted">{{ "{:+.2f}%".format(r.day_change_percentage) if r.day_change_percentage is number else "" }}</span></td></tr>
+      {% endfor %}
+      <tr data-account-total><td colspan="6" class="muted">Total</td><td class="num"><b>{{ pnl(rows|map(attribute="pnl")|select("number")|sum) }}</b></td><td></td></tr>
+    </table></div>
+    {% else %}<p class="muted">No holdings.</p>{% endif %}
+    {% endif %}
+  </section>
+  {% if a.mf_holdings is defined %}
+  <section class="sec" data-panel="holdings">
+    <h2>Mutual funds</h2>
+    {{ err("mf_holdings") }}
+    {% set rows = a.mf_holdings.data or [] %}
+    {% if a.mf_holdings.data is not none %}
+    {% if rows %}
+    <div class="tbl"><table>
+      <tr><th>Fund</th><th>Folio</th><th class="num">Units</th><th class="num">Avg NAV</th><th class="num">NAV</th><th class="num">Invested</th><th class="num">Current</th><th class="num">P&amp;L</th><th class="num">P&amp;L %</th></tr>
+      {# Brokers' own MF pnl can be missing or 0 (Kite sends 0.0), so it is always worked out from NAVs. #}
+      {% set t = namespace(inv=0, cur=0) %}
+      {% for r in rows %}
+      {% set inv = (r.average_price or 0) * (r.quantity or 0) %}{% set cur = (r.last_price or 0) * (r.quantity or 0) %}
+      {% set t.inv = t.inv + inv %}{% set t.cur = t.cur + cur %}
+      <tr data-account-row data-order-status="{{ (r.status or '')|lower }}"><td><b>{{ r.fund or r.tradingsymbol }}</b></td><td class="muted">{{ r.folio or "" }}</td><td class="num">{{ "{:,.3f}".format(r.quantity) if r.quantity is number else "—" }}</td>
+        <td class="num">{{ money(r.average_price) }}</td><td class="num">{{ money(r.last_price) }} <span class="muted">{{ r.last_price_date or "" }}</span></td>
+        <td class="num">{{ money(inv) }}</td><td class="num">{{ money(cur) }}</td>
+        <td class="num"><b>{{ pnl(cur - inv) }}</b></td><td class="num {{ 'up' if cur >= inv else 'down' }}">{{ "{:+.2f}%".format((cur - inv) / inv * 100) if inv else "—" }}</td></tr>
+      {% endfor %}
+      <tr data-account-total><td colspan="5" class="muted">Total</td><td class="num">{{ money(t.inv) }}</td><td class="num">{{ money(t.cur) }}</td>
+        <td class="num"><b>{{ pnl(t.cur - t.inv) }}</b></td><td class="num {{ 'up' if t.cur >= t.inv else 'down' }}"><b>{{ "{:+.2f}%".format((t.cur - t.inv) / t.inv * 100) if t.inv else "—" }}</b></td></tr>
+    </table></div>
+    {% else %}<p class="muted">No mutual fund holdings.</p>{% endif %}
+    {% endif %}
+  </section>
+
+  <section class="sec" data-panel="holdings">
+    <h2>SIPs</h2>
+    {{ err("sips") }}
+    {% set rows = a.sips.data or [] %}
+    {% if a.sips.data is not none %}
+    {% if rows %}
+    <div class="tbl"><table>
+      <tr><th>Fund</th><th>Status</th><th>Frequency</th><th class="num">Amount</th><th class="num">Done</th><th class="num">Pending</th><th>Next instalment</th><th>Last instalment</th></tr>
+      {% for r in rows %}
+      <tr data-account-row data-order-status="{{ (r.status or '')|lower }}"><td><b>{{ r.fund or r.tradingsymbol }}</b></td><td class="{{ 'up' if r.status == 'ACTIVE' else 'muted' }}">{{ r.status }}</td><td>{{ (r.frequency or "")|capitalize }}</td>
+        <td class="num">{{ money(r.instalment_amount) }}</td><td class="num">{{ r.completed_instalments if r.completed_instalments is not none else "—" }}</td>
+        <td class="num">{{ r.pending_instalments if r.pending_instalments is not none and r.pending_instalments >= 0 else "—" }}</td>
+        <td>{{ (r.next_instalment or "—")[:10] }}</td><td>{{ (r.last_instalment or "—")[:10] }}</td></tr>
+      {% endfor %}
+      {% set active = rows|selectattr("status", "equalto", "ACTIVE")|list %}
+      <tr data-account-total><td colspan="3" class="muted">Active SIPs: {{ active|length }}</td><td class="num"><b>{{ money(active|map(attribute="instalment_amount")|select("number")|sum) }}</b></td><td colspan="4" class="muted">per instalment</td></tr>
+    </table></div>
+    {% else %}<p class="muted">No SIPs.</p>{% endif %}
+    {% endif %}
+  </section>
+  {% else %}
+  <p data-panel="holdings" class="muted" style="font-size:12px;margin-top:16px">Mutual funds and SIPs held in {{ bname }} aren’t available through its trading API, so they don’t appear here.</p>
+  {% endif %}
+  </div>
+  {% endif %}

@@ -44,35 +44,42 @@ async def _load(expiry: str, strike: float, opt_type: str, start: str, end: str 
 
 @router.get("/data", response_class=HTMLResponse)
 async def index(request: Request):
-    error = None
-    try:
-        expiries = await upstox.expiries()
-    except upstox.UpstoxError as e:
-        expiries, error = [], str(e)
     return templates.TemplateResponse(request, "index.html", {
-        "expiries": expiries, "error": error, "intervals": list(upstox.INTERVALS),
+        "expiries": [], "error": None, "intervals": list(upstox.INTERVALS),
         "today": upstox.today_ist().isoformat(),
     })
 
 
+@router.get("/api/expiries")
+async def expiries():
+    return {"expiries": await upstox.expiries()}
+
+
+
 @router.get("/account", response_class=HTMLResponse)
 async def account_page(request: Request, broker: str = "upstox"):
-    """Profile, funds, holdings, positions, orders and trades — server-rendered, for Upstox or Kite.
-    Each section loads independently; a static-IP refusal is shown per section."""
+    broker = broker if broker in brokers.BROKERS else "upstox"
+    return templates.TemplateResponse(request, "account.html", {"broker": broker, "now": "Updating…"})
+
+
+@router.get("/api/account/view", response_class=HTMLResponse)
+async def account_view(request: Request, broker: str = "upstox"):
+    """Load broker data after the page shell; preserve per-section failures."""
     broker = broker if broker in brokers.BROKERS else "upstox"
     now = datetime.now(upstox.IST).strftime("%d %b %Y %H:%M")
     if broker in ("kite", "indmoney"):
         creds = await asyncio.to_thread(_creds, request, request.state.user_id, broker)
         if not creds.token_valid():
-            return templates.TemplateResponse(request, "account.html", {"broker": broker, "a": None, "blocked": False,
+            return templates.TemplateResponse(request, "_account_content.html", {"broker": broker, "a": None, "blocked": False,
                                                                         "login_needed": True, "now": now})
         acct = await (brokers.kite_account(creds) if broker == "kite" else brokers.ind_account(creds))
         blocked = all(v["error"] for v in acct.values())
     else:
         acct = await upstox.account()
         blocked = all(v["error"] and "static IP" in v["error"] for v in acct.values())
-    return templates.TemplateResponse(request, "account.html", {"broker": broker, "a": acct, "blocked": blocked,
+    return templates.TemplateResponse(request, "_account_content.html", {"broker": broker, "a": acct, "blocked": blocked,
                                                                 "login_needed": False, "now": now})
+
 
 
 @router.get("/api/market/calendar")

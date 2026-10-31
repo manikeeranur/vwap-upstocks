@@ -30,7 +30,8 @@ class RequestLoggingMiddleware:
                 headers = list(message.get("headers", []))
                 headers.append((b"x-request-id", rid.encode()))
                 headers = [(k, v) for k, v in headers if k.lower() != b"cache-control"]
-                headers.extend([(b"cache-control", b"no-store"), (b"x-content-type-options", b"nosniff"),
+                cache = (b"public, max-age=31536000, immutable" if scope.get("query_string") == b"v=20261031-loading" else b"public, max-age=0, must-revalidate") if scope["path"].startswith("/static/") and status in (200, 304) else b"no-store"
+                headers.extend([(b"cache-control", cache), (b"x-content-type-options", b"nosniff"),
                                 (b"referrer-policy", b"no-referrer"), (b"x-frame-options", b"DENY"),
                                 (b"content-security-policy", b"frame-ancestors 'none'; base-uri 'self'; form-action 'self'")])
                 message = {**message, "headers": headers}

@@ -1,4 +1,5 @@
 <!doctype html>
+{% from "_loading.html" import skeleton %}
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -196,7 +197,7 @@
     </div>
     <div class="bar" id="bar" hidden><div></div></div>
     <div class="filter-bar" style="margin-top:20px"><label class="search-filter">Search results<input type="search" id="result-search" placeholder="Symbol, strike or date" maxlength="100"></label><label>Option side<select id="result-side"><option value="">Calls &amp; puts</option><option value="CE">Calls · CE</option><option value="PE">Puts · PE</option></select></label><label>Net result<select id="result-outcome"><option value="">All results</option><option value="profit">Profitable</option><option value="loss">Loss-making</option><option value="flat">Break-even</option></select></label><button class="btn ghost" type="button" id="clear-result-filters">Clear filters</button></div><p id="result-filter-summary" class="filter-summary" role="status"></p>
-    <div id="summary"></div>
+    <div id="summary" aria-busy="true">{{ skeleton("metrics",4) }}</div>
     <div class="monthly" id="monthly" hidden></div>
     <div class="tblwrap" id="tblwrap" hidden><table class="rt" id="tbl">
       <thead><tr id="thead"></tr></thead>
@@ -220,7 +221,7 @@
     <div id="chart"></div>
   </div>
 </div>
-<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<script>const CHART_LIBRARY="https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js";</script>
 <script>
 const $ = id => document.getElementById(id);
 const fmt = n => (Math.round(n * 100) / 100).toFixed(2);
@@ -432,9 +433,10 @@ async function poll() {
 }
 
 async function loadSavedRuns(restoreLatest = false) {
+  const done=restoreLatest?LoadingUI.begin("#summary",{initial:true,kind:"metrics",retry:()=>loadSavedRuns(true)}):()=>{};
   try {
     const response = await appFetch('/api/vwap/jobs');
-    if (!response.ok) return;
+    if (!response.ok) throw new Error("Saved runs could not load. Please retry.");
     const { jobs } = await response.json();
     const select = $("savedRuns");
     select.replaceChildren(new Option('Choose a saved run', ''));
@@ -445,7 +447,8 @@ async function loadSavedRuns(restoreLatest = false) {
     select.value = job || '';
     $("savedRunsLabel").hidden = !jobs.length;
     if (restoreLatest && !job && !$("run").disabled && jobs.length) await openSavedRun(jobs[0].id);
-  } catch (_) { /* Saved runs can be fetched again after connectivity returns. */ }
+    else if(restoreLatest && !job)$("summary").textContent="No saved results yet. Run a backtest to get started.";
+  } catch (error) {done(error);} finally{done();}
 }
 
 async function openSavedRun(id) {
@@ -469,12 +472,13 @@ async function openSavedRun(id) {
   } catch (error) {
     if (job !== id) return;
     $("status").textContent = error.message;
+    if($("summary").querySelector("[data-skeleton]"))$("summary").textContent="Saved results unavailable. Choose a run to try again.";
     $("run").disabled = false;
   }
 }
 $("savedRuns").addEventListener("change", event => openSavedRun(event.target.value));
 
-$("run").addEventListener("click", async () => {
+LoadingUI.on($("run"),"click", async () => {
   $("run").disabled = true; $("zip").disabled = $("sumcsv").disabled = $("pdf").disabled = true;
   days = []; render(); $("bar").hidden = false; $("bar").firstElementChild.style.width = "0";
   $("status").textContent = "Starting…";
@@ -486,9 +490,9 @@ $("run").addEventListener("click", async () => {
   timer = setInterval(poll, 1500); poll();
 });
 const qtyNow = () => (parseInt($("lots").value) || 1) * (parseInt($("lotsize").value) || 65);
-$("zip").addEventListener("click", () => { window.location = `/api/vwap/job/${job}/zip?qty=${qtyNow()}`; });
-$("pdf").addEventListener("click", () => { window.location = `/api/vwap/job/${job}/report.pdf?lots=${parseInt($("lots").value) || 20}&lot_size=${parseInt($("lotsize").value) || 65}`; });
-$("sumcsv").addEventListener("click", () => { window.location = `/api/vwap/job/${job}/summary.csv?qty=${qtyNow()}`; });
+LoadingUI.on($("zip"),"click",()=>LoadingUI.download(`/api/vwap/job/${job}/zip?qty=${qtyNow()}`));
+LoadingUI.on($("pdf"),"click",()=>LoadingUI.download(`/api/vwap/job/${job}/report.pdf?lots=${parseInt($("lots").value) || 20}&lot_size=${parseInt($("lotsize").value) || 65}`));
+LoadingUI.on($("sumcsv"),"click",()=>LoadingUI.download(`/api/vwap/job/${job}/summary.csv?qty=${qtyNow()}`));
 ["lots", "lotsize"].forEach(id => $(id).addEventListener("input", render));
 
 // ─── Trade chart ──────────────────────────────────────────────────────────────
@@ -597,8 +601,11 @@ async function openChart(t) {
   $("cmodal").hidden = false;
   document.body.style.overflow = "hidden";
   const q = new URLSearchParams({ key: t.instrument_key, date: t.date, expiry: t.expiry });
-  const fontReady = document.fonts ? Promise.race([document.fonts.load("12px Satoshi"), new Promise(r => setTimeout(r, 1500))]) : Promise.resolve();
-  [chartData] = await Promise.all([appFetch(`/api/chart?${q}`).then(r => r.json()).catch(e => ({ detail: e.message })), fontReady]);
+  $("chart").innerHTML=LoadingUI.skeleton("chart",1);
+  const chartReady=LoadingUI.loadScript(CHART_LIBRARY);
+  const [loadedChart] = await Promise.all([appFetch(`/api/chart?${q}`).then(r => r.json()).catch(e => ({ detail: e.message })), chartReady]).catch(error=>[{detail:error.message}]);
+  if(chartTrade!==t || $("cmodal").hidden)return;
+  chartData=loadedChart;
   if (chartData.detail || chartData.error) { $("chart").innerHTML = `<p class="err" style="padding:16px">${chartData.detail || chartData.error}</p>`; return; }
   drawChart();
 }

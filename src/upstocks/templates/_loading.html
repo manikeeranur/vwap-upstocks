@@ -1,0 +1,4 @@
+{% macro skeleton(kind='rows', count=4) -%}
+{% if kind == 'table' %}{% for _ in range(count) %}<tr aria-hidden="true"><td colspan="20"><div class="skeleton-row">{% for _ in range(4) %}<span class="skeleton-line"></span>{% endfor %}</div></td></tr>{% endfor %}
+{% else %}<div class="skeleton skeleton-{{ kind }}" data-skeleton aria-hidden="true">{% for _ in range(count) %}<div class="skeleton-item">{% for _ in range(1 if kind == 'calendar' else 3) %}<span class="skeleton-line"></span>{% endfor %}</div>{% endfor %}</div>{% endif %}
+{%- endmacro %}

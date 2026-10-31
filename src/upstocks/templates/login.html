@@ -27,14 +27,15 @@
     <button class="btn primary" type="submit">Sign in</button>
   </form>
 </main>
+<script src="/static/loading.js?v=20261031-loading"></script>
 <script>
 const token = {{ request.app.state.dashboard_token | default('') | tojson }}, next = {{ next | tojson }};
-document.getElementById('f').addEventListener('submit', async e => {
+LoadingUI.on(document.getElementById('f'),'submit', async e => {
   e.preventDefault();
   const f = e.target, button = f.querySelector('button'), err = document.getElementById('err');
   button.disabled = true; err.textContent = '';
   try {
-    const r = await fetch('/api/login', {method:'POST', headers:{'content-type':'application/json','X-App-Token':token},
+    const r = await LoadingUI.request('/api/login', {method:'POST', headers:{'content-type':'application/json','X-App-Token':token},
       body:JSON.stringify({username:f.username.value, password:f.password.value})});
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(typeof j.detail === 'string' ? j.detail : 'Sign-in failed. Please try again.');

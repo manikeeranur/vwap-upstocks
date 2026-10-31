@@ -1,4 +1,5 @@
 <!doctype html>
+{% from "_loading.html" import skeleton %}
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -63,7 +64,7 @@
       <button class="btn ghost" id="preview" type="button">Preview</button>
       <button class="btn primary" id="dl" type="button">{{ ui_icon("download") }} Download CSV</button>
     </div>
-    <div id="out"></div>
+    <div id="out" aria-busy="true">{{ skeleton("rows",2) }}</div>
   </form>
   <details class="page-guide"><summary>Download details</summary><p>Choose a strike or find one by premium. Expiry is selected from your trading date. Downloads include one day unless “Include days until expiry” is enabled. Market hours: 09:15–15:29 IST.</p></details>
 </main>
@@ -75,16 +76,18 @@ let optType = "CE";
 
 // Strikes of the selected expiry — the Strike box is free text (type 22350);
 // this list only feeds its suggestions and the "nearest strike" hint.
-let strikeList = [];
+let strikeList = [],strikeVersion=0;
 
 async function loadStrikes() {
   const exp = $("expiry").value; if (!exp) return;
+  const version=++strikeVersion;const done=LoadingUI.button("#expiry");
   try {
     const r = await appFetch(`/api/contracts?expiry=${exp}`).then(r => r.json());
+    if(version!==strikeVersion)return;
     if (r.error || !r.strikes) throw new Error(r.error || "no strikes");
     strikeList = r.strikes;
     $("strikes").innerHTML = r.strikes.map(s => `<option value="${s}">`).join("");
-  } catch (e) { strikeList = []; $("out").innerHTML = `<p class="err">Could not load strikes: ${e.message}</p>`; }
+  } catch (e) { if(version===strikeVersion){strikeList = []; $("out").textContent = "Could not load strikes: "+e.message;} } finally {done();}
 }
 
 // Typed strike must exist for this expiry; otherwise say which ones are closest.
@@ -138,7 +141,7 @@ async function findStrike() {
     <div class="near">Nearby: ${near}</div></div>`;
   return r;
 }
-$("find").addEventListener("click", () => findStrike().catch(e => { $("out").innerHTML = `<p class="err">${e.message}</p>`; }));
+LoadingUI.on($("find"),"click", () => findStrike().catch(e => { $("out").innerHTML = `<p class="err">${e.message}</p>`; }));
 
 // In premium mode, Preview/Download first resolve the strike from the premium.
 async function ensureStrike() { if (mode === "premium") await findStrike(); else checkStrike(); }
@@ -157,11 +160,11 @@ function autoExpiryForDay() {
 }
 $("date").addEventListener("change", autoExpiryForDay);
 
-$("preview").addEventListener("click", async () => {
+LoadingUI.on($("preview"),"click", async () => {
   let found = "";
   try { await ensureStrike(); found = mode === "premium" ? $("out").innerHTML : ""; }
   catch (e) { $("out").innerHTML = `<p class="err">${e.message}</p>`; return; }
-  $("out").innerHTML = found + '<p class="msg">Loading…</p>';
+  $("out").innerHTML = found + LoadingUI.skeleton('rows',3);
   const r = await appFetch(`/api/preview?${query()}`).then(r => r.json()).catch(e => ({ error: e.message }));
   if (r.error || r.detail) { $("out").innerHTML = found + `<p class="err">${r.error || r.detail}</p>`; return; }
   const row = c => `<tr><td>${c[0].slice(0,10)} ${c[0].slice(11,16)}</td><td>${c[1]}</td><td>${c[2]}</td><td>${c[3]}</td><td>${c[4]}</td><td>${c[5]}</td><td>${c[6]}</td></tr>`;
@@ -172,13 +175,26 @@ $("preview").addEventListener("click", async () => {
     <tbody>${r.head.map(row).join("")}${r.tail.length ? '<tr><td colspan="7" style="text-align:center">…</td></tr>' + r.tail.map(row).join("") : ""}</tbody></table></div>`;
 });
 
-$("dl").addEventListener("click", async () => {
+LoadingUI.on($("dl"),"click", async () => {
   try { await ensureStrike(); } catch (e) { $("out").innerHTML = `<p class="err">${e.message}</p>`; return; }
-  window.location = `/download?${query()}`;
+  await LoadingUI.download(`/download?${query()}`);
 });
 
 $("date").value = today;
-autoExpiryForDay(); // also loads that expiry's strikes
+async function loadExpiries(){
+  const done=LoadingUI.begin('#out',{initial:true,retry:loadExpiries});
+  ['expiry','find','preview','dl'].forEach(id=>$(id).disabled=true);
+  try{
+    const response=await appFetch('/api/expiries');if(!response.ok)throw new Error('Expiry dates could not load. Please retry.');
+    const data=await response.json();
+    $('expiry').replaceChildren(...data.expiries.map(x=>new Option(x,x)));
+    if(!data.expiries.length)throw new Error('No expiry dates are available from the broker.');
+    $('out').replaceChildren();autoExpiryForDay();
+    ['expiry','find','preview','dl'].forEach(id=>$(id).disabled=false);
+  }catch(error){done(error);}
+  finally{done();}
+}
+loadExpiries();
 </script>
 </body>
 </html>

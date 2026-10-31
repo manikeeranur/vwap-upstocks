@@ -1,4 +1,5 @@
 <!doctype html>
+{% from "_loading.html" import skeleton %}
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -82,17 +83,17 @@
 <p class="filter-summary">P&amp;L totals follow the selected mode, broker, strategy and filters. Stock portfolio activity is on the Stocks page.</p>
   <p class="page-status" id="pageStatus" role="status">Loading your calendar…</p>
   <p class="small muted" id="calendarStatus" role="status"></p>
-  <div class="tiles" id="tiles"></div>
+  <div class="tiles" id="tiles" data-skeleton-kind="metrics" aria-busy="true">{{ skeleton("metrics",4) }}</div>
   <div class="broker-tiles" id="brokerTiles" hidden></div>
   <div class="card">
-    <div class="cal" id="cal"></div>
+    <div class="cal" id="cal" data-skeleton-kind="calendar" data-skeleton-count="35" aria-busy="true">{{ skeleton("calendar",35) }}</div>
     <p class="calendar-legend"><span>Weekend</span><span>Holiday · exchange closed</span><span>Special session · limited hours</span><span>Dates and session times: IST</span></p>
   </div>
   <div class="card" id="detail" hidden></div>
 <p class="small" data-view-only="live">Net P&amp;L deducts saved charges. Broker-calculated charges are labeled estimated; a reconciled contract note makes them final. When charges are unavailable, gross P&amp;L is shown. Open, partial and unresolved trades are in Overview → Live.</p>
 </main>
-<script src="/static/portfolio-pnl.js?v=20261031-broker-fees"></script>
-<script src="/static/exchange-calendar.js"></script>
+<script src="/static/portfolio-pnl.js?v=20261031-loading"></script>
+<script src="/static/exchange-calendar.js?v=20261031-loading"></script>
 <script>
 const $ = id => document.getElementById(id);
 const LABELS = { ...{{ labels | tojson }}, ema25_vwap: "VWAP + EMA25", ema_pullback: "EMA pullback", smc_ema_combo: "SMC + EMA (1/day)" }, TODAY = "{{ today }}";
@@ -104,7 +105,7 @@ const EXCHANGES = {{ exchanges | tojson }};
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const session = key => ExchangeCalendar.session(key, C?.days?.[key], EXCHANGES[$("strat").value]);
 let cur = new Date(TODAY + "T12:00:00"); cur.setDate(1);
-let J = null, C = null, sel = null, loadVersion = 0, visibleRows = [];
+let J = null, C = null, sel = null, loadVersion = 0, visibleRows = [], loadController;
 const dataView = WorkspaceView.bind({onChange:render,descriptions:{
   paper:'Simulated intraday P&L · before charges',
   live:'Closed live trades · net after saved charges · estimates labeled'
@@ -122,32 +123,29 @@ function accountTiles(per, basis) {
 
 async function load() {
   const version = ++loadVersion;
+  $("mon").textContent=cur.toLocaleDateString("en-IN",{month:"long",year:"numeric"});
   const a = new Date(cur.getFullYear(), cur.getMonth(), 1), b = new Date(cur.getFullYear(), cur.getMonth() + 1, 0);
-  const status = $("pageStatus"); status.hidden = false; status.className = "page-status"; status.textContent = "Loading your calendar…";
-  $("cal").setAttribute("aria-busy", "true");
+  loadController?.abort();loadController=new AbortController();const signal=loadController.signal;
+  const status=$("pageStatus");status.hidden=false;status.className="page-status";status.textContent="Loading your calendar…";
+  const done=LoadingUI.begin(["#tiles","#cal"],{initial:true,retry:load});
+  J=null;C=null;$("detail").hidden=true;$("brokerTiles").hidden=true;
+  $("calendarStatus").textContent="Checking exchange holidays…";
+  const holiday=appFetch(`/api/market/calendar?year=${cur.getFullYear()}&month=${cur.getMonth()+1}`,{signal}).then(async r=>{
+    if(!r.ok)throw new Error("Holiday calendar unavailable");
+    const value=await r.json();if(version!==loadVersion)return;C=value;
+    $("calendarStatus").textContent=C.verified ? C.warning || "NSE / BSE exchange schedule · select a day for session details." : "Holiday dates are unavailable. Weekends are marked.";
+    if(J)render();
+  }).catch(()=>{if(version===loadVersion)$("calendarStatus").textContent="Holiday dates unavailable; weekends and recorded P&L are still shown.";});
   try {
-    const [journal, calendar] = await Promise.allSettled([
-      appFetch(`/api/journal?start=${iso(a)}&end=${iso(b)}`).then(async r => {
-        if (!r.ok) throw new Error("Couldn't load the calendar. Change the month to try again.");
-        return r.json();
-      }),
-      appFetch(`/api/market/calendar?year=${cur.getFullYear()}&month=${cur.getMonth() + 1}`).then(async r => {
-        if (!r.ok) throw new Error("Holiday calendar unavailable");
-        return r.json();
-      })
-    ]);
-    if (version !== loadVersion) return;
-    if (journal.status === "rejected") throw journal.reason;
-    J = journal.value; C = calendar.status === "fulfilled" ? calendar.value : null;
-    $("calendarStatus").textContent = !C?.verified
-      ? "Holiday dates are unavailable for this year. Weekends are marked; recorded P&L is still shown."
-      : C.warning || "NSE / BSE exchange schedule · select a day for holiday names and session times.";
-    status.hidden = true; render();
-  } catch (error) {
-    if (version !== loadVersion) return;
-    J = null; $("brokerTiles").hidden = true; $("brokerTiles").innerHTML = ""; $("cal").innerHTML = ""; $("tiles").innerHTML = ""; $("detail").hidden = true;
-    status.className = "page-status error"; status.textContent = error.message;
-  } finally { if (version === loadVersion) $("cal").setAttribute("aria-busy", "false"); }
+    const response=await appFetch(`/api/journal?start=${iso(a)}&end=${iso(b)}`,{signal});
+    if(!response.ok)throw new Error("Couldn't load the calendar. Please retry.");
+    const result=await response.json();if(version!==loadVersion)return;
+    J=result;status.hidden=true;render();
+  } catch(error) {
+    if(version!==loadVersion)return;
+    done(error);status.className="page-status error";status.textContent=error.message;
+  } finally {done();}
+  await holiday;
 }
 
 function dayTrades(d) {

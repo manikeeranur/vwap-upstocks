@@ -1,9 +1,10 @@
 <!doctype html>
+{% from "_loading.html" import skeleton %}
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>upstocks — Stocks</title>{% include "_style.html" %}
-<link rel="stylesheet" href="/static/stocks.css">
-<script defer src="/static/stocks.js?v=20261031-broker-fees"></script></head>
+<link rel="stylesheet" href="/static/stocks.css?v=20261031-loading">
+<script defer src="/static/stocks.js?v=20261031-loading"></script></head>
 <body>{% set active="stocks" %}{% include "_nav.html" %}
 <main id="main" tabindex="-1">
 <header class="stock-header"><div><h1>Stocks · Momentum 12–1 tuned</h1>
@@ -22,7 +23,7 @@
 <button id="refresh-stocks" type="button" class="btn ghost">Refresh status</button>
 <a href="/brokers" data-view-only="live">Broker connections</a>
 </div>
-<section id="portfolio-summary" aria-label="Portfolio summary" class="stock-summary"></section>
+<section id="portfolio-summary" aria-label="Portfolio summary" class="stock-summary" aria-busy="true">{{ skeleton('metrics',4) }}</section>
 
 <section class="card" data-panel="settings"><h2>Capital &amp; controls</h2>
 <form id="stock-settings">
@@ -39,7 +40,7 @@
 </form>
 <button id="reconcile-stocks" data-view-only="live" type="button" class="btn ghost">Reconcile &amp; leave entries paused</button>
 </section>
-<section class="card" data-panel="portfolio"><h2 id="holding-heading">Paper holding &amp; next action</h2><div id="stock-position"></div><div id="stock-plan"></div>
+<section class="card" data-panel="portfolio"><h2 id="holding-heading">Paper holding &amp; next action</h2><div id="stock-position" aria-busy="true">{{ skeleton("rows",2) }}</div><div id="stock-plan"></div>
 <p class="mode-summary-note">Sell from 11:00 IST, then buy from 12:00 on the first trading session of the month. A new buy waits for a completed exit.<span data-view-only="live"> Ownership must be reconciled. Live orders use price limits; an unfilled order is shown until resolved.</span></p>
 <p data-view-only="live">Manual holdings are never adopted. Shared-stock activity or an ownership mismatch blocks automation.</p>
 <button id="preview-stocks" type="button" class="btn ghost">Refresh ranking preview</button><div id="ranking-preview" role="status"></div>

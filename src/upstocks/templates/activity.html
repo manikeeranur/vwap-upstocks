@@ -1,4 +1,5 @@
 <!doctype html>
+{% from "_loading.html" import skeleton %}
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -68,7 +69,7 @@
   <p id="error" class="log-error" role="alert" hidden></p>
   <section class="event-panel" aria-label="Activity records" aria-busy="true" id="event-panel">
     <div class="event-heading"><h2>Event stream</h2><span id="event-count">Loading…</span></div>
-    <div id="events" aria-live="polite"></div>
+    <div id="events" aria-live="polite">{{ skeleton("rows",5) }}</div>
     <div class="event-footer" id="load-footer" hidden><button class="btn ghost small" id="load-more" type="button">Load earlier events</button></div>
   </section>
 </main>
@@ -102,11 +103,13 @@
   }
   async function load(append = false) {
     if (busy || !$('filters').reportValidity()) return;
+    const done=LoadingUI.begin('#events',{initial:!applied,retry:()=>load()});
     busy = true; $('error').hidden = true; $('event-panel').setAttribute('aria-busy', 'true');
     ['refresh','apply','load-more'].forEach(id => $(id).disabled = true);
     const params = append ? new URLSearchParams(applied) : new URLSearchParams({day:$('day').value, level:$('level').value, component:$('component').value, q:$('search').value.trim(), include_http:String($('include-http').checked || $('component').value === 'http')});
     for (const key of ['level','component']) if (!params.get(key)) params.delete(key);
     if (append && cursor) params.set('before', cursor);
+    const summaryTask=append?null:get('/api/activity/session?day='+encodeURIComponent(params.get('day'))).then(value=>({value}),error=>({error}));
     try {
       const data = await get('/api/activity?' + params);
       if (!append) {
@@ -117,11 +120,12 @@
       if (!append) {
         const day = encodeURIComponent(applied.get('day'));
         $('export').href = '/api/activity/session.zip?day=' + day;
-        const summary = await get('/api/activity/session?day=' + day);
+        const summaryResult=await summaryTask;if(summaryResult.error)throw summaryResult.error;
+        const summary=summaryResult.value;
         for (const [id,key] of [['events','events'],['evidence','evidence'],['orders','order_attempts'],['trades','journal_trades']]) $(id+'-total').textContent = summary[key].toLocaleString('en-IN');
       }
-    } catch (e) { $('error').textContent = e.message; $('error').hidden = false; if (!count) $('event-count').textContent = 'Unable to load'; }
-    finally { busy = false; $('event-panel').setAttribute('aria-busy', 'false'); ['refresh','apply','load-more'].forEach(id => $(id).disabled = false); }
+    } catch (e) { done(e);$('error').textContent = e.message; $('error').hidden = false; if (!count) $('event-count').textContent = 'Unable to load'; }
+    finally { done();busy = false; $('event-panel').setAttribute('aria-busy', 'false'); ['refresh','apply','load-more'].forEach(id => $(id).disabled = false); }
   }
   async function health() {
     try {
@@ -134,9 +138,9 @@
       if (data.audit_failures) $('health').append(node('span', `${data.audit_failures} log write failures`));
     } catch { $('health').classList.add('warn'); $('health').textContent = 'System status unavailable'; }
   }
-  $('filters').addEventListener('submit', e => { e.preventDefault(); load(); });
-  $('refresh').addEventListener('click', () => { load(); health(); });
-  $('load-more').addEventListener('click', () => load(true));
+  LoadingUI.on($('filters'),'submit',e=>{e.preventDefault();return load();});
+  LoadingUI.on($('refresh'),'click',()=>Promise.all([load(),health()]));
+  LoadingUI.on($('load-more'),'click',()=>load(true));
   $('component').addEventListener('change', () => { if ($('component').value === 'http') $('include-http').checked = true; });
   $('include-http').addEventListener('change', () => { if (!$('include-http').checked && $('component').value === 'http') $('component').value = ''; });
   const saved=new URLSearchParams(location.search);
@@ -147,6 +151,7 @@
   }
   $('include-http').checked=saved.get('include_http')==='true';
   $('reset-filters').addEventListener('click',()=>{if(busy)return;$('level').value='';$('component').value='';$('search').value='';$('include-http').checked=false;load();});
+  LoadingUI.on($('export'),'click',e=>{e.preventDefault();return LoadingUI.download(e.currentTarget.href);});
   load(); health();
 })();
 </script>

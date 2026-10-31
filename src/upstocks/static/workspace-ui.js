@@ -68,7 +68,8 @@
       });
     });
     panels.forEach(p=>{p.setAttribute('role','tabpanel');p.setAttribute('aria-labelledby',name+'-tab-'+p.dataset.panel);});
-    new MutationObserver(()=>select(active)).observe(document.documentElement,{attributes:true,attributeFilter:['data-workspace-mode']});
+    const observer=new MutationObserver(()=>{if(container.isConnected)select(active);else observer.disconnect();});
+    observer.observe(document.documentElement,{attributes:true,attributeFilter:['data-workspace-mode']});
     select(active);
   }
   function dayIST(value) {
