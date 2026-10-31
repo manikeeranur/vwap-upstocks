@@ -5,6 +5,8 @@ import logging
 import sqlite3
 
 from fastapi import FastAPI, Request
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 import httpx
@@ -19,6 +21,7 @@ from .middleware import RequestLoggingMiddleware
 from .observability import SERVER_LOG_CONFIG, close_logging, configure_logging, redact
 from .repository import ConfigurationConflict, Repository
 from .security import DashboardGuard, SessionAuth
+from .stocks.domain import PortfolioError, StaleRevision
 from .services.backtests import BacktestService
 from .services.momentum import MomentumService
 from .services.momentum_live import MomentumLiveService
@@ -106,6 +109,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
                 lock.release()
 
     app = FastAPI(title="Upstocks", version="0.2.0", lifespan=lifespan)
+    app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
     app.state.settings = settings
     app.state.ready = False
     app.add_middleware(SessionAuth)
@@ -113,6 +117,11 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     app.add_middleware(RequestLoggingMiddleware)
     for router in (accounts.router, pages.router, trading.router, market.router, research.router, momentum.router, operations.router):
         app.include_router(router)
+
+    @app.exception_handler(PortfolioError)
+    async def stock_error(request: Request, exc: PortfolioError):
+        return JSONResponse({"detail": redact(str(exc)), "request_id": getattr(request.state, "request_id", "")},
+                            status_code=409 if isinstance(exc, StaleRevision) else 422)
 
     @app.exception_handler(ConfigurationConflict)
     async def configuration_conflict(request: Request, exc: ConfigurationConflict):
@@ -158,9 +167,15 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
             return JSONResponse({"status": "starting"}, status_code=503)
         health = await asyncio.to_thread(request.app.state.repository.health)
         scanner = request.app.state.trading._task
-        healthy = not settings.scanner_enabled or scanner is not None and not scanner.done()
+        workers = {
+            "scanner": request.app.state.trading.worker_health(),
+            "momentum": request.app.state.momentum_live.worker_health(),
+            "reminders": request.app.state.reminders.worker_health(),
+        }
+        healthy = not settings.scanner_enabled or all(w["running"] and not w.get("stale") for w in workers.values())
         return JSONResponse({"status": "ok" if healthy else "degraded", **health,
                              "scanner": "running" if scanner and not scanner.done() else "disabled" if not settings.scanner_enabled else "stopped",
+                             "workers": workers,
                              "active_backtests": len(request.app.state.backtests.tasks),
                              "people": len(request.app.state.trading.state["users"]),
                              "audit_failures": request.app.state.audit_failures}, status_code=200 if healthy else 503)

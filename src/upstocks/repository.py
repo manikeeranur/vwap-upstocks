@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import secrets
 import uuid
+from typing import Any
 
 from .database import Database, utc_now
 from .observability import clean, redact, request_id
@@ -188,12 +189,12 @@ class Repository:
             settings = {r[0]: json.loads(r[1]) for r in conn.execute("SELECT key,value FROM settings WHERE key IN ('lot_size','config_revision')")}
             users = {r["id"]: {"username": r["username"], "paused": bool(r["entries_paused"]), "telegram": bool(r["telegram_chat_id"])}
                      for r in conn.execute("SELECT * FROM users")}
-            accounts = {}
+            accounts: dict[str, dict[str,Any]] = {}
             for r in conn.execute("SELECT * FROM broker_strategy"):
                 acc = accounts.setdefault(account_id(r["user_id"], r["broker"]),
                                           {"user": r["user_id"], "broker": r["broker"], "live": {}, "lots": {}})
                 acc["live"][r["preset"]], acc["lots"][r["preset"]] = bool(r["live"]), r["lots"]
-            orders = {}
+            orders: dict[str, dict[str,Any]] = {}
             for r in conn.execute("SELECT * FROM broker_orders ORDER BY created_at"):
                 orders.setdefault(r["account"], {}).setdefault(r["trade_id"], {})[r["side"].lower()] = json.loads(r["payload"])
             logs = [r[0] for r in conn.execute("SELECT message FROM audit_events WHERE kind='activity' ORDER BY id DESC LIMIT 300")]
@@ -238,6 +239,27 @@ class Repository:
                                {"trade_id": tid, "account": account, "side": side, "order": payload, "context": context or {}})
             return bool(inserted)
 
+    def replace_exit(self, tid, account, expected, payload):
+        """Archive a terminal attempt and reserve only its unfilled remainder atomically."""
+        from .stocks.domain import PortfolioError
+        from .stocks.statements import fingerprint
+        with self.db.connect(write=True) as conn:
+            row = conn.execute("SELECT * FROM broker_orders WHERE trade_id=? AND account=? AND side='SELL'",(tid,account)).fetchone()
+            buy = conn.execute("SELECT payload FROM broker_orders WHERE trade_id=? AND account=? AND side='BUY'",(tid,account)).fetchone()
+            if not row or not buy:
+                raise PortfolioError("Exit intent is unavailable")
+            old, bought = json.loads(row["payload"]), json.loads(buy[0])
+            if fingerprint(old) != fingerprint(expected) or old.get("execution_status") not in ("cancelled","rejected"):
+                raise PortfolioError("Exit changed since review; reconcile and review it again")
+            if payload["qty"] != bought.get("filled_qty",0) - old.get("filled_qty",0) or payload["qty"] <= 0:
+                raise PortfolioError("Replacement quantity exceeds the remaining strategy position")
+            conn.execute("INSERT INTO broker_order_attempts(trade_id,account,side,payload,archived_at) VALUES(?,?,'SELL',?,?)",
+                         (tid,account,row["payload"],utc_now()))
+            conn.execute("UPDATE broker_orders SET status='pending',payload=?,updated_at=? WHERE trade_id=? AND account=? AND side='SELL'",
+                         (encode(payload),utc_now(),tid,account))
+            self._evidence(conn,tid.split("|")[1],"EXIT_REPLACEMENT",{"account":account,"trade_id":tid,"previous":old,"replacement":payload})
+            return True
+
     def finish_order(self, tid, account, side, payload, message):
         with self.db.connect(write=True) as conn:
             conn.execute("UPDATE broker_orders SET status=?,payload=?,updated_at=? WHERE trade_id=? AND account=? AND side=?",
@@ -245,14 +267,14 @@ class Repository:
             _audit(conn, "activity", message, level="ERROR" if payload["status"] == "unknown" else "INFO")
             self._evidence(conn, tid.split("|", 3)[1], "ORDER_RESULT", {"trade_id": tid, "account": account, "side": side, "order": payload})
 
-    def save_fill(self, tid, account, side, price=None, charges=None):
+    def save_fill(self, tid, account, side, price=None, charges=None, filled_qty=None, execution_status=None):
         """Record the broker's average fill price and/or charges on a submitted order (kept once known)."""
         with self.db.connect(write=True) as conn:
             row = conn.execute("SELECT payload FROM broker_orders WHERE trade_id=? AND account=? AND side=?", (tid, account, side)).fetchone()
             if row is None:
                 return
             payload = json.loads(row["payload"])
-            changes = {k: v for k, v in (("fill_price", price), ("charges", charges)) if v is not None and payload.get(k) != v}
+            changes = {k: v for k, v in (("fill_price", price), ("charges", charges), ("filled_qty", filled_qty), ("execution_status", execution_status)) if v is not None and payload.get(k) != v}
             if not changes:
                 return
             payload.update(changes)
@@ -303,9 +325,9 @@ class Repository:
             if sessions is not None:
                 self._write_sessions(conn, view["day"], sessions)
 
-    def journal(self, start, end):
+    def journal(self, start, end, user_id=None):
         with self.db.connect() as conn:
-            days = {}
+            days: dict[str, Any] = {}
             for r in conn.execute("SELECT * FROM journal_sessions WHERE day BETWEEN ? AND ? ORDER BY day,preset", (start, end)):
                 days.setdefault(r["day"], {})[r["preset"]] = {"lots": r["lots"], "lot_size": r["lot_size"], "updated": r["updated"], "trades": []}
             for r in conn.execute("SELECT * FROM journal_trades WHERE day BETWEEN ? AND ? ORDER BY day,preset,position", (start, end)):
@@ -313,21 +335,27 @@ class Repository:
             notes = {r[0]: r[1] for r in conn.execute("SELECT DISTINCT n.trade_id,n.text FROM notes n JOIN journal_trades t ON n.trade_id=t.trade_id WHERE t.day BETWEEN ? AND ?", (start, end))}
             # Trades a broker actually bought, with the real fill prices once known:
             # {trade id: {account: {"qty", "buy", "sell"}}} (trade ids are "preset|YYYY-MM-DD|…").
-            live, sells = {}, {}
+            live: dict[str, Any] = {}
+            sells = {}
             for r in conn.execute("SELECT trade_id,account,side,payload FROM broker_orders "
                                   "WHERE substr(trade_id, instr(trade_id,'|')+1, 10) BETWEEN ? AND ?", (str(start), str(end))):
+                if user_id is not None and not r["account"].startswith(f"{user_id}:"):
+                    continue
                 order = json.loads(r["payload"])
                 if not order.get("order_id"):
                     continue
                 if r["side"] == "BUY":
-                    live.setdefault(r["trade_id"], {})[r["account"]] = {"qty": order.get("qty") or 0, "buy": order.get("fill_price"), "sell": None,
-                                                                         "buy_charges": order.get("charges"), "sell_charges": None,
+                    live.setdefault(r["trade_id"], {})[r["account"]] = {"qty": order.get("filled_qty") or 0, "sold_qty": 0,
+                                                                         "buy_status": order.get("execution_status"), "sell_status": None,
+                                                                         "buy": order.get("fill_price"), "sell": None,
+                                                                         "buy_charges": order.get("charges") if order.get("charges_source") == "operator_statement" else None, "sell_charges": None,
                                                                          "client_id": order.get("client_id") or "", "holder": order.get("holder") or ""}
                 else:
                     sells[(r["trade_id"], r["account"])] = order
             for (tid, account), order in sells.items():
                 if account in live.get(tid, {}):
-                    live[tid][account].update(sell=order.get("fill_price"), sell_charges=order.get("charges"))
+                    live[tid][account].update(sell=order.get("fill_price"), sell_charges=order.get("charges") if order.get("charges_source") == "operator_statement" else None,
+                                                 sold_qty=order.get("filled_qty") or 0, sell_status=order.get("execution_status"))
             return {"days": days, "notes": notes, "live": live}
 
     def set_note(self, tid, text):

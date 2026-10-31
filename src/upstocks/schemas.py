@@ -180,3 +180,48 @@ class MomentumRequest(Input):
     def settings(self):
         from . import momentum
         return momentum.Settings(**self.model_dump(exclude={"refresh_all"}))
+
+
+class StockConfig(Input):
+    broker: Literal["paper", "upstox", "kite", "indmoney"]
+    revision: int = Field(strict=True, ge=0)
+    usable_capital: float = Field(ge=1000, le=100_000_000)
+    enabled: StrictBool
+    paused: StrictBool
+    confirm: Literal["LIVE"] | None = None
+    entry_source: str = Field(default="monthly", pattern=r"^(monthly|paper|backtest:[0-9a-f]{12})$")
+
+    @model_validator(mode="after")
+    def live_confirmation(self):
+        if self.broker == "paper" and self.entry_source == "paper":
+            raise ValueError("Paper cannot follow itself; choose monthly decisions or a saved backtest")
+        if self.broker != "paper" and self.enabled and not self.paused and self.confirm != "LIVE":
+            raise ValueError("Enabling live entries requires confirm: LIVE")
+        return self
+
+
+class StockReconcile(Input):
+    broker: Literal["paper", "upstox", "kite", "indmoney"]
+
+class StockRecovery(StockReconcile):
+    revision: int = Field(strict=True, ge=0)
+    order_id: str = Field(min_length=1,max_length=80)
+    confirm: Literal["EXIT"]
+
+class StatementPreview(StockReconcile):
+    reference: str = Field(min_length=3,max_length=120)
+    csv_text: str = Field(min_length=1,max_length=262144)
+
+class StatementApply(Input):
+    document_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    confirm: Literal["IMPORT"]
+
+class StockRecoveryCancel(StockReconcile):
+    revision: int = Field(strict=True, ge=0)
+    recovery_id: str = Field(min_length=1,max_length=80)
+
+class IntradayRecovery(Input):
+    broker: Literal["upstox","kite","indmoney"]
+    trade_id: str = Field(min_length=1,max_length=160)
+    order_id: str = Field(min_length=1,max_length=100)
+    confirm: Literal["EXIT"]

@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>upstocks — Stocks</title>{% include "_style.html" %}
+<link rel="stylesheet" href="/static/stocks.css">
+<script defer src="/static/stocks.js"></script></head>
+<body>{% set active="stocks" %}{% include "_nav.html" %}
+<main id="main" tabindex="-1">
+<header class="stock-header"><div><h1>Stocks · Momentum 12–1 tuned</h1>
+<p>One holding per portfolio. Monthly decisions from completed daily candles.</p></div>
+<a class="btn ghost" href="/momentum">Research &amp; backtests</a></header>
+<div id="stock-error" role="alert" hidden></div>
+<p id="stock-status" role="status">Loading your portfolios…</p>
+<div class="stock-toolbar">
+<label for="portfolio">Portfolio</label>
+<select id="portfolio"><option value="paper">Paper simulation</option><option value="upstox">Live · Upstox</option><option value="kite">Live · Kite</option><option value="indmoney">Live · INDmoney</option></select>
+<button id="refresh-stocks" type="button" class="btn ghost">Refresh status</button>
+<a href="/brokers">Broker connections</a>
+</div>
+<section id="portfolio-summary" aria-label="Portfolio summary" class="stock-summary"></section>
+<div class="stock-columns">
+<section class="card"><h2>Capital &amp; controls</h2>
+<form id="stock-settings">
+<label for="usable-capital">Usable capital (₹)</label>
+<input id="usable-capital" name="usable_capital" type="number" min="1000" max="100000000" step="0.01" required aria-describedby="capital-help">
+<p id="capital-help">Purchases use at most this limit, remaining strategy cash and available broker cash, with a cost provision. Profits do not increase your limit. Change it only when flat and reconciled.</p>
+<label for="entry-source">When enabling a flat portfolio</label><select id="entry-source"></select>
+<p>Follow the current paper holding or a saved tuned backtest to enter during the next verified trading session, using only your usable capital. A saved backtest must be refreshed through the latest completed session. Monthly exits and rotations continue afterward.</p>
+<label class="stock-check"><input id="stock-enabled" type="checkbox"> Enable this portfolio’s automation</label>
+<label class="stock-check"><input id="stock-paused" type="checkbox"> Pause new entries; continue exits</label>
+<p>Disabling automation stops new buys and sells. Pending orders continue to reconcile. The global “Pause entries” control also applies to all live stock portfolios.</p>
+<button id="save-stock-settings" type="submit" class="btn primary">Save settings</button>
+<span id="stock-save-status" role="status">No unsaved changes</span>
+</form>
+<button id="reconcile-stocks" type="button" class="btn ghost">Reconcile &amp; leave entries paused</button>
+</section>
+<section class="card"><h2>Holding &amp; next action</h2><div id="stock-position"></div><div id="stock-plan"></div>
+<p>Sell from 11:00 IST, then buy from 12:00 on the first trading session of the month. A new buy waits for a completed exit and reconciled ownership. Live orders use price limits; an unfilled order is shown until resolved.</p>
+<p>Manual holdings are never adopted. Shared-stock activity or an ownership mismatch blocks automation.</p>
+<button id="preview-stocks" type="button" class="btn ghost">Refresh ranking preview</button><div id="ranking-preview" role="status"></div>
+</section></div>
+<section class="card"><h2>Orders &amp; fills</h2><p>“Submitted” is an acknowledgement. Only confirmed fills change quantity and cash. Costs use conservative provisions until final charges are imported from a reviewed broker statement.</p>
+<div class="stock-table" role="region" aria-label="Stock orders" tabindex="0"><table><thead><tr><th>Time</th><th>Side</th><th>Stock</th><th>Filled / ordered</th><th>State</th><th>Limit</th><th>Reference</th></tr></thead><tbody id="stock-orders"></tbody></table></div></section>
+<section class="card" id="execution-recovery"><h2>Exit recovery</h2>
+<p>Replace only a confirmed cancelled or rejected exit. The replacement covers the remaining strategy-owned shares or contracts after broker verification. Stock recovery requests expire after seven days; entries stay paused.</p>
+<div id="stock-recoveries" role="status"></div>
+<h3>Intraday exits · selected broker</h3><div id="intraday-recoveries"></div>
+</section>
+<section class="card"><h2>Historical fills &amp; final charges</h2>
+<p>Use a broker statement or contract note to reconcile saved strategy orders. <a href="/api/reconciliation/template.csv">Download CSV template</a>. Include the exact client ID, broker order ID, trade date, instrument, quantities, cumulative average fill price and final total charges in rupees. Final statuses: complete, cancelled or rejected. Leave charges blank if unavailable.</p>
+<p>Only existing strategy orders can be matched. Manual trades are excluded. This is operator-verified evidence; check the preview against your broker document before applying. Stock entries remain paused afterward.</p>
+<form id="statement-form">
+<label for="statement-reference">Statement / contract-note reference</label><input id="statement-reference" required minlength="3" maxlength="120">
+<label for="statement-file">Reconciliation CSV (maximum 256 KB)</label><input id="statement-file" type="file" accept=".csv,text/csv" required>
+<button type="submit" class="btn ghost" id="preview-statement">Review statement</button>
+</form>
+<div id="statement-preview" role="status"></div><button id="apply-statement" class="btn primary" hidden>Apply reviewed evidence</button>
+</section>
+<section class="card"><h2>Portfolio activity</h2><ol id="stock-events"></ol></section>
+</main></body></html>

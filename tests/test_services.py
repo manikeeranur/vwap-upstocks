@@ -23,7 +23,7 @@ ACC = "1:upstox"
 
 def logged_in(broker="upstox"):
     """Credentials with a token issued just now (valid for today)."""
-    return brokers.Credentials(broker, "key", "secret", "token", datetime.now(upstox.IST).isoformat(timespec="seconds"))
+    return brokers.Credentials(broker, "key", "secret", "token", datetime.now(upstox.IST).isoformat(timespec="seconds"), "TEST-OWNER", "Test")
 
 
 class ServiceTests(unittest.IsolatedAsyncioTestCase):
@@ -42,6 +42,11 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         svc = TradingService(self.repo)
         svc._credentials = lambda account: logged_in(account.split(":")[1])
         return svc
+
+    async def repo_fill(self, qty):
+        order = self.trading.state["orders"][ACC][TID]["buy"]
+        order.update(filled_qty=qty, execution_status="complete")
+        self.repo.save_fill(TID, ACC, "BUY", 100, None, qty, "complete")
 
     async def live(self, on=True, **kw):
         await self.trading.configure(PRESET, user=1, broker="upstox", live=on, **kw)
@@ -109,7 +114,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
                 patch("upstocks.brokers.ind_place", new=AsyncMock(return_value="DRV-1")) as ind, \
                 patch("upstocks.live.market_open", return_value=True), \
                 patch("upstocks.live.now_ist", return_value=datetime(2026, 10, 12, 9, 37, tzinfo=upstox.IST)):
-            self.trading._credentials = lambda account: brokers.Credentials(account.split(":")[1], "k", "s", "t", "2026-10-12T08:31:00+05:30")
+            self.trading._credentials = lambda account: brokers.Credentials(account.split(":")[1], "k", "s", "t", "2026-10-12T08:31:00+05:30", "AB1234" if account.endswith(":kite") else "TEST-OWNER", "Test Holder" if account.endswith(":kite") else "Test")
             await self.trading._act(PRESET, [trade])
         self.assertEqual(up.await_args.args[1:3], (65, "BUY"))
         self.assertEqual(kite.await_args.args[1:4], ("NIFTY26O1325000CE", 195, "BUY"))
@@ -132,16 +137,21 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((trade["peak_high"], trade["peak_low"]), (636.7, 455))
         self.assertEqual(candles.await_count, 1)
 
-    async def test_live_fills_only_for_accounts_with_orders_today(self):
+    async def test_reconciliation_tracks_quantities_and_terminal_status(self):
         today = upstox.today_ist().isoformat()
-        self.trading.state["orders"] = {"1:kite": {f"harmonic|{today}|10:01|NSE_FO|1": {"buy": {"order_id": "b1"}}},
-                                        "1:upstox": {"harmonic|2020-01-01|10:01|NSE_FO|1": {"buy": {"order_id": "old"}}}}
-        self.trading._credentials = lambda account: brokers.Credentials(account.split(":")[1], "k", "s", "t", brokers.now_iso())
-        with patch("upstocks.brokers.order_fills", new=AsyncMock(return_value={"b1": 439.1})) as fills:
-            self.assertEqual(await self.trading.live_fills(1), {"1:kite": {"b1": 439.1}})
-            await self.trading.live_fills(1)   # cached
-        self.assertEqual(fills.await_count, 1)
-        self.assertEqual(self.trading.state["orders"]["1:kite"][f"harmonic|{today}|10:01|NSE_FO|1"]["buy"]["fill_price"], 439.1)
+        tid = f"harmonic|{today}|10:01|NSE_FO|1"
+        self.trading.state["orders"] = {"1:kite": {tid: {"buy": {"order_id":"b1","qty":65,"status":"submitted","client_id":"TEST-OWNER"}}}}
+        self.repo.reserve_order(tid, "1:kite", "harmonic", "BUY", self.trading.state["orders"]["1:kite"][tid]["buy"])
+        self.trading._credentials = lambda account: logged_in("kite")
+        rows = [{"order_id":"b1","tag":None,"qty":65,"filled_qty":20,"notional":200000,
+                 "average_price":100,"status":"open","side":"BUY"}]
+        with patch("upstocks.execution_brokers.order_book", AsyncMock(return_value=rows)) as book, patch.object(self.trading, "_store_charges", AsyncMock()):
+            self.assertEqual(await self.trading.live_fills(1), {"1:kite":{"b1":100}})
+            await self.trading.live_fills(1)
+        self.assertEqual(book.await_count, 1)
+        order = self.trading.state["orders"]["1:kite"][tid]["buy"]
+        self.assertEqual((order["filled_qty"],order["execution_status"]),(20,"open"))
+        self.assertTrue(self.trading._unresolved("1:kite"))
 
     def test_indmoney_token_lasts_24_hours(self):
         creds = brokers.Credentials("indmoney", "", "", "t", "2026-10-12T08:31:00+05:30")
@@ -185,10 +195,47 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             await task
             broker.assert_not_awaited()
 
+    async def test_slow_strategy_does_not_hold_up_fast_strategy_execution(self):
+        slow_entered, release, acted = asyncio.Event(), asyncio.Event(), asyncio.Event()
+        async def engine(preset, day):
+            if preset == "smc_live":
+                slow_entered.set()
+                await release.wait()
+            return []
+        async def act(preset, trades):
+            if preset == PRESET:
+                acted.set()
+        with patch("upstocks.live.run_engine", engine), patch.object(self.trading, "_act", act), patch.object(self.trading, "_peaks", AsyncMock()):
+            task = asyncio.create_task(self.trading.scan())
+            try:
+                await asyncio.wait_for(slow_entered.wait(), 1)
+                await asyncio.wait_for(acted.wait(), 1)
+                self.assertFalse(task.done())
+            finally:
+                release.set()
+                await task
+                await self.trading.stop()
+
+    async def test_ack_only_buy_cannot_be_sold(self):
+        await self.live()
+        with patch("upstocks.upstox.place_market_order", AsyncMock(return_value="ack")) as broker, patch("upstocks.live.market_open", return_value=True):
+            await self.trading._order(ACC, PRESET, TID, TRADE, "BUY", "test")
+            self.assertFalse(await self.trading._order(ACC, PRESET, TID, TRADE, "SELL", "test"))
+            self.assertEqual(broker.await_count, 1)
+
+    async def test_rejected_buy_with_zero_fills_cannot_be_sold(self):
+        await self.live()
+        with patch("upstocks.upstox.place_market_order", AsyncMock(return_value="ack")) as broker, patch("upstocks.live.market_open", return_value=True):
+            await self.trading._order(ACC, PRESET, TID, TRADE, "BUY", "test")
+            self.trading.state["orders"][ACC][TID]["buy"].update(execution_status="rejected", filled_qty=0)
+            self.assertFalse(await self.trading._order(ACC, PRESET, TID, TRADE, "SELL", "test"))
+            self.assertEqual(broker.await_count, 1)
+
     async def test_sell_uses_original_quantity_even_after_config_change(self):
         await self.live(lots=2)
         with patch("upstocks.upstox.place_market_order", new=AsyncMock(return_value="broker-1")) as broker, patch("upstocks.live.market_open", return_value=True):
             await self.trading._order(ACC, PRESET, TID, TRADE, "BUY", "test")
+            self.trading.state["orders"][ACC][TID]["buy"].update(filled_qty=130, execution_status="complete")
             await self.live(False, lots=5)
             await self.trading.configure(lot_size=25)
             self.assertEqual(await self.trading.square_off(PRESET, user=1), 1)
@@ -199,6 +246,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         await self.live(lots=2)
         with patch("upstocks.upstox.place_market_order", new=AsyncMock(return_value="broker-1")) as broker, patch("upstocks.live.market_open", return_value=True):
             self.assertTrue(await self.trading._order(ACC, PRESET, TID, TRADE, "BUY", "test"))
+            await self.repo_fill(130)
             await self.trading.configure(user=1, entries_paused=True)
             self.assertFalse(await self.trading._order(ACC, PRESET, TID + '2', TRADE, "BUY", "test"))
             restarted = self.service()

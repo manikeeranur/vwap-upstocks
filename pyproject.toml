@@ -25,3 +25,31 @@ upstocks-db = "upstocks.maintenance:main"
 [build-system]
 requires = ["uv_build>=0.12.19,<0.13.0"]
 build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "mypy>=2.4.1",
+    "ruff>=0.17.3",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 110
+
+[tool.ruff.lint]
+select = ["E9", "F"]
+
+[tool.mypy]
+files = ["src/upstocks/stocks", "src/upstocks/order_evidence.py", "src/upstocks/execution_brokers.py", "src/upstocks/services/reconciliation.py", "src/upstocks/services/momentum_live.py", "src/upstocks/services/trading.py", "src/upstocks/repository.py"]
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+follow_imports = "skip"
+
+[[tool.mypy.overrides]]
+module = ["upstocks.stocks.domain", "upstocks.stocks.accounting", "upstocks.stocks.statements", "upstocks.order_evidence"]
+disallow_untyped_defs = true
+disallow_untyped_calls = true
+warn_return_any = true
+disallow_any_generics = true

@@ -32,7 +32,7 @@ from datetime import date
 from statistics import median
 
 from . import upstox
-from .vwap import STEP, DayResult, Settings, Trade, _add, _mins, _nearest_expiry, _round2, span_rows
+from .vwap import DayResult, Settings, Trade, _add, _mins, _nearest_expiry, _round2, span_rows
 
 TICK = 0.05
 

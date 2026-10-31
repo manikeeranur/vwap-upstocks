@@ -13,7 +13,9 @@ import logging
 import time
 import uuid
 
-from .. import brokers, live, upstox
+from .. import brokers, execution_brokers, live, upstox
+from ..stocks.domain import TERMINAL, PortfolioError
+from ..order_evidence import current_attempt, apply_evidence, combine
 from ..observability import redact
 from ..repository import account_id
 
@@ -30,19 +32,43 @@ class TradingService:
         self._scan_lock = asyncio.Lock()
         self._config_lock = asyncio.Lock()
         self._task = None
+        self._reconcile_task = None
+        self._report_task = None
+        self.last_cycle = None
+        self.last_reconcile = None
+        self.started_at = time.monotonic()
+        self._fills_errors = {}
+        self._fills_lock = asyncio.Lock()
         self._skipped = set()   # (account, trade id) already reported as "not logged in"
         self._peak_cache = {}   # closed trade -> (peak high, peak low)
+        self._historical_retry = {}
         self._fills_cache = {}  # account -> (monotonic time, {order id: fill price})
 
     def start(self):
         if self._task is None:
             self._task = asyncio.create_task(self._loop(), name="market-scanner")
+            self._reconcile_task = asyncio.create_task(self._reconcile_loop(), name="order-reconciliation")
+
+    def worker_health(self):
+        return {"running": bool(self._task and not self._task.done() and self._reconcile_task and not self._reconcile_task.done()),
+                "stale": time.monotonic() - (self.last_cycle or self.started_at) > 180 or time.monotonic() - (self.last_reconcile or self.started_at) > 120,
+                "reconciliation_stale": time.monotonic() - (self.last_reconcile or self.started_at) > 120}
 
     async def stop(self):
-        if self._task:
-            self._task.cancel()
-            await asyncio.gather(self._task, return_exceptions=True)
-            self._task = None
+        tasks = [t for t in (self._task, self._reconcile_task, self._report_task) if t]
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        self._task = self._reconcile_task = self._report_task = None
+
+    async def _reconcile_loop(self):
+        while True:
+            try:
+                await self.record_fills()
+            except Exception:
+                log.exception("Order reconciliation cycle failed")
+            self.last_reconcile = time.monotonic()
+            await asyncio.sleep(20)
 
     def reload_people(self):
         """Pick up people or switches added outside this service (new user, keys)."""
@@ -68,7 +94,9 @@ class TradingService:
         state["lot_sizes"] = {p: live.lot_size(p, state["lot_size"]) for p in live.PRESETS}
         state["paper_only"] = [p for p in live.PRESETS if live.paper_only(p)]
         return {"state": state, "view": view, "market_open": live.market_open(),
-                "now": live.now_ist().strftime("%a %d %b %H:%M:%S"), "view_revision": self.view_revision}
+                "now": live.now_ist().strftime("%a %d %b %H:%M:%S"), "view_revision": self.view_revision,
+                "reconciliation": {a: {"error": self._fills_errors.get(a) or ("Unresolved orders block new entries; reconnect and reconcile with the broker" if self._unresolved(a) else None), "age_seconds": round(time.monotonic() - self._fills_cache[a][0]) if a in self._fills_cache else None}
+                                   for a in state["accounts"]}}
 
     async def _activity(self, message):
         message = redact(f"{live.now_ist():%Y-%m-%d %H:%M:%S} {message}")
@@ -111,7 +139,7 @@ class TradingService:
             if account and acc != account:
                 continue
             out += [(acc, tid) for tid, orders in trades.items()
-                    if tid.startswith(preset + "|") and orders.get("buy", {}).get("order_id") and "sell" not in orders]
+                    if tid.startswith(preset + "|") and (orders.get("buy", {}).get("filled_qty", 0) - orders.get("sell", {}).get("filled_qty", 0)) > 0]
         return out
 
     async def _peaks(self, day, trades):
@@ -140,34 +168,82 @@ class TradingService:
         await asyncio.gather(*(one(t) for t in trades if t.get("instrument_key") and t.get("entry_time")))
 
     async def live_fills(self, user_id):
-        """{account: {order id: fill price}} for this person's brokers that have live orders today (cached 20 s)."""
-        today = upstox.today_ist().isoformat()
+        """Persist terminal status and cumulative quantities; never infer fills from an ID."""
         out = {}
-        for account, acc in self.state["accounts"].items():
-            if acc["user"] != user_id or not any(today in tid for tid in self.state["orders"].get(account, {})):
-                continue
-            hit = self._fills_cache.get(account)
-            if hit and time.monotonic() - hit[0] < 20:
-                out[account] = hit[1]
-                continue
-            creds = await asyncio.to_thread(self._credentials, account)
-            if not creds.token_valid():
-                continue
-            try:
-                fills = await brokers.order_fills(creds)
-            except Exception:
-                log.warning("Broker fills unavailable", extra={"account": account})
-                continue
-            self._fills_cache[account] = (time.monotonic(), fills)
-            out[account] = fills
-            await self._store_fills(account, fills)
-            await self._store_charges(account, creds)
+        async with self._fills_lock:
+            for account, acc in list(self.state["accounts"].items()):
+                saved = self.state["orders"].get(account, {})
+                if acc["user"] != user_id or not saved:
+                    continue
+                hit = self._fills_cache.get(account)
+                if hit and time.monotonic() - hit[0] < 20:
+                    out[account] = hit[1]
+                    continue
+                try:
+                    creds = await asyncio.to_thread(self._credentials, account)
+                    if not creds.token_valid():
+                        raise brokers.BrokerError("Broker login expired; reconciliation unavailable")
+                    rows = await asyncio.wait_for(execution_brokers.order_book(creds), 20)
+                    fills = {}
+                    errors = []
+                    historical_budget = 2
+                    for tid, sides in list(saved.items()):
+                        for side, order in list(sides.items()):
+                            matches = [r for r in rows if (order.get("order_id") and r["order_id"] == str(order["order_id"]))
+                                       or (order.get("client_tag") and r.get("tag") == order["client_tag"])]
+                            if not matches and order.get("execution_status") not in TERMINAL:
+                                if not order.get("order_id"):
+                                    errors.append("Unknown submission has no unique broker ID; review statement evidence")
+                                    continue
+                                key = (account,str(order["order_id"]))
+                                if historical_budget <= 0 or self._historical_retry.get(key,0) > time.monotonic():
+                                    errors.append("Historical order awaits verification; import a statement if unavailable")
+                                    continue
+                                historical_budget -= 1
+                                self._historical_retry[key] = time.monotonic()+300
+                                try:
+                                    matches = [await asyncio.wait_for(execution_brokers.order_detail(creds,order["order_id"],equity=False),6)]
+                                except Exception:
+                                    errors.append("Historical order unavailable from broker; import verified statement evidence")
+                                    continue
+                            if not matches:
+                                continue
+                            if len(matches) != 1:
+                                raise brokers.BrokerError("Ambiguous broker order reference")
+                            row = matches[0]
+                            if not order.get("client_id") or order["client_id"] != creds.client_id:
+                                raise brokers.BrokerError("Order belongs to a different or unverified broker login")
+                            if row["qty"] != order.get("qty") or row["side"] != side.upper():
+                                raise brokers.BrokerError("Broker order quantity or side does not match intent")
+                            current = current_attempt(order)
+                            if row["filled_qty"] < current["filled_qty"]:
+                                continue
+                            updated = combine(order,apply_evidence(current,row))
+                            updated.update(order_id=row["order_id"],status="submitted")
+                            if row["filled_qty"]:
+                                fills[row["order_id"]] = row["average_price"]
+                            updated.pop("error", None)
+                            if updated != order:
+                                await asyncio.to_thread(self.repository.finish_order, tid, account, side.upper(), updated,
+                                                        f"{self._who(account)} · broker status reconciled")
+                                order.update(updated)
+                                order.pop("error", None)
+                    self._fills_cache[account] = (time.monotonic(), fills)
+                    if errors:
+                        self._fills_errors[account] = "; ".join(sorted(set(errors)))
+                    else:
+                        self._fills_errors.pop(account, None)
+                    out[account] = fills
+                    await self._store_charges(account, creds)
+                except Exception as exc:
+                    self._fills_errors[account] = redact(str(exc)) or "Broker evidence unavailable"
+                    log.warning("Broker reconciliation unavailable", extra={"account": account}, exc_info=True)
         return out
 
     async def _store_charges(self, account, creds):
-        """Keep the broker's own charges for filled live orders (once per order)."""
+        """Retain broker fee estimates separately from final statement charges."""
         missing = {str(o["order_id"]): (tid, side) for tid, sides in self.state["orders"].get(account, {}).items()
-                   for side, o in sides.items() if o.get("order_id") and o.get("fill_price") is not None and "charges" not in o}
+                   for side, o in sides.items() if o.get("order_id") and o.get("fill_price") is not None and o.get("execution_status") in TERMINAL and "estimated_charges" not in o and o.get("charges_source") != "operator_statement"}
         if not missing:
             return
         try:
@@ -177,27 +253,19 @@ class TradingService:
             return
         for oid, total in found.items():
             tid, side = missing[oid]
-            self.state["orders"][account][tid][side]["charges"] = round(total, 2)
-            await asyncio.to_thread(self.repository.save_fill, tid, account, side.upper(), None, round(total, 2))
-
-    async def _store_fills(self, account, fills):
-        """Keep each live order's real fill price, so P&L later (e.g. the calendar) uses what the broker filled."""
-        for tid, orders in list(self.state["orders"].get(account, {}).items()):
-            for side, order in list(orders.items()):
-                price = fills.get(str(order.get("order_id") or ""))
-                if price is not None and order.get("fill_price") != price:
-                    order["fill_price"] = price
-                    await asyncio.to_thread(self.repository.save_fill, tid, account, side.upper(), price)
-
+            order = self.state["orders"][account][tid][side]
+            updated = {**order,"estimated_charges":round(total,2)}
+            await asyncio.to_thread(self.repository.finish_order,tid,account,side.upper(),updated,"Broker fee estimate refreshed")
+            order.update(updated)
 
     async def record_fills(self):
-        """Fetch fills for anyone with today's live orders still missing a fill price."""
-        today = upstox.today_ist().isoformat()
-        users = {acc["user"] for account, acc in self.state["accounts"].items()
-                 if any(today in tid and o.get("order_id") and ("fill_price" not in o or "charges" not in o)
-                        for tid, sides in self.state["orders"].get(account, {}).items() for o in sides.values())}
-        for uid in users:
-            await self.live_fills(uid)
+        users = {a["user"] for account, a in self.state["accounts"].items()
+                 if self.state["orders"].get(account)}
+        await asyncio.gather(*(self.live_fills(uid) for uid in users))
+
+    def _unresolved(self, account):
+        return any(o.get("execution_status") not in TERMINAL
+                   for sides in self.state["orders"].get(account, {}).values() for o in sides.values())
 
     def _any_live(self, preset):
         return any(acc["live"].get(preset) for acc in self.state["accounts"].values())
@@ -209,15 +277,24 @@ class TradingService:
             self.view["running"] = True
             try:
                 results, errors = {}, {}
-                for preset in live.PRESETS:
+                async def calculate(preset):
                     cfg = self.state["config"][preset]
                     if not (cfg["on"] or self._any_live(preset) or (is_today and self._open_positions(preset))):
-                        continue
+                        return preset, None, None
                     try:
-                        trades = await live.run_engine(preset, day)
+                        return preset, await asyncio.wait_for(live.run_engine(preset, day), 45), None
                     except Exception as exc:
-                        errors[preset] = redact(str(exc))
                         log.exception("Strategy scan failed", extra={"preset": preset})
+                        return preset, None, redact(str(exc)) or "Strategy scan timed out"
+
+                tasks = [asyncio.create_task(calculate(p)) for p in live.PRESETS]
+                for finished in asyncio.as_completed(tasks):
+                    preset, trades, error = await finished
+                    if error:
+                        errors[preset] = error
+                        continue
+                    cfg = self.state["config"][preset]
+                    if not (cfg["on"] or self._any_live(preset) or (is_today and self._open_positions(preset))):
                         continue
                     if trades is None:
                         continue
@@ -229,12 +306,6 @@ class TradingService:
                     for trade in trades:
                         trade["orders"] = ({acc: deepcopy(o[trade["id"]]) for acc, o in self.state["orders"].items() if trade["id"] in o}
                                            if is_today else {})
-                    await self._peaks(day, trades)   # after orders, so it never delays them
-                    if is_today:
-                        try:
-                            await self.record_fills()
-                        except Exception:
-                            log.warning("Recording fills failed")
                     results[preset] = trades
                 view = {"day": day.isoformat(), "scanned_at": f"{live.now_ist():%H:%M:%S}",
                         "results": results, "errors": errors, "running": False}
@@ -252,35 +323,40 @@ class TradingService:
                                          "lot_size": self.state["lot_size"], "revision": self.state["revision"],
                                          "is_replay": not is_today, "market_open": live.market_open()})
                 self.view = view
+                if self._report_task:
+                    self._report_task.cancel()
+                    await asyncio.gather(self._report_task, return_exceptions=True)
+                async def enrich():
+                    try:
+                        await asyncio.wait_for(asyncio.gather(*(self._peaks(day, ts) for ts in results.values())), 30)
+                    except Exception:
+                        log.warning("Optional trade statistics unavailable", exc_info=True)
+                self._report_task = asyncio.create_task(enrich(), name="trade-statistics")
                 self.view_revision = uuid.uuid4().hex
                 log.info("Scan completed", extra={"status_code": 200 if not errors else 207})
                 return deepcopy(view)
             finally:
                 self.view["running"] = False
+                for task in locals().get("tasks", []):
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(*locals().get("tasks", []), return_exceptions=True)
+                self.last_cycle = time.monotonic()
 
     def _credentials(self, account):
         acc = self.state["accounts"][account]
         row = self.repository.broker_account(acc["user"], acc["broker"]) or {}
         open_ = self.vault.open if self.vault else (lambda v: v)
         return brokers.Credentials(acc["broker"], row.get("api_key", ""), open_(row.get("api_secret", "")),
-                                   open_(row.get("access_token", "")), row.get("token_issued"))
+                                   open_(row.get("access_token", "")), row.get("token_issued"), str(row.get("broker_user") or ""),
+                                   json.loads(row.get("profile") or "{}").get("name", ""))
 
-    def _holder(self, account):
-        """Whose broker account an order goes to: (client id, name) from that broker's current login."""
-        acc = self.state["accounts"][account]
-        row = self.repository.broker_account(acc["user"], acc["broker"]) or {}
-        try:
-            name = json.loads(row.get("profile") or "{}").get("name") or ""
-        except ValueError:
-            name = ""
-        return row.get("broker_user") or "", name
-
-    async def _order(self, account, preset, tid, trade, side, why):
+    async def _order(self, account, preset, tid, trade, side, why, replacement=None):
         acc = self.state["accounts"].get(account)
         if acc is None or live.paper_only(preset):
             return False
         async with self._config_lock:
-            if side == "BUY" and (self.state["users"].get(acc["user"], {}).get("paused") or not acc["live"].get(preset)
+            if side == "BUY" and (self._unresolved(account) or self._fills_errors.get(account) or self.state["users"].get(acc["user"], {}).get("paused") or not acc["live"].get(preset)
                                   or not live.market_open()):
                 return False
             creds = await asyncio.to_thread(self._credentials, account)
@@ -292,26 +368,39 @@ class TradingService:
                                          f"not logged in to {brokers.LABELS[acc['broker']]} today")
                 return False
             buy = self.state["orders"].get(account, {}).get(tid, {}).get("buy", {})
-            exit_qty = buy.get("qty") if side == "SELL" and buy.get("qty") else None
+            exit_qty = buy.get("filled_qty", 0) - (replacement or {}).get("filled_qty", 0) if side == "SELL" else None
+            if side == "SELL" and (buy.get("execution_status") not in TERMINAL or not exit_qty):
+                return False
             lots = acc["lots"].get(preset, 1)
             lot_size = live.lot_size(preset, self.state["lot_size"])
             qty = exit_qty or lots * lot_size
-            client_id, holder = await asyncio.to_thread(self._holder, account)
-            record = {"at": f"{live.now_ist():%H:%M:%S}", "qty": qty, "why": why, "symbol": trade.get("symbol", ""),
-                      "broker": acc["broker"], "status": "pending",
+            client_id, holder = creds.client_id, creds.holder
+            if not client_id:
+                await self._activity(f"{self._who(account)} · broker account identity unavailable; reconnect before trading")
+                return False
+            if side == "SELL" and (not buy.get("client_id") or client_id != buy["client_id"]):
+                await self._activity(f"{self._who(account)} · exit blocked: broker account identity changed or is unknown")
+                return False
+            record = {"at": f"{live.now_ist():%H:%M:%S}", "created_at":live.now_ist().isoformat(), "qty": qty, "why": why, "symbol": trade.get("symbol", ""),
+                      "broker": acc["broker"], "status": "pending", "client_tag": "ut" + uuid.uuid4().hex[:18],
+                      "filled_qty": 0, "execution_status": "unknown",
                       # The broker account this order went to — a broker's login can change between days.
                       "client_id": client_id, "holder": holder,
                       # Kept so an exit (incl. manual square-off) can find the same contract at any broker.
                       "contract": {k: trade.get(k) for k in ("expiry", "strike", "type") if trade.get(k) is not None}}
             context = {"trade": deepcopy(trade), "account": account, "lots": lots, "lot_size": lot_size,
                        "revision": self.state["revision"]}
-            if not await asyncio.to_thread(self.repository.reserve_order, tid, account, preset, side, record, context):
+            if replacement:
+                record["total_qty"] = buy["filled_qty"]
+                record = combine(record,current_attempt(record),[*replacement.get("attempts",[]),current_attempt(replacement)])
+                await asyncio.to_thread(self.repository.replace_exit,tid,account,replacement,record)
+            elif not await asyncio.to_thread(self.repository.reserve_order, tid, account, preset, side, record, context):
                 return False
             self.state["orders"].setdefault(account, {}).setdefault(tid, {})[side.lower()] = record
         # No transaction spans a network request. Unknown outcomes are never retried.
         try:
             order_id, sent_qty, symbol = await brokers.place_order(creds, trade, lots, lot_size, side,
-                                                                   f"upstocks{preset[:6]}", qty=exit_qty)
+                                                                   record["client_tag"], qty=exit_qty)
             if not order_id:
                 raise RuntimeError("Broker did not return an order ID")
             record.update(order_id=order_id, status="submitted", qty=sent_qty, broker_symbol=symbol)
@@ -344,8 +433,42 @@ class TradingService:
                     age = (now - now.replace(hour=h, minute=m, second=0, microsecond=0)).total_seconds() / 60
                     if trade["open"] and 0 <= age <= live.FRESH_MIN:
                         await self._order(account, preset, tid, trade, "BUY", f"entry {trade['entry_time']} @ ₹{trade['entry']:.2f}")
-                elif orders["buy"].get("order_id") and "sell" not in orders and not trade["open"]:
+                elif orders["buy"].get("filled_qty", 0) > 0 and "sell" not in orders and not trade["open"]:
                     await self._order(account, preset, tid, trade, "SELL", f"{trade['status']} {trade.get('exit_time') or ''}".strip())
+
+    async def recover_exit(self, user_id, body):
+        account = account_id(user_id,body.broker)
+        if not live.market_open():
+            raise PortfolioError("Exit recovery is available during market hours")
+        self._fills_cache.pop(account,None)
+        await self.live_fills(user_id)
+        async with self._scan_lock, self._fills_lock:
+            orders = self.state["orders"].get(account,{}).get(body.trade_id,{})
+            buy,sell = orders.get("buy",{}),orders.get("sell",{})
+            if sell.get("order_id") != body.order_id or sell.get("execution_status") not in ("cancelled","rejected"):
+                raise PortfolioError("Select a reconciled cancelled/rejected exit")
+            if buy.get("execution_status") not in TERMINAL or self._unresolved(account):
+                raise PortfolioError("Reconcile all pending orders before replacing an exit")
+            remaining = buy.get("filled_qty",0)-sell.get("filled_qty",0)
+            if remaining <= 0:
+                raise PortfolioError("No strategy-owned quantity remains")
+            creds = await asyncio.to_thread(self._credentials,account)
+            evidence = await execution_brokers.stock_snapshot(creds)
+            if evidence["client_id"] != buy.get("client_id") or evidence["client_id"] != sell.get("client_id"):
+                raise PortfolioError("Broker account identity changed")
+            symbol = sell.get("broker_symbol") or buy.get("broker_symbol")
+            if not symbol:
+                raise PortfolioError("Exact broker contract is unavailable; reconcile it before recovery")
+            known = {a.get("order_id") for o in (buy,sell) for a in [*o.get("attempts",[]),current_attempt(o)]}
+            if any(r["symbol"] == symbol and r["order_id"] not in known and (r["filled_qty"] or r["status"] not in TERMINAL) for r in evidence["orders"]):
+                raise PortfolioError("Manual or other-strategy activity exists for this contract")
+            positions = [r for r in evidence["positions"] if (r.get("tradingsymbol") or r.get("trading_symbol") or r.get("name")) == symbol]
+            net = sum(int(r.get("net_qty") if body.broker == "indmoney" else r.get("quantity",0)) for r in positions)
+            if net != remaining:
+                raise PortfolioError("Broker position does not match the remaining strategy quantity")
+            trade = {"symbol":buy["symbol"],"instrument_key":body.trade_id.split("|",3)[3],**buy.get("contract",{})}
+            sent = await self._order(account,body.trade_id.split("|")[0],body.trade_id,trade,"SELL","explicit recovery of remaining quantity",replacement=deepcopy(sell))
+            return {"sold":int(sent),"remaining_quantity":remaining}
 
     async def square_off(self, preset, user=None, broker=None):
         sent = 0
@@ -364,7 +487,8 @@ class TradingService:
         while True:
             now = live.now_ist()
             nxt = (now + timedelta(minutes=1)).replace(second=5, microsecond=0)
-            await asyncio.sleep((nxt - now).total_seconds())
+            self.last_cycle = time.monotonic()
+            await asyncio.sleep(max(0, (nxt - now).total_seconds()))
             if live.market_open(nxt) and nxt.strftime("%H:%M") >= "09:16":
                 try:
                     await self.scan()

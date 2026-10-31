@@ -97,7 +97,7 @@ Do not run the old JSON-based server beside the new app. Migration preserves exi
 
 An order attempt is committed **before** contacting the broker. A unique `(trade_id, side)` constraint prevents duplicate submissions, including concurrent requests and restarts. A broker order ID means **submitted**, not filled. Exits use the original buy quantity even if settings change.
 
-If a request times out, is interrupted, or lacks an order ID, its outcome is `unknown`; it is never automatically resent. Pending attempts become unknown on restart. Check the broker's order book and positions before taking further action. Automatic broker reconciliation and fill tracking are not implemented. Local SQLite cannot provide an exactly-once guarantee across the broker's network boundary.
+If a request times out, is interrupted, or lacks an order ID, its outcome is `unknown`; it is never automatically resent. Pending attempts become unknown on restart. Check the broker's order book and positions before taking further action. Broker status and fill reconciliation is implemented; unresolved historical outcomes require broker evidence. See docs/execution-safety.md. Local SQLite cannot provide an exactly-once guarantee across the broker's network boundary.
 
 Backtests save every completed day. Completed jobs and exports survive restart and are accessible from **Saved runs** on the strategy backtest screen. Interrupted jobs retain partial results and show an error; rerun explicitly when appropriate. The default limit is two concurrent jobs, each processing up to three days concurrently under the shared broker rate limiter. Extra jobs receive HTTP 429.
 
@@ -135,3 +135,25 @@ To restore, stop the application, retain the current database and its `-wal`/`-s
 ```
 
 Tests use temporary databases and mocked broker calls. They cover migration preservation and rollback, WAL backups, concurrent order reservation, interrupted orders/jobs, restart persistence, entry-pause and exit behavior, original exit quantities, concurrent configuration revisions, input validation, page rendering/JavaScript parsing, complete snapshot exports, IST date boundaries, log redaction/rotation, request correlation, host/origin/token checks, and chunked-body limits. No live orders are placed by the tests.
+
+
+## Stock workspace and execution safety
+
+Stocks now has a dedicated /stocks workspace with account-scoped paper and live
+portfolios, usable-capital limits, explicit save/revision controls, and durable
+order/fill history. A broker acknowledgement is not a fill. Pending outcomes are
+reconciled before further orders, and the global entry pause also covers stocks.
+
+Overview reports confirmed realized P&L separately from estimated open-position
+valuation. Net values require complete charge evidence. Runtime JSON from the old
+momentum implementation is retained for migration review, never silently adopted.
+
+Read [Execution architecture, upgrade and recovery](docs/execution-safety.md)
+before deploying this branch. It documents data ownership, cash provisions,
+migration guards, limitations and repeatable validation commands.
+
+The entry-source selector can align a newly enabled live portfolio with its current
+paper holding or a fresh saved tuned backtest. The Exit recovery panel replaces
+only confirmed cancelled/rejected exits for the verified remaining quantity.
+Historical fills and final charges use an account-scoped CSV preview/apply flow;
+broker fee estimates never count as exact net P&L. These additions use schema 8.

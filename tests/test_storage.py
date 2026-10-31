@@ -31,13 +31,23 @@ class StorageTests(unittest.TestCase):
         for side, oid, price in (("BUY", "b1", 439.1), ("SELL", "s1", 543.8)):
             self.assertTrue(self.repo.reserve_order(tid, "1:kite", "harmonic", side, {"status": "pending", "qty": 65}, ctx))
             self.repo.finish_order(tid, "1:kite", side, {"status": "submitted", "order_id": oid, "qty": 65}, "sent")
-            self.repo.save_fill(tid, "1:kite", side, price, 60.5 if side == "BUY" else 67.58)
+            self.repo.save_fill(tid, "1:kite", side, price, 60.5 if side == "BUY" else 67.58, filled_qty=65, execution_status="complete")
         live = self.repo.journal("2026-10-28", "2026-10-28")["live"]
-        self.assertEqual(live, {tid: {"1:kite": {"qty": 65, "buy": 439.1, "sell": 543.8, "buy_charges": 60.5, "sell_charges": 67.58, "client_id": "", "holder": ""}}})
+        self.assertEqual(live, {tid: {"1:kite": {"qty": 65, "sold_qty": 65, "buy_status": "complete", "sell_status": "complete", "buy": 439.1, "sell": 543.8, "buy_charges": None, "sell_charges": None, "client_id": "", "holder": ""}}})
+
+    def test_journal_filters_live_orders_by_user_and_uses_actual_fills(self):
+        for account in ("1:kite", "2:kite"):
+            self.repo.reserve_order(TID, account, PRESET, "BUY", {"status": "pending", "qty": 65}, {"trade": {}})
+            self.repo.finish_order(TID, account, "BUY", {"status": "submitted", "order_id": account, "qty": 65,
+                                                       "filled_qty": 10, "execution_status": "open"}, "partial")
+        rows = self.repo.journal("2026-10-12", "2026-10-12", 1)["live"][TID]
+        self.assertEqual(set(rows), {"1:kite"})
+        self.assertEqual(rows["1:kite"]["qty"], 10)
+        self.assertEqual(rows["1:kite"]["sold_qty"], 0)
 
     def test_schema_idempotent_and_wal(self):
         self.db.initialize()
-        self.assertEqual(self.db.check(), {"integrity": "ok", "foreign_key_errors": 0, "schema_version": 6})
+        self.assertEqual(self.db.check(), {"integrity": "ok", "foreign_key_errors": 0, "schema_version": 8})
         with self.db.connect() as conn:
             self.assertEqual(conn.execute("PRAGMA journal_mode").fetchone()[0], "wal")
             self.assertEqual(conn.execute("PRAGMA foreign_keys").fetchone()[0], 1)

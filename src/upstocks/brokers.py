@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import csv
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 import hashlib
 import io
 import time
@@ -49,6 +49,8 @@ class Credentials:
     api_secret: str
     access_token: str
     token_issued: str | None   # ISO datetime (IST)
+    client_id: str = ""
+    holder: str = ""
 
     def valid_until(self) -> datetime | None:
         if not (self.access_token and self.token_issued):

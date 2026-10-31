@@ -6,6 +6,7 @@ reminded. Brokers require a person to log in themselves each day, so this never 
 import asyncio
 from datetime import timedelta
 import logging
+import time
 
 import httpx
 
@@ -20,6 +21,11 @@ class ReminderService:
     def __init__(self, app):
         self.app = app
         self._task = None
+        self.last_cycle = None
+        self.started_at = time.monotonic()
+
+    def worker_health(self):
+        return {"running": bool(self._task and not self._task.done()), "stale": time.monotonic() - (self.last_cycle or self.started_at) > 180}
 
     def start(self):
         if self._task is None:
@@ -48,8 +54,12 @@ class ReminderService:
         """{user_id: [brokers with a live switch on but no valid token today]}."""
         trading, repo, vault = self.app.state.trading, self.app.state.repository, self.app.state.vault
         out = {}
+        stock_service = getattr(self.app.state, "momentum_live", None)
+        stocks = {p["id"] for p in stock_service.store.snapshot()
+                  if p["broker"] != "paper" and (p["enabled"] or p["position"] or
+                     any(o["status"] not in {"complete", "cancelled", "rejected"} for o in p["orders"]))} if stock_service else set()
         for acc in trading.state["accounts"].values():
-            if not any(acc["live"].values()):
+            if not any(acc["live"].values()) and f'{acc["user"]}:{acc["broker"]}' not in stocks:
                 continue
             row = repo.broker_account(acc["user"], acc["broker"]) or {}
             creds = brokers.Credentials(acc["broker"], row.get("api_key", ""), "", vault.open(row.get("access_token", "")),
@@ -79,6 +89,7 @@ class ReminderService:
 
     async def _loop(self):
         while True:
+            self.last_cycle = time.monotonic()
             now = live.now_ist()
             nxt = (now + timedelta(minutes=1)).replace(second=0, microsecond=0)
             await asyncio.sleep((nxt - now).total_seconds())

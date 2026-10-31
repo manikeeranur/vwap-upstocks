@@ -83,13 +83,13 @@ class PriceStore:
 
     async def instruments(self) -> list[dict]:
         """NSE EQ-series stocks from Upstox's public instrument file (refreshed daily)."""
-        path = self.dir / "instruments.json"
+        path = self.dir / "instruments-v2.json"
         if not path.exists() or time.time() - path.stat().st_mtime > 86400:
             async with httpx.AsyncClient(timeout=60) as client:
                 r = await client.get(INSTRUMENTS_URL)
                 r.raise_for_status()
             rows = json.loads(gzip.decompress(r.content))
-            eq = sorted(({"key": x["instrument_key"], "symbol": x["trading_symbol"], "name": x.get("name", "")}
+            eq = sorted(({"key": x["instrument_key"], "symbol": x["trading_symbol"], "name": x.get("name", ""), "tick_size": x.get("tick_size")}
                          for x in rows if x.get("segment") == "NSE_EQ" and x.get("instrument_type") == "EQ"),
                         key=lambda x: x["symbol"])
             self.dir.mkdir(parents=True, exist_ok=True)

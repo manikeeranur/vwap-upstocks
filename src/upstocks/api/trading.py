@@ -4,7 +4,7 @@ from datetime import date
 from fastapi import APIRouter, HTTPException, Request
 
 from .. import upstox
-from ..schemas import ConfigUpdate, NoteUpdate, PresetRequest
+from ..schemas import ConfigUpdate, NoteUpdate, PresetRequest, IntradayRecovery
 
 router = APIRouter()
 
@@ -36,7 +36,7 @@ async def paper_config(body: ConfigUpdate, request: Request):
 async def journal_data(request: Request, start: date, end: date):
     if start > end:
         raise HTTPException(422, "start must be before end")
-    return await asyncio.to_thread(request.app.state.repository.journal, start.isoformat(), end.isoformat())
+    return await asyncio.to_thread(request.app.state.repository.journal, start.isoformat(), end.isoformat(), request.state.user_id)
 
 
 @router.post("/api/journal/note")
@@ -55,3 +55,7 @@ async def paper_scan(request: Request, day: date | None = None):
     if day and day > upstox.today_ist():
         raise HTTPException(422, "Cannot scan a future date")
     return await request.app.state.trading.scan(day)
+
+@router.post("/api/paper/recover-exit")
+async def recover_exit(body: IntradayRecovery, request: Request):
+    return await request.app.state.trading.recover_exit(request.state.user_id,body)

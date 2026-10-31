@@ -1,286 +1,613 @@
-"""Momentum Tuned — the Momentum page's "tuned" rotation, run every month from 2026-11-01.
+"""Independent, account-scoped monthly execution and broker reconciliation."""
 
-- One holding, ₹50,000 to start, compounding: each sale's money buys the next stock.
-- Decision on the first trading day of each month, from the ranking after the previous month's
-  last close (12-1 momentum among the 1,000 most-traded NSE stocks): keep the holding while it is
-  rank ≤ 5 and above its 150-day average; otherwise sell it at 11:00 and, at 12:00, buy the
-  best-ranked stock above its average (sell first, so the sale pays for the buy).
-- Paper always runs (fills at the last traded price then, 0.1 % cost a side, like the backtest).
-- Each broker has its own live switch. Live orders are delivery (CNC) MARKET orders for the paper
-  quantity, each saved before it is sent and never retried. A live sell is only sent for shares
-  this strategy bought at that broker and still held there; switching live on mid-holding starts
-  with the next buy.
-- No trade on a market holiday, or when the month's first trading day was missed.
-- Switched off ("on": false), it is paused: no decision, no paper or live order; a holding is kept.
-"""
 import asyncio
-from copy import deepcopy
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 import logging
+import time
 
-from .. import brokers, live, momentum, upstox
+from .. import execution_brokers as execution, live, momentum, upstox
 from ..observability import redact
+from ..stocks.domain import PortfolioError, TERMINAL, buy_quantity, decide, paise, quantity
+from ..stocks.store import StockStore
+from .reconciliation import ReconciliationService
 
 log = logging.getLogger(__name__)
-
-KEY = "momentum_tuned"
-START, CAPITAL, COST = date(2026, 11, 1), 50_000.0, 0.001
-PREPARE_AT, SELL_AT, BUY_AT, GIVE_UP_AT = "09:30", "11:00", "12:00", "15:00"
-TAG = "upstocksmomtuned"
-
-
-def settings(today: date) -> momentum.Settings:
-    return momentum.Settings(start=today - timedelta(days=60), end=today, capital=CAPITAL, cost_pct=COST * 100,
-                             score="tuned", **momentum.TUNED)
-
-
-def default_state() -> dict:
-    return {"on": True, "start": START.isoformat(), "capital": CAPITAL, "cash": CAPITAL, "holding": None,
-            "live": {b: False for b in brokers.BROKERS}, "positions": {}, "month": None, "plan": None,
-            "history": [], "orders": [], "log": []}
-
-
-def decide(ranking: list[dict], held: str | None, exit_rank: int) -> tuple[dict | None, dict | None, str]:
-    """(sell, buy, reason) for one holding — the same rules as momentum.decide."""
-    by_symbol = {r["symbol"]: r for r in ranking}
-    sell, reason = None, ""
-    if held:
-        r = by_symbol.get(held)
-        if r is None:
-            sell, reason = {"symbol": held, "rank": None}, "Left the universe"
-        elif r["rank"] > exit_rank:
-            sell, reason = {"symbol": held, "rank": r["rank"]}, f"Rank {r['rank']} worse than {exit_rank}"
-        elif not r["above_sma"]:
-            sell, reason = {"symbol": held, "rank": r["rank"]}, "Closed below its 150-day average"
-        else:
-            return None, None, f"Keep {held}: rank {r['rank']}, above its average"
-    buy = next(({"symbol": r["symbol"], "key": r["key"], "rank": r["rank"]} for r in ranking
-                 if r["symbol"] != held and r["above_sma"]), None)
-    if buy is None:
-        reason = (reason + " · " if reason else "") + "no stock above its average — stay in cash"
-    return sell, buy, reason or f"Buy {buy['symbol']} (rank {buy['rank']})"
+START = date(2026, 11, 1)
 
 
 class MomentumLiveService:
     def __init__(self, app):
         self.app = app
+        self.store = StockStore(app.state.database)
+        self.reconciliation = ReconciliationService(self.store)
         self._task = None
-        self._lock = asyncio.Lock()   # state changes and orders, one at a time
-        self.state = default_state()
-
-    @property
-    def repo(self):
-        return self.app.state.repository
+        self._locks = {}
+        self._fenced = set()
+        self._ranking_task = None
+        self._ranking_day = None
+        self.last_cycle = None
+        self.started_at = time.monotonic()
+        self.last_error = None
+        self._market_day = None
 
     def load(self):
-        saved, base = self.repo.get_json(KEY) or {}, default_state()
-        self.state = {**base, **{k: v for k, v in saved.items() if k in base}}
-
-    async def _save(self):
-        await asyncio.to_thread(self.repo.set_json, KEY, self.state)
+        repo = self.app.state.repository
+        self.store.ensure(repo.users(), repo.get_json("momentum_tuned"))
+        self.store.recover()
 
     def start(self):
         if self._task is None:
-            self._task = asyncio.create_task(self._loop(), name="momentum-tuned")
+            self._task = asyncio.create_task(self._loop(), name="momentum-execution")
 
     async def stop(self):
-        if self._task:
-            self._task.cancel()
-            await asyncio.gather(self._task, return_exceptions=True)
-            self._task = None
+        tasks = [t for t in (self._task, self._ranking_task) if t]
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        self._task = self._ranking_task = None
 
-    def snapshot(self) -> dict:
-        return deepcopy(self.state)
+    def worker_health(self):
+        running = bool(self._task and not self._task.done())
+        stale = time.monotonic() - (self.last_cycle or self.started_at) > 120
+        return {
+            "running": running,
+            "stale": stale,
+            "error": self.last_error,
+            "blocked_in_memory": len(self._fenced),
+        }
 
-    async def _note(self, message, telegram=True):
-        stamp = f"{live.now_ist():%Y-%m-%d %H:%M}"
-        self.state["log"] = (self.state["log"] + [f"{stamp} {message}"])[-200:]
-        await self.app.state.trading._activity(f"Momentum Tuned: {message}")
-        if telegram:
-            for u in await asyncio.to_thread(self.repo.users):
-                if u.get("telegram_chat_id"):
-                    await self.app.state.reminders.send(u["telegram_chat_id"], f"Momentum Tuned: {message}")
+    def _lock(self, pid):
+        return self._locks.setdefault(pid, asyncio.Lock())
 
-    async def configure(self, broker: str, on: bool):
-        async with self._lock:
-            self.state["live"][broker] = on
-            await self._save()
-            await self._note(f"{brokers.LABELS[broker]} LIVE {'ON' if on else 'OFF'}", telegram=False)
-        return self.snapshot()
+    async def snapshot(self, user_id):
+        repo = self.app.state.repository
+        await asyncio.to_thread(self.store.ensure, [repo.user(user_id)], repo.get_json("momentum_tuned"))
+        portfolios = await asyncio.to_thread(self.store.snapshot, user_id)
+        return {
+            "portfolios": portfolios,
+            "worker": self.worker_health(),
+            "global_entries_paused": self.app.state.trading.state["users"]
+            .get(user_id, {})
+            .get("paused", False),
+            "start": START.isoformat(),
+            "money_unit": "paise",
+            "preview": self.preview_status(),
+            "entry_sources": [
+                {"id": "monthly", "label": "Wait for the next monthly decision"},
+                {"id": "paper", "label": "Follow my current paper holding"},
+            ]
+            + [
+                {
+                    "id": "backtest:" + r["id"],
+                    "label": "Saved tuned backtest · "
+                    + str(r.get("through") or r.get("end"))
+                    + " · "
+                    + r["id"],
+                }
+                for r in (self.app.state.momentum.runs() if hasattr(self.app.state.momentum, "runs") else [])
+                if r.get("score") == "tuned"
+            ],
+        }
 
-    async def set_on(self, on: bool):
-        async with self._lock:
-            self.state["on"] = on
-            await self._save()
-            await self._note(f"{'resumed' if on else 'paused — no decisions or orders until switched on'}", telegram=False)
-        return self.snapshot()
+    async def _get(self, pid):
+        uid = int(pid.split(":")[0])
+        return next(p for p in await asyncio.to_thread(self.store.snapshot, uid) if p["id"] == pid)
 
-    async def preview(self) -> dict:
-        """What the rules would do with the latest close (read-only)."""
-        r = await self.app.state.momentum.live_ranking(settings(upstox.today_ist()))
-        held = (self.state["holding"] or {}).get("symbol")
-        sell, buy, reason = decide(r["ranking"], held, momentum.TUNED["exit_rank"])
-        return {"ranking_date": r["date"], "sell": sell, "buy": buy, "reason": reason, "top": r["ranking"][:10],
-                "held_rank": next((x for x in r["ranking"] if x["symbol"] == held), None)}
+    async def _creds(self, p):
+        account = self.app.state.trading.state["accounts"].get(p["id"])
+        if not account or account["user"] != p["user_id"] or account["broker"] != p["broker"]:
+            raise PortfolioError("Connect this user's broker account first")
+        creds = await asyncio.to_thread(self.app.state.trading._credentials, p["id"])
+        if not creds.token_valid(live.now_ist()):
+            raise PortfolioError("Broker login expired. Reconnect this account to reconcile.")
+        return creds
 
-    # ── Schedule ────────────────────────────────────────────────────────────
-    async def _loop(self):
-        while True:
-            await asyncio.sleep(20)
-            try:
-                await self.tick()
-            except Exception as exc:
-                log.exception("Momentum Tuned tick failed")
-                await self._note(f"error — {redact(str(exc))} (tries again in 5 minutes)", telegram=False)
-                await asyncio.sleep(300)
+    async def configure(self, user_id, body):
+        await self.snapshot(user_id)
+        pid = f"{user_id}:{body.broker}"
+        async with self._lock(pid):
+            p = await self._get(pid)
+            client_id = p["client_id"]
+            if body.broker != "paper" and body.enabled:
+                creds = await self._creds(p)
+                evidence = await execution.stock_snapshot(creds)
+                client_id = evidence["client_id"]
+                if p["client_id"] and client_id != p["client_id"]:
+                    raise PortfolioError("Broker login differs from this portfolio's owner")
+            await asyncio.to_thread(
+                self.store.configure,
+                pid,
+                body.revision,
+                enabled=body.enabled,
+                paused=body.paused,
+                usable_capital=paise(body.usable_capital),
+                client_id=client_id,
+                entry_source=body.entry_source,
+            )
+        return await self.snapshot(user_id)
+
+    async def _reconcile(self, p, evidence):
+        if p["client_id"] != evidence["client_id"]:
+            raise PortfolioError("Broker login differs from this portfolio's owner")
+        for order in p["orders"]:
+            if order["status"] in TERMINAL:
+                continue
+            rows = evidence["orders"]
+            if order["broker_id"] and not any(r["order_id"] == order["broker_id"] for r in rows):
+                detail = await execution.order_detail(await self._creds(p), order["broker_id"])
+                rows = [*rows, detail]
+            row = execution.match_order(order, rows)
+            await asyncio.to_thread(self.store.apply, order["id"], row)
+        p = await self._get(p["id"])
+        known = {o["broker_id"] for o in p["orders"] if o["broker_id"]}
+        # Protect current holdings and today's rotation. A stock sold on an
+        # earlier day can later be traded manually without blocking this portfolio.
+        today = live.now_ist().date()
+        instruments = {
+            o["isin"]: {"isin": o["isin"], "symbol": o["symbol"], "key": o["instrument_key"]}
+            for o in p["orders"]
+            if o["status"] not in TERMINAL
+            or datetime.fromisoformat(o["created_at"].replace("Z", "+00:00")).astimezone(upstox.IST).date()
+            == today
+        }
+        if p["position"]:
+            h = p["position"]
+            instruments[h["isin"]] = {"isin": h["isin"], "symbol": h["symbol"], "key": h["instrument_key"]}
+        for inst in instruments.values():
+            expected = p["position"]["qty"] if p["position"] and p["position"]["isin"] == inst["isin"] else 0
+            execution.ownership(evidence, inst, expected, known)
+        return p
+
+    async def reconcile(self, user_id, broker):
+        await self.snapshot(user_id)
+        pid = f"{user_id}:{broker}"
+        async with self._lock(pid):
+            p = await self._get(pid)
+            if broker != "paper":
+                evidence = await execution.stock_snapshot(await self._creds(p))
+                await self._reconcile(p, evidence)
+            else:
+                for order in p["orders"]:
+                    if order["status"] not in TERMINAL:
+                        await asyncio.to_thread(
+                            self.store.apply,
+                            order["id"],
+                            {
+                                "order_id": "paper-" + order["id"],
+                                "status": "cancelled",
+                                "filled_qty": order["filled_qty"],
+                                "notional": order["notional"],
+                            },
+                        )
+            await asyncio.to_thread(self.store.recovered, pid)
+            self._fenced.discard(pid)
+        return await self.snapshot(user_id)
+
+    def preview_status(self):
+        if not self._ranking_task:
+            return {"status": "idle"}
+        if not self._ranking_task.done():
+            return {"status": "running"}
+        try:
+            result = self._ranking_task.result()
+            if result["failed"]:
+                return {"status": "error", "error": "Incomplete price history; trading decisions are blocked"}
+            return {"status": "done", "ranking_date": result["date"], "top": result["ranking"][:10]}
+        except (Exception, asyncio.CancelledError):
+            return {
+                "status": "error",
+                "error": "Ranking refresh failed. Check data availability and refresh again.",
+            }
+
+    async def preview(self, user_id):
+        if self._ranking_task and not self._ranking_task.done():
+            return self.preview_status()
+        self._ranking_day = None
+        await self._ranking(upstox.today_ist())
+        return self.preview_status()
+
+    @staticmethod
+    def settings(today):
+        return momentum.Settings(
+            start=today - timedelta(days=60),
+            end=today,
+            capital=50_000,
+            cost_pct=0.1,
+            score="tuned",
+            **momentum.TUNED,
+        )
+
+    async def _ranking(self, today):
+        # Research/download work never holds up the reconciliation loop.
+        if self._ranking_day != today:
+            if self._ranking_task and not self._ranking_task.done():
+                self._ranking_task.cancel()
+            self._ranking_day = today
+            self._ranking_task = asyncio.create_task(
+                self.app.state.momentum.live_ranking(self.settings(today)), name="momentum-ranking"
+            )
+            return None
+        if self._ranking_task is None or not self._ranking_task.done():
+            return None
+        result = self._ranking_task.result()
+        if result["failed"] or not result["ranking"]:
+            raise PortfolioError("Incomplete ranking: no orders until all price downloads succeed")
+        ranking_date = date.fromisoformat(result["date"])
+        if ranking_date >= today or (today - ranking_date).days > 7:
+            raise PortfolioError("Ranking date is stale or not a completed session")
+        self.last_error = None
+        return result
+
+    async def _price(self, key):
+        body = await asyncio.wait_for(upstox._get("/v2/market-quote/quotes", {"instrument_key": key}), 10)
+        rows = [r for r in body.get("data", {}).values() if r.get("instrument_token") == key]
+        if len(rows) != 1:
+            raise PortfolioError("Stock quote is unavailable")
+        quote = rows[0]
+        stamp = float(quote.get("last_trade_time") or 0) / 1000
+        age = live.now_ist().timestamp() - stamp
+        if not -5 <= age <= 120:
+            raise PortfolioError("Stock quote is stale; no order submitted")
+        price = paise(quote["last_price"])
+        if price <= 0:
+            raise PortfolioError("A positive stock quote is required")
+        return price
+
+    async def _tick_size(self, key):
+        instruments = await self.app.state.momentum.store.instruments()
+        row = next((r for r in instruments if r["key"] == key), None)
+        tick = quantity(row.get("tick_size")) if row else 0
+        if tick <= 0:
+            raise PortfolioError("Exchange tick size is unavailable")
+        return tick
+
+    async def _execute(self, p, plan, side, instrument, evidence=None, creds=None, parent_id=None):
+        if p["id"] in self._fenced:
+            raise PortfolioError("Storage/submission uncertainty requires explicit reconciliation")
+        inst = {
+            "symbol": instrument["symbol"],
+            "key": instrument.get("key") or instrument["instrument_key"],
+            "isin": instrument.get("isin") or instrument["key"].split("|", 1)[1],
+        }
+        price = await self._price(inst["key"])
+        # Limit orders cap purchase price and respect the current exchange tick.
+        tick = await self._tick_size(inst["key"])
+        limit = (
+            ((price * 1005 + 1000 * tick - 1) // (1000 * tick)) * tick
+            if side == "BUY"
+            else max(tick, (price * 995 // (1000 * tick)) * tick)
+        )
+        budget = min(p["cash"], p["usable_capital"])
+        if evidence:
+            known = {o["broker_id"] for o in p["orders"] if o["broker_id"]}
+            execution.ownership(evidence, inst, p["position"]["qty"] if side == "SELL" else 0, known)
+            budget = min(budget, evidence["cash"])
+        qty = p["position"]["qty"] if side == "SELL" else buy_quantity(budget, limit)
+        if qty <= 0:
+            raise PortfolioError("Allocated cash cannot fund one share plus the cost provision")
+        # Shared gate serializes reservations with the user's global pause control.
+        async with self.app.state.trading._config_lock:
+            order = await asyncio.to_thread(
+                self.store.reserve, p["id"], plan["month"], side, inst, qty, limit, p["client_id"], parent_id
+            )
+        if not order:
+            return
+        self._fenced.add(p["id"])
+        if p["broker"] == "paper":
+            await asyncio.to_thread(
+                self.store.apply,
+                order["id"],
+                {
+                    "order_id": "paper-" + order["id"],
+                    "status": "complete",
+                    "filled_qty": qty,
+                    "notional": qty * price,
+                },
+            )
+            self._fenced.discard(p["id"])
+            return
+        try:
+            oid = await execution.place_stock_limit(creds, order)
+            await asyncio.to_thread(self.store.submission, order["id"], oid)
+        except asyncio.CancelledError:
+            await asyncio.shield(
+                asyncio.to_thread(
+                    self.store.submission,
+                    order["id"],
+                    error="Interrupted submission; reconcile before trading",
+                )
+            )
+            raise
+        except Exception:
+            # Broker call and durable acknowledgement are one uncertainty boundary.
+            # A failed DB write must not cause a second submission.
+            await asyncio.to_thread(
+                self.store.submission,
+                order["id"],
+                error="Submission uncertain; reconcile the unique order reference",
+            )
+            raise
+        else:
+            self._fenced.discard(p["id"])
+
+    async def queue_recovery(self, user_id, body):
+        await self.snapshot(user_id)
+        pid = f"{user_id}:{body.broker}"
+        async with self._lock(pid):
+            p = await self._get(pid)
+            if body.broker != "paper":
+                evidence = await execution.stock_snapshot(await self._creds(p))
+                p = await self._reconcile(p, evidence)
+            await asyncio.to_thread(
+                self.store.queue_recovery,
+                pid,
+                body.revision,
+                body.order_id,
+                (live.now_ist() + timedelta(days=7)).isoformat(),
+            )
+            self._fenced.discard(pid)
+        return await self.snapshot(user_id)
+
+    async def cancel_recovery(self, user_id, body):
+        pid = f"{user_id}:{body.broker}"
+        async with self._lock(pid):
+            await asyncio.to_thread(self.store.cancel_recovery, pid, body.revision, body.recovery_id)
+        return await self.snapshot(user_id)
+
+    async def statement_preview(self, user_id, body):
+        await self.snapshot(user_id)
+        pid = f"{user_id}:{body.broker}"
+        async with self._lock(pid):
+            p = await self._get(pid)
+            evidence = await execution.stock_snapshot(await self._creds(p))
+            return await asyncio.to_thread(
+                self.reconciliation.preview,
+                user_id,
+                body.broker,
+                body.reference,
+                body.csv_text,
+                evidence["client_id"],
+                live.now_ist(),
+            )
+
+    async def statement_apply(self, user_id, body):
+        # Use the same lock order as the scanner/reconciliation. No broker calls or orders here.
+        trading = self.app.state.trading
+        async with trading._scan_lock, trading._fills_lock:
+            with self.store.db.connect() as c:
+                doc = c.execute(
+                    "SELECT broker FROM reconciliation_documents WHERE id=? AND user_id=?",
+                    (body.document_id, user_id),
+                ).fetchone()
+            if not doc:
+                raise PortfolioError("Statement preview not found")
+            pid = f"{user_id}:{doc['broker']}"
+            async with self._lock(pid), trading._config_lock:
+                result = await asyncio.to_thread(
+                    self.reconciliation.apply, user_id, body.document_id, live.now_ist()
+                )
+                saved = await asyncio.to_thread(trading.repository.state)
+                trading.state["orders"][pid] = saved["orders"].get(pid, {})
+                trading._fills_cache.pop(pid, None)
+                # An explicit broker reconcile still verifies current ownership before entries resume.
+                return result
+
+    async def _target(self, p, now, ranking):
+        if ranking is None:
+            raise PortfolioError("Current strategy entry waits for a complete fresh ranking")
+        source = p["entry_source"]
+        if source == "paper":
+            paper = await self._get(f"{p['user_id']}:paper")
+            if paper["blocked"] or any(o["status"] not in TERMINAL for o in paper["orders"]):
+                raise PortfolioError("Paper portfolio must finish its rotation before live alignment")
+            plan = paper["plan"] or {}
+            if plan.get("month") != now.strftime("%Y-%m") or plan.get("skip"):
+                raise PortfolioError("Paper portfolio has no current monthly decision")
+            holding = paper["position"]
+            if (
+                not holding
+                and plan.get("buy")
+                and not any(
+                    o["cycle"] == plan["month"] and o["side"] == "BUY" and o["status"] in TERMINAL
+                    for o in paper["orders"]
+                )
+            ):
+                raise PortfolioError("Paper entry is still due; live alignment will wait")
+            if holding and plan.get("sell") and holding["symbol"] == plan["sell"]["symbol"]:
+                raise PortfolioError("Paper exit is still due; live alignment will wait")
+        else:
+            result = await asyncio.to_thread(self.app.state.momentum.run, source.split(":", 1)[1])
+            if not result or result.get("settings", {}).get("score") != "tuned":
+                raise PortfolioError("Saved tuned backtest is unavailable")
+            settings = result["settings"]
+            if any(settings.get(key) != value for key, value in momentum.TUNED.items()):
+                raise PortfolioError("Backtest parameters do not match the live tuned strategy")
+            data = result.get("data", {})
+            if data.get("failed") != 0 or data.get("through") != ranking["date"]:
+                raise PortfolioError(
+                    "Refresh this saved backtest through the latest completed session before alignment"
+                )
+            holdings = result.get("holdings", [])
+            if len(holdings) > 1:
+                raise PortfolioError("A single-holding backtest is required")
+            holding = holdings[0] if holdings else None
+        if not holding:
+            return None
+        target = next((r for r in ranking["ranking"] if r["symbol"] == holding["symbol"]), None)
+        if target is None:
+            raise PortfolioError("Current strategy holding is absent from the verified ranking")
+        if source.startswith("backtest:") and ranking["date"][:7] != now.strftime("%Y-%m"):
+            sell, buy, _ = decide(ranking["ranking"], target["symbol"], momentum.TUNED["exit_rank"])
+            if sell:
+                target = buy
+        return target
+
+    async def _portfolio_tick(self, pid, now, ranking):
+        async with self._lock(pid):
+            p = await self._get(pid)
+            evidence = creds = None
+            if p["broker"] != "paper" and (
+                p["enabled"] or p["position"] or any(o["status"] not in TERMINAL for o in p["orders"])
+            ):
+                creds = await self._creds(p)
+                evidence = await asyncio.wait_for(execution.stock_snapshot(creds), 45)
+                p = await self._reconcile(p, evidence)
+            await asyncio.to_thread(self.store.health, pid)
+            if (
+                not p["enabled"]
+                or p["blocked"]
+                or pid in self._fenced
+                or now.date() < START
+                or not live.market_open(now)
+                or self._market_day != now.date()
+            ):
+                return
+            if any(o["status"] not in TERMINAL for o in p["orders"]):
+                return
+            month, hhmm = now.strftime("%Y-%m"), now.strftime("%H:%M")
+            for recovery in p["recoveries"]:
+                if recovery["status"] != "queued":
+                    continue
+                if datetime.fromisoformat(recovery["expires_at"]) < now:
+                    await asyncio.to_thread(self.store.recovery_status, recovery["id"], "expired")
+                    continue
+                if "09:30" <= hhmm < "15:00":
+                    parent = next(o for o in p["orders"] if o["id"] == recovery["parent_id"])
+                    if p["position"]:
+                        await self._execute(
+                            p,
+                            {"month": "recovery:" + recovery["id"]},
+                            "SELL",
+                            p["position"],
+                            evidence,
+                            creds,
+                            parent["id"],
+                        )
+                    await asyncio.to_thread(
+                        self.store.recovery_status,
+                        recovery["id"],
+                        "submitted" if p["position"] else "resolved",
+                    )
+                return
+            if p["alignment_pending"] and not p["position"] and not p["paused"] and "09:30" <= hhmm < "15:00":
+                if p["broker"] != "paper" and self.app.state.trading.state["users"].get(p["user_id"], {}).get(
+                    "paused"
+                ):
+                    return
+                target = await self._target(p, now, ranking)
+                plan = {
+                    "month": month,
+                    "day": str(now.date()),
+                    "buy": target,
+                    "sell": None,
+                    "reason": "Align with " + p["entry_source"],
+                    "ranking_date": ranking["date"],
+                    "alignment": True,
+                }
+                await asyncio.to_thread(self.store.plan, pid, plan)
+                if target:
+                    await self._execute(p, plan, "BUY", target, evidence, creds)
+                await asyncio.to_thread(self.store.alignment_done, pid)
+                return
+            plan = p["plan"]
+            if not plan or plan["month"] != month:
+                if ranking is None or hhmm < "09:30":
+                    return
+                if ranking["date"][:7] == month:
+                    await asyncio.to_thread(
+                        self.store.plan,
+                        pid,
+                        {
+                            "month": month,
+                            "day": str(now.date()),
+                            "reason": "First session missed; wait until next month",
+                            "skip": True,
+                        },
+                    )
+                    return
+                sell, buy, reason = decide(
+                    ranking["ranking"], (p["position"] or {}).get("symbol"), momentum.TUNED["exit_rank"]
+                )
+                plan = {
+                    "month": month,
+                    "day": str(now.date()),
+                    "ranking_date": ranking["date"],
+                    "sell": sell,
+                    "buy": buy,
+                    "reason": reason,
+                }
+                await asyncio.to_thread(self.store.plan, pid, plan)
+            if plan.get("skip") or plan["day"] != str(now.date()) or hhmm >= "15:00":
+                return
+            cycle_orders = [o for o in p["orders"] if (o["origin_cycle"] or o["cycle"]) == month]
+            parents = {o["parent_id"] for o in cycle_orders if o["parent_id"]}
+            if any(o["status"] in ("cancelled", "rejected") and o["id"] not in parents for o in cycle_orders):
+                raise PortfolioError(
+                    "A rotation order was cancelled/rejected; review it before the next cycle"
+                )
+            if plan.get("sell") and p["position"] and hhmm >= "11:00":
+                await self._execute(p, plan, "SELL", p["position"], evidence, creds)
+            elif plan.get("buy") and not p["position"] and hhmm >= "12:00" and not p["paused"]:
+                if p["broker"] != "paper" and self.app.state.trading.state["users"].get(p["user_id"], {}).get(
+                    "paused"
+                ):
+                    return
+                if plan.get("sell") and not any(
+                    o["side"] == "SELL" and o["status"] == "complete" for o in cycle_orders
+                ):
+                    raise PortfolioError("The previous holding has not completed its exit")
+                await self._execute(p, plan, "BUY", plan["buy"], evidence, creds)
 
     async def tick(self, now=None):
         now = now or live.now_ist()
-        if not self.state["on"] or now.date() < date.fromisoformat(self.state["start"]) or not live.market_open(now):
-            return
-        month, t = now.strftime("%Y-%m"), now.strftime("%H:%M")
-        plan = self.state["plan"] if self.state["month"] == month else None
-        if plan is None:
-            if t < PREPARE_AT:
-                return
-            async with self._lock:
-                await self._prepare(now, month)
-            return
-        if plan.get("skip") or plan.get("finished"):
-            return
-        async with self._lock:
-            if t >= GIVE_UP_AT:
-                plan["finished"] = True
-                await self._note(f"{now:%d-%m-%Y}: steps left undone at {GIVE_UP_AT} ({', '.join(k for k in ('sell', 'buy') if plan.get(k) and not plan.get(k + '_done'))}) — nothing more this month")
-            elif plan.get("sell") and not plan.get("sell_done") and t >= SELL_AT:
-                await self._sell(plan)
-            elif plan.get("buy") and not plan.get("buy_done") and t >= BUY_AT and (not plan.get("sell") or plan.get("sell_done")):
-                await self._buy(plan)
-            if all(not plan.get(k) or plan.get(k + "_done") for k in ("sell", "buy")):
-                plan["finished"] = True
-            await self._save()
+        ranking = None
+        if now.date() >= START and live.market_open(now) and now.strftime("%H:%M") >= "09:30":
+            if self._market_day != now.date():
+                try:
+                    rows = await asyncio.wait_for(
+                        upstox.candles(upstox.NIFTY, "1m", now.date(), now.date(), expired=False), 20
+                    )
+                    if rows:
+                        self._market_day = now.date()
+                except Exception as exc:
+                    # Market-data outages must not prevent broker fill reconciliation.
+                    self.last_error = "Market session could not be verified: " + (
+                        redact(str(exc)) or "request timed out"
+                    )
+                    log.warning("Momentum market data unavailable: %s", self.last_error)
+            if self._market_day == now.date():
+                try:
+                    ranking = await self._ranking(now.date())
+                except Exception as exc:
+                    self.last_error = redact(str(exc)) or "Ranking unavailable"
+                    log.warning("Momentum ranking unavailable: %s", self.last_error)
+        portfolios = await asyncio.to_thread(self.store.snapshot)
 
-    async def _prepare(self, now, month):
-        today = now.date()
-        rows = await upstox.candles(upstox.NIFTY, "1m", today, today, expired=False)
-        if not rows:
-            return  # holiday or no candle yet; checked again on the next tick
-        r = await self.app.state.momentum.live_ranking(settings(today))
-        self.state["month"] = month
-        if r["date"][:7] == month:
-            self.state["plan"] = {"day": today.isoformat(), "skip": f"Not the month's first trading day (already traded {r['date']})"}
-            await self._note(f"{today:%d-%m-%Y}: missed this month's first trading day — no change until next month")
-        elif r["failed"] > 50:
-            self.state["plan"] = {"day": today.isoformat(), "skip": f"{r['failed']} stocks' prices failed to download"}
-            await self._note(f"{today:%d-%m-%Y}: price download incomplete ({r['failed']} failed) — no change this month")
-        else:
-            held = (self.state["holding"] or {}).get("symbol")
-            sell, buy, reason = decide(r["ranking"], held, momentum.TUNED["exit_rank"])
-            self.state["plan"] = {"day": today.isoformat(), "ranking_date": r["date"], "sell": sell, "buy": buy,
-                                  "reason": reason, "top": r["ranking"][:5]}
-            top = ", ".join(f"{x['rank']}. {x['symbol']}" for x in r["ranking"][:5])
-            steps = (f"sell {sell['symbol']} at {SELL_AT}" if sell else "") + (" · " if sell and buy else "") + \
-                    (f"buy {buy['symbol']} at {BUY_AT}" if buy else "")
-            await self._note(f"{today:%d-%m-%Y} decision (close of {date.fromisoformat(r['date']):%d-%m-%Y}): {reason}"
-                             f"{' — ' + steps if steps else ''}. Top 5: {top}")
-        await self._save()
-
-    async def _ltp(self, key):
-        quotes = await upstox.ltp_quotes([key])
-        px = quotes.get(key)
-        if not px:
-            raise RuntimeError(f"No last price for {key}")
-        return float(px)
-
-    # ── Steps ───────────────────────────────────────────────────────────────
-    async def _sell(self, plan):
-        h = self.state["holding"]
-        px = await self._ltp(h["key"])
-        gross = h["qty"] * px
-        self.state["cash"] = round(self.state["cash"] + gross * (1 - COST), 2)
-        pnl = gross * (1 - COST) - h["cost"]
-        self.state["history"].append({**h, "exit_date": plan["day"], "exit_time": SELL_AT, "exit": round(px, 2),
-                                      "pnl": round(pnl, 2), "pnl_pct": round(pnl / h["cost"] * 100, 2),
-                                      "reason": plan["reason"], "cash_after": self.state["cash"]})
-        self.state["holding"] = None
-        plan["sell_done"] = True
-        await self._save()
-        await self._note(f"paper SELL {h['qty']} {h['symbol']} @ ₹{px:,.2f} ({pnl:+,.2f}) — cash ₹{self.state['cash']:,.2f}")
-        for broker, on in self.state["live"].items():
-            pos = self.state["positions"].get(broker)
-            if not pos or pos["symbol"] != h["symbol"]:
-                continue   # nothing this strategy bought there (live switched on later, or already sold)
-            creds = self._creds(broker)
-            if creds is None:
-                await self._note(f"{brokers.LABELS[broker]}: SELL {h['symbol']} skipped — not logged in today; sell it yourself")
-                continue
+        async def one(p):
             try:
-                held = await brokers.equity_held(creds, pos["isin"])
+                await asyncio.wait_for(self._portfolio_tick(p["id"], now, ranking), 60)
             except Exception as exc:
-                await self._note(f"{brokers.LABELS[broker]}: SELL {h['symbol']} skipped — holdings check failed: {redact(str(exc))}")
-                continue
-            qty = min(pos["qty"], held)
-            if qty <= 0:
-                await self._note(f"{brokers.LABELS[broker]}: SELL {h['symbol']} skipped — no shares held there")
-                self.state["positions"].pop(broker, None)
-                continue
-            if await self._order(broker, creds, "SELL", pos["symbol"], pos["isin"], qty):
-                self.state["positions"].pop(broker, None)
-            await self._save()
+                reason = redact(str(exc)) or "Execution evidence unavailable; reconciliation required"
+                log.warning("Stock portfolio cycle failed", extra={"portfolio": p["id"]}, exc_info=True)
+                await asyncio.to_thread(self.store.health, p["id"], reason)
+                if (
+                    any(o["status"] not in TERMINAL for o in p["orders"])
+                    or p["id"] in self._fenced
+                    or any(
+                        x in reason.lower()
+                        for x in ("ownership", "manual", "different", "cancelled/rejected")
+                    )
+                ):
+                    await asyncio.to_thread(self.store.block, p["id"], reason)
 
-    async def _buy(self, plan):
-        b = plan["buy"]
-        px = await self._ltp(b["key"])
-        qty = int(self.state["cash"] / (px * (1 + COST)))
-        plan["buy_done"] = True
-        if qty <= 0:
-            await self._note(f"BUY {b['symbol']} skipped — ₹{self.state['cash']:,.2f} is less than one share at ₹{px:,.2f}")
-            return
-        cost = qty * px * (1 + COST)
-        self.state["cash"] = round(self.state["cash"] - cost, 2)
-        isin = b["key"].split("|", 1)[1]
-        self.state["holding"] = {"symbol": b["symbol"], "key": b["key"], "isin": isin, "qty": qty, "entry": round(px, 2),
-                                 "entry_date": plan["day"], "entry_time": BUY_AT, "rank": b["rank"], "cost": round(cost, 2)}
-        await self._save()
-        await self._note(f"paper BUY {qty} {b['symbol']} @ ₹{px:,.2f} (rank {b['rank']}) — ₹{cost:,.2f}")
-        for broker, on in self.state["live"].items():
-            if not on:
-                continue
-            creds = self._creds(broker)
-            if creds is None:
-                await self._note(f"{brokers.LABELS[broker]}: BUY {b['symbol']} skipped — not logged in today")
-                continue
-            if await self._order(broker, creds, "BUY", b["symbol"], isin, qty):
-                self.state["positions"][broker] = {"symbol": b["symbol"], "isin": isin, "qty": qty, "since": plan["day"]}
-            await self._save()
+        await asyncio.gather(*(one(p) for p in portfolios))
+        self.last_cycle = time.monotonic()
 
-    def _creds(self, broker):
-        trading = self.app.state.trading
-        for acc_id, acc in trading.state["accounts"].items():
-            if acc["broker"] == broker:
-                creds = trading._credentials(acc_id)
-                return creds if creds.token_valid(live.now_ist()) else None
-        return None
-
-    async def _order(self, broker, creds, side, symbol, isin, qty) -> bool:
-        """Save the order first, send it once; an unknown outcome is never retried."""
-        rec = {"at": f"{live.now_ist():%Y-%m-%d %H:%M:%S}", "broker": broker, "side": side, "symbol": symbol,
-               "isin": isin, "qty": qty, "status": "pending"}
-        self.state["orders"].append(rec)
-        await self._save()
-        try:
-            rec["order_id"] = await brokers.place_equity_order(creds, symbol, isin, qty, side, TAG)
-            if not rec["order_id"]:
-                raise RuntimeError("Broker did not return an order ID")
-            rec["status"] = "submitted"
-            await self._note(f"{brokers.LABELS[broker]} LIVE {side} {qty} {symbol} → order {rec['order_id']}")
-        except asyncio.CancelledError:
-            rec.update(status="unknown", error="Interrupted — check the order with the broker; not retried")
-            await self._save()
-            raise
-        except Exception as exc:
-            rec.update(status="unknown", error=redact(str(exc)))
-            await self._note(f"{brokers.LABELS[broker]} LIVE {side} {qty} {symbol} needs review: {rec['error']}")
-        await self._save()
-        return rec["status"] == "submitted"
-
+    async def _loop(self):
+        while True:
+            try:
+                await self.tick()
+            except Exception:
+                self.last_error = "Momentum worker cycle failed; see operational logs"
+                log.exception("Momentum worker cycle failed")
+            await asyncio.sleep(20)

@@ -89,7 +89,9 @@
   <details class="performance-detail"><summary>More performance metrics</summary><div class="tiles" id="extraTiles"></div></details>
   <p class="small" id="noteStatus" role="status">Notes autosave.</p>
   <div id="trades"></div>
+<p class="small">Live totals include only fully closed trades with confirmed quantities, fill prices and reported broker charges. Open, partial and unresolved trades are excluded.</p>
 </main>
+<script src="/static/portfolio-pnl.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const LABELS = { ...{{ labels | tojson }}, ema25_vwap: "VWAP + EMA25", ema_pullback: "EMA pullback", smc_ema_combo: "SMC + EMA (1/day)" }, PRESETS = {{ presets | tojson }};
@@ -109,12 +111,7 @@ function accountTiles(per) {   // per: {key: {broker, client_id, holder, gross, 
 }
 const isLive = () => $("src").value !== "paper";
 // Same formula as the Strategy backtest page, used only when the broker's own charges aren't known.
-function estCharges(entry, exit, qty) {
-  const turnover = (entry + exit) * qty, brokerage = 40;
-  const stt = exit * qty * 0.000625, exchange = turnover * 0.00053, clearing = turnover * 0.00003;
-  const gst = (brokerage + exchange + clearing) * 0.18, sebi = turnover * 0.000001, stamp = entry * qty * 0.00003;
-  return brokerage + stt + exchange + clearing + gst + sebi + stamp;
-}
+
 
 async function load() {
   const version = ++loadVersion, status = $("pageStatus");
@@ -141,11 +138,11 @@ function rows() {
       // Live: one row per broker that bought it, at that broker's real fills and charges.
       const want = $("src").value.split(":")[1];
       for (const [acc, o] of Object.entries(J.live?.[t.id] || {})) {
-        const broker = acc.split(":")[1]; if (want && broker !== want) continue;
-        const real = o.buy != null && o.sell != null, gross = real ? (o.sell - o.buy) * o.qty : t.pnl * o.qty;
-        const realCh = o.buy_charges != null && o.sell_charges != null;
-        const ch = realCh ? o.buy_charges + o.sell_charges : estCharges(o.buy ?? t.entry, o.sell ?? t.exit, o.qty);
-        out.push({ ...t, preset: p, broker, client_id: o.client_id || "", holder: o.holder || "", qty: o.qty, buyFill: o.buy, sellFill: o.sell, real, realCh, gross, ch, rs: gross - ch });
+        const broker = acc.split(":")[1]; if (want && broker !== want || !UpstocksPnl.settled(o)) continue;
+        const real = true, gross = (o.sell - o.buy) * o.qty;
+        const realCh = true;
+        const ch = o.buy_charges + o.sell_charges;
+        out.push({ ...t, open: false, status: "FILLED", preset: p, broker, client_id: o.client_id || "", holder: o.holder || "", qty: o.qty, buyFill: o.buy, sellFill: o.sell, real, realCh, gross, ch, rs: gross - ch });
       }
     }
   }
@@ -165,7 +162,7 @@ function render() {
   const gross = R.reduce((a, t) => a + (t.gross ?? t.rs), 0), chg = R.reduce((a, t) => a + (t.ch || 0), 0), anyEst = R.some(t => t.ch != null && (!t.real || !t.realCh));
   $("tiles").innerHTML = [
     isLive() ? tile("Net P&L", money(net), `${R.length} live trades · after ₹${chg.toLocaleString("en-IN", {minimumFractionDigits:2, maximumFractionDigits:2})} charges${anyEst ? " (some est.)" : ""}`, net >= 0 ? "up" : "down")
-             : tile("Net P&L", money(net), `${R.length} trades · gross, before charges`, net >= 0 ? "up" : "down"),
+             : tile("Paper P&L", money(net), `${R.length} trades · gross, before charges`, net >= 0 ? "up" : "down"),
     tile("Win rate", R.length ? `${Math.round(wins.length / R.length * 100)}%` : "—", `${wins.length} won · ${losses.length} lost`),
     tile("Profit factor", gl > 0 ? (gw / gl).toFixed(2) : wins.length ? "∞" : "—", ""),
     isLive() ? tile("Gross P&L", money(gross), "Real fill prices, before charges", gross >= 0 ? "up" : "down") : tile("Max drawdown", money(-dd), "peak to trough", dd ? "down" : ""),

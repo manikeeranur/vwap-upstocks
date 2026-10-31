@@ -9,7 +9,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from .. import accounts, brokers
 from ..observability import redact
-from ..schemas import BrokerKeys, BrokerRequest, IndTotp, IndToken, Login, TelegramSetting
+from ..schemas import BrokerKeys, IndTotp, IndToken, Login, TelegramSetting
 from .common import templates
 
 router = APIRouter()

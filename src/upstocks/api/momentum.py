@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 
 from .. import upstox
-from ..schemas import MomentumLive, MomentumOn, MomentumRequest
+from ..schemas import MomentumLive, MomentumOn, MomentumRequest, StockConfig, StockReconcile, StockRecovery, StockRecoveryCancel, StatementPreview, StatementApply
 from ..services.momentum import MomentumBusy
 from .common import templates
 
@@ -31,34 +31,41 @@ async def momentum_run(body: MomentumRequest, request: Request):
     return request.app.state.momentum.snapshot()
 
 
+@router.get("/stocks", response_class=HTMLResponse)
+async def stocks_page(request: Request):
+    return templates.TemplateResponse(request, "stocks.html")
+
+
+@router.get("/api/stocks")
 @router.get("/api/momentum/tuned")
-async def momentum_tuned(request: Request):
-    """Momentum Tuned's live state; the holding is marked at its last traded price when available."""
-    state = request.app.state.momentum_live.snapshot()
-    h = state.get("holding")
-    if h:
-        try:
-            h["ltp"] = (await upstox.ltp_quotes([h["key"]])).get(h["key"])
-        except Exception:
-            h["ltp"] = None
-    return state
+async def stocks_state(request: Request):
+    return await request.app.state.momentum_live.snapshot(request.state.user_id)
+
+
+@router.post("/api/stocks/config")
+async def stocks_config(body: StockConfig, request: Request):
+    return await request.app.state.momentum_live.configure(request.state.user_id, body)
+
+
+@router.post("/api/stocks/reconcile")
+async def stocks_reconcile(body: StockReconcile, request: Request):
+    return await request.app.state.momentum_live.reconcile(request.state.user_id, body.broker)
 
 
 @router.post("/api/momentum/tuned/live")
-async def momentum_tuned_live(body: MomentumLive, request: Request):
-    return await request.app.state.momentum_live.configure(body.broker, body.live)
+async def old_live(body: MomentumLive, request: Request):
+    raise HTTPException(409, "Open the Stocks workspace to review account, budget and execution settings.")
 
 
 @router.post("/api/momentum/tuned/on")
-async def momentum_tuned_on(body: MomentumOn, request: Request):
-    """Switch Momentum Tuned on (decides and trades) or off (paused; a holding is kept)."""
-    return await request.app.state.momentum_live.set_on(body.on)
+async def old_on(body: MomentumOn, request: Request):
+    raise HTTPException(409, "Paper and live automation now have separate controls in Stocks.")
 
 
 @router.post("/api/momentum/tuned/preview")
 async def momentum_tuned_preview(request: Request):
-    """What the rules would decide from the latest close (refreshes prices; read-only)."""
-    return await request.app.state.momentum_live.preview()
+    service = request.app.state.momentum_live
+    return await service.preview(request.state.user_id)
 
 
 @router.get("/api/momentum/job")
@@ -117,3 +124,25 @@ async def momentum_chart(request: Request, symbol: str = Query(..., max_length=4
     await store.limiter.wait()
     rows = await upstox.daily_history(key, start, end)
     return {"symbol": symbol, "interval": "1d", "candles": [[r[0][:10], *r[1:6]] for r in rows]}
+
+@router.post("/api/stocks/recovery")
+async def stocks_recovery(body: StockRecovery, request: Request):
+    return await request.app.state.momentum_live.queue_recovery(request.state.user_id,body)
+
+@router.post("/api/stocks/recovery/cancel")
+async def cancel_recovery(body: StockRecoveryCancel, request: Request):
+    return await request.app.state.momentum_live.cancel_recovery(request.state.user_id,body)
+
+@router.get("/api/reconciliation/template.csv")
+async def statement_template():
+    from ..stocks.statements import COLUMNS
+    return StreamingResponse(iter([",".join(COLUMNS)+"\n"]), media_type="text/csv",
+                             headers={"Content-Disposition":'attachment; filename="strategy-reconciliation.csv"'})
+
+@router.post("/api/reconciliation/preview")
+async def statement_preview(body: StatementPreview, request: Request):
+    return await request.app.state.momentum_live.statement_preview(request.state.user_id,body)
+
+@router.post("/api/reconciliation/apply")
+async def statement_apply(body: StatementApply, request: Request):
+    return await request.app.state.momentum_live.statement_apply(request.state.user_id,body)

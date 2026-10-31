@@ -124,6 +124,78 @@ MIGRATIONS = [
              '$.holder', COALESCE((SELECT json_extract(a.profile, '$.name') FROM broker_accounts a WHERE a.user_id || ':' || a.broker = broker_orders.account), ''))
            WHERE json_extract(payload, '$.order_id') IS NOT NULL AND json_extract(payload, '$.client_id') IS NULL""",
     ),
+    (
+        """CREATE TABLE stock_portfolios (
+            id TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), broker TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 0 CHECK(enabled IN (0,1)),
+            paused INTEGER NOT NULL DEFAULT 1 CHECK(paused IN (0,1)),
+            usable_capital INTEGER NOT NULL CHECK(usable_capital>0), cash INTEGER NOT NULL CHECK(cash>=0),
+            realized INTEGER NOT NULL DEFAULT 0, client_id TEXT NOT NULL DEFAULT '',
+            revision INTEGER NOT NULL DEFAULT 0, blocked TEXT, plan TEXT, last_error TEXT, last_checked TEXT,
+            UNIQUE(user_id,broker), CHECK(broker IN ('paper','upstox','kite','indmoney')))""",
+        """CREATE TABLE stock_positions (
+            portfolio_id TEXT PRIMARY KEY REFERENCES stock_portfolios(id), symbol TEXT NOT NULL,
+            isin TEXT NOT NULL, instrument_key TEXT NOT NULL, qty INTEGER NOT NULL CHECK(qty>0),
+            cost INTEGER NOT NULL CHECK(cost>=0), opened_at TEXT NOT NULL)""",
+        """CREATE TABLE stock_orders (
+            id TEXT PRIMARY KEY, portfolio_id TEXT NOT NULL REFERENCES stock_portfolios(id),
+            cycle TEXT NOT NULL, side TEXT NOT NULL CHECK(side IN ('BUY','SELL')),
+            symbol TEXT NOT NULL, isin TEXT NOT NULL, instrument_key TEXT NOT NULL,
+            qty INTEGER NOT NULL CHECK(qty>0), limit_paise INTEGER NOT NULL CHECK(limit_paise>0),
+            reserved INTEGER NOT NULL, client_id TEXT NOT NULL, status TEXT NOT NULL,
+            broker_id TEXT, filled_qty INTEGER NOT NULL DEFAULT 0 CHECK(filled_qty>=0 AND filled_qty<=qty),
+            notional INTEGER NOT NULL DEFAULT 0, fee_provision INTEGER NOT NULL DEFAULT 0,
+            error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+            UNIQUE(portfolio_id,cycle,side),
+            CHECK(status IN ('pending','submitted','unknown','open','complete','cancelled','rejected')))""",
+        "CREATE INDEX stock_orders_portfolio ON stock_orders(portfolio_id,status)",
+        """CREATE TABLE stock_fills (
+            id INTEGER PRIMARY KEY, order_id TEXT NOT NULL REFERENCES stock_orders(id),
+            cumulative_qty INTEGER NOT NULL, qty INTEGER NOT NULL, notional INTEGER NOT NULL,
+            fee_provision INTEGER NOT NULL, created_at TEXT NOT NULL)""",
+        """CREATE TABLE stock_events (
+            id INTEGER PRIMARY KEY, portfolio_id TEXT NOT NULL REFERENCES stock_portfolios(id),
+            kind TEXT NOT NULL, details TEXT NOT NULL, created_at TEXT NOT NULL)""",
+        """CREATE TRIGGER stock_events_no_update BEFORE UPDATE ON stock_events
+           BEGIN SELECT RAISE(ABORT,'Stock events are append-only'); END""",
+        """CREATE TRIGGER stock_events_no_delete BEFORE DELETE ON stock_events
+           BEGIN SELECT RAISE(ABORT,'Stock events are append-only'); END""",
+        """CREATE TRIGGER stock_fills_no_update BEFORE UPDATE ON stock_fills
+           BEGIN SELECT RAISE(ABORT,'Stock fills are append-only'); END""",
+        """CREATE TRIGGER stock_fills_no_delete BEFORE DELETE ON stock_fills
+           BEGIN SELECT RAISE(ABORT,'Stock fills are append-only'); END""",
+    ),
+
+    (
+        "ALTER TABLE stock_portfolios ADD COLUMN entry_source TEXT NOT NULL DEFAULT 'monthly'",
+        "ALTER TABLE stock_portfolios ADD COLUMN alignment_pending INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE stock_portfolios ADD COLUMN cash_shortfall INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE stock_orders ADD COLUMN parent_id TEXT REFERENCES stock_orders(id)",
+        "ALTER TABLE stock_orders ADD COLUMN origin_cycle TEXT",
+        "ALTER TABLE stock_orders ADD COLUMN charges_paise INTEGER CHECK(charges_paise>=0)",
+        "ALTER TABLE stock_orders ADD COLUMN charges_source TEXT",
+        "ALTER TABLE stock_orders ADD COLUMN charges_document TEXT",
+        "CREATE UNIQUE INDEX stock_order_replacement ON stock_orders(parent_id) WHERE parent_id IS NOT NULL",
+        """CREATE TABLE stock_recoveries (
+            id TEXT PRIMARY KEY, portfolio_id TEXT NOT NULL REFERENCES stock_portfolios(id),
+            parent_id TEXT NOT NULL UNIQUE REFERENCES stock_orders(id), status TEXT NOT NULL,
+            expires_at TEXT NOT NULL, created_at TEXT NOT NULL)""",
+        """CREATE TABLE reconciliation_documents (
+            id TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), broker TEXT NOT NULL,
+            reference TEXT NOT NULL, digest TEXT NOT NULL, payload TEXT NOT NULL, status TEXT NOT NULL,
+            created_at TEXT NOT NULL, expires_at TEXT NOT NULL, UNIQUE(user_id,broker,digest))""",
+        """CREATE TABLE stock_legacy_claims (
+            identity TEXT PRIMARY KEY, portfolio_id TEXT NOT NULL REFERENCES stock_portfolios(id),
+            document_id TEXT NOT NULL REFERENCES reconciliation_documents(id))""",
+        """CREATE TABLE broker_order_attempts (
+            id INTEGER PRIMARY KEY, trade_id TEXT NOT NULL, account TEXT NOT NULL,
+            side TEXT NOT NULL, payload TEXT NOT NULL, archived_at TEXT NOT NULL)""",
+        """CREATE TRIGGER broker_attempts_no_update BEFORE UPDATE ON broker_order_attempts
+           BEGIN SELECT RAISE(ABORT,'Broker attempts are append-only'); END""",
+        """CREATE TRIGGER broker_attempts_no_delete BEFORE DELETE ON broker_order_attempts
+           BEGIN SELECT RAISE(ABORT,'Broker attempts are append-only'); END""",
+    ),
+
 ]
 
 
