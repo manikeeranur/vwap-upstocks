@@ -93,9 +93,9 @@
   <details class="performance-detail"><summary>More performance metrics</summary><div class="tiles" id="extraTiles"></div></details>
   <p class="small" id="noteStatus" role="status">Notes autosave.</p>
   <div id="trades"></div>
-<p class="small" data-view-only="live">Live totals include only fully closed trades with confirmed quantities, fill prices and reported broker charges. Open, partial and unresolved trades are excluded.</p>
+<p class="small" data-view-only="live">Closed live trades remain visible while final charges are pending. Gross P&amp;L uses recorded fills; final net P&amp;L requires verified charges. Open, partial and unresolved trades are in Overview → Live.</p>
 </main>
-<script src="/static/portfolio-pnl.js"></script>
+<script src="/static/portfolio-pnl.js?v=20261031-history-fees"></script>
 <script>
 const $ = id => document.getElementById(id);
 const LABELS = { ...{{ labels | tojson }}, ema25_vwap: "VWAP + EMA25", ema_pullback: "EMA pullback", smc_ema_combo: "SMC + EMA (1/day)" }, PRESETS = {{ presets | tojson }};
@@ -109,13 +109,13 @@ const BROKERS = { upstox: "Upstox", kite: "Kite", indmoney: "INDmoney" };
 // A broker account: which broker, and whose login it was when the order went (Client ID + name).
 const holderName = h => (h || "").split(/\s+/).filter(Boolean).map(w => w[0] + w.slice(1).toLowerCase()).join(" ");
 const accLabel = x => `${BROKERS[x.broker] || x.broker}${x.client_id ? ` · ${holderName(x.holder) || x.client_id} (${x.client_id})` : ""}`;
-function accountTiles(per) {   // per: {key: {broker, client_id, holder, gross, net, n}}
-  for (const b of Object.keys(BROKERS)) if (!Object.values(per).some(x => x.broker === b)) per[b] = {broker: b, client_id: "", holder: "", gross: 0, net: 0, n: 0};
-  return Object.values(per).map(x => `<div class="broker-tile">${window.brokerLogo ? brokerLogo(x.broker, 28) : ""}<div><span>${BROKERS[x.broker]}${x.client_id ? ` · ${esc(holderName(x.holder) || "")}` : ""}</span><b class="${x.n ? (x.net >= 0 ? "up" : "down") : "muted"}">${x.n ? money(x.net) : "—"}</b></div><small>${x.client_id ? esc(x.client_id) + "<br>" : ""}${x.n} ${x.n === 1 ? "trade" : "trades"}${x.n ? ` · gross ${money(x.gross)}` : ""}</small></div>`).join("");
+function accountTiles(per, basis) {
+  for (const b of Object.keys(BROKERS)) if (!Object.values(per).some(x => x.broker === b)) per[b] = {broker:b,client_id:"",holder:"",value:0,n:0};
+  return Object.values(per).map(x => `<div class="broker-tile">${window.brokerLogo ? brokerLogo(x.broker,28) : ""}<div><span>${BROKERS[x.broker]}${x.client_id ? ` · ${esc(holderName(x.holder) || "")}` : ""}</span><b class="${x.n ? (x.value >= 0 ? "up" : "down") : "muted"}">${x.n ? money(x.value) : "—"}</b></div><small>${x.client_id ? esc(x.client_id)+"<br>" : ""}${x.n} ${x.n === 1 ? "trade" : "trades"}${x.n ? ` · ${basis}` : ""}</small></div>`).join("");
 }
 const dataView = WorkspaceView.bind({onChange:render,descriptions:{
   paper:'Simulated intraday trades · recorded paper quantities',
-  live:'Closed broker trades with final charges · strategy orders only'
+  live:'Closed live trades · strategy orders only'
 }});
 const historyFilters=WorkspaceUI.bindFilters({fields:{q:'history-search',result:'history-result',strategy:'strat'},reset:'clear-history-filters',onChange:render});
 const sourceMode = () => dataView.legacy();
@@ -144,8 +144,9 @@ function rows() {
 
 function render() {
   if (!J) return;
-  const R = rows();
-  $("historyScope").textContent = isLive() ? "Live net results exclude open positions, unresolved orders and missing final charges. Review those in Overview → Live." : "Paper results use simulated fills and the quantity saved for each session. Notes belong to the paper journal.";
+  const R = rows(), summary = UpstocksPnl.historySummary(R);
+  const basis = R.some(t=>t.pnlBasis === 'gross') || !isLive() ? 'gross' : 'net';
+  $("historyScope").textContent = isLive() ? `Live ${basis} P&L · charts, result filters and performance metrics use ${basis}. ${basis === "gross" ? "Final charges are pending; closed trades remain included." : "All displayed trades have final charges."} Open positions and unresolved orders are in Overview → Live.` : "Paper results use simulated fills and the quantity saved for each session. Notes belong to the paper journal.";
   const wins = R.filter(t => t.rs > 0), losses = R.filter(t => t.rs <= 0);
   const net = R.reduce((a, t) => a + t.rs, 0), gw = wins.reduce((a, t) => a + t.rs, 0), gl = -losses.reduce((a, t) => a + t.rs, 0);
   const byDay = {}; R.forEach(t => byDay[t.date] = (byDay[t.date] || 0) + t.rs);
@@ -153,19 +154,19 @@ function render() {
   let cum = 0, peak = 0, dd = 0; const curve = [0];
   R.forEach(t => { cum += t.rs; curve.push(cum); peak = Math.max(peak, cum); dd = Math.max(dd, peak - cum); });
   const tile = (k, v, s = "", cls = "") => `<div class="tile"><span>${k}</span><b class="${cls}">${v}</b><small>${s}</small></div>`;
-  const gross = R.reduce((a, t) => a + (t.gross ?? t.rs), 0), chg = R.reduce((a, t) => a + (t.ch || 0), 0), anyEst = R.some(t => t.ch != null && (!t.real || !t.realCh));
+  const gross = summary.gross;
   $("tiles").innerHTML = [
-    isLive() ? tile("Live net P&L", money(net), `${R.length} live trade${R.length===1?"":"s"} · after ₹${chg.toLocaleString("en-IN", {minimumFractionDigits:2, maximumFractionDigits:2})} charges${anyEst ? " (some est.)" : ""}`, net >= 0 ? "up" : "down")
+    isLive() ? tile("Live net P&L", summary.net === null ? "Pending" : money(summary.net), summary.net === null ? `${summary.pendingCharges} trades await final charges` : `${R.length} closed live trades · after final charges`, summary.net === null ? "muted" : summary.net >= 0 ? "up" : "down")
              : tile("Paper P&L", money(net), `${R.length} trade${R.length===1?"":"s"} · gross, before charges`, net >= 0 ? "up" : "down"),
     tile("Win rate", R.length ? `${Math.round(wins.length / R.length * 100)}%` : "—", `${wins.length} won · ${losses.length} lost`),
     tile("Profit factor", gl > 0 ? (gw / gl).toFixed(2) : wins.length ? "∞" : "—", ""),
-    isLive() ? tile("Live gross P&L", money(gross), "Real fill prices, before charges", gross >= 0 ? "up" : "down") : tile("Max drawdown", money(-dd), "peak to trough", dd ? "down" : ""),
+    isLive() ? tile("Live gross P&L", money(gross), "Recorded fill prices, before charges", gross >= 0 ? "up" : "down") : tile("Max drawdown", money(-dd), "peak to trough", dd ? "down" : ""),
   ].join("");
   $("brokerTiles").hidden = sourceMode() !== "live";
   if (sourceMode() === "live") {
     const per = {};   // account-wise: broker + client ID
-    R.forEach(t => { const a = per[`${t.broker}|${t.client_id}`] ||= {broker: t.broker, client_id: t.client_id, holder: t.holder, gross: 0, net: 0, n: 0}; a.gross += t.gross; a.net += t.rs; a.n++; });
-    $("brokerTiles").innerHTML = accountTiles(per);
+    R.forEach(t => { const a = per[`${t.broker}|${t.client_id}`] ||= {broker: t.broker, client_id: t.client_id, holder: t.holder, gross:0,value:0,n:0}; a.gross += t.gross; a.value += t.rs; a.n++; });
+    $("brokerTiles").innerHTML = accountTiles(per,basis);
   }
   $("extraTiles").innerHTML = [
     ...(isLive() ? [tile("Max drawdown", money(-dd), "peak to trough", dd ? "down" : "")] : []),
@@ -173,16 +174,16 @@ function render() {
     tile("Best day", best ? money(best[1]) : "—", best ? best[0] : "", best ? (best[1] >= 0 ? "up" : "down") : ""),
     tile("Worst day", worst ? money(worst[1]) : "—", worst ? worst[0] : "", worst ? (worst[1] >= 0 ? "up" : "down") : ""),
   ].join("");
-  $("curveLabel").textContent = isLive() ? "· Live net P&L after charges, ₹" : "· Paper gross P&L, ₹";
-  $("equity").setAttribute("aria-label",isLive() ? "Cumulative live net profit and loss" : "Cumulative paper gross profit and loss");
+  $("curveLabel").textContent = isLive() ? `· Live ${basis} P&L, ₹` : "· Paper gross P&L, ₹";
+  $("equity").setAttribute("aria-label",isLive() ? `Cumulative live ${basis} profit and loss` : "Cumulative paper gross profit and loss");
   lastCurve = curve; drawEquity(curve);
   const per = {}; R.forEach(t => { const s = per[t.preset] ||= { n: 0, w: 0, rs: 0 }; s.n++; s.w += t.rs > 0; s.rs += t.rs; });
-  $("byStrat").innerHTML = `<thead><tr><th>Strategy</th><th>Trades</th><th>Win %</th><th>${isLive() ? "Live net ₹" : "Paper gross ₹"}</th></tr></thead><tbody>${
+  $("byStrat").innerHTML = `<thead><tr><th>Strategy</th><th>Trades</th><th>Win %</th><th>${isLive() ? `Live ${basis} ₹` : "Paper gross ₹"}</th></tr></thead><tbody>${
     Object.entries(per).map(([p, s]) => `<tr><td>${esc(LABELS[p] || p)}</td><td>${s.n}</td><td>${Math.round(s.w / s.n * 100)}%</td><td class="${s.rs >= 0 ? "up" : "down"}">${money(s.rs)}</td></tr>`).join("")
     || `<tr><td class="muted" colspan="4">No trades in this range.</td></tr>`}</tbody>`;
   $("noteStatus").hidden = isLive() || !R.length;
   if (!R.length) {
-    $("trades").innerHTML = `<div class="card journal-empty"><span class="upload-icon">{{ ui_icon("trades") }}</span><h2>No ${isLive() ? "settled live" : "paper"} trades match these filters</h2><p>${isLive() ? "Open positions and unverified fills are available in Overview → Live." : "Try another date range or strategy."}</p></div>`;
+    $("trades").innerHTML = `<div class="card journal-empty"><span class="upload-icon">{{ ui_icon("trades") }}</span><h2>No ${isLive() ? "closed live" : "paper"} trades match these filters</h2><p>${isLive() ? "Open positions and unverified fills are available in Overview → Live." : "Try another date range or strategy."}</p></div>`;
     return;
   }
   // One table per strategy (in the menu's order), newest trade first.
@@ -191,7 +192,7 @@ function render() {
   $("trades").innerHTML = shown.map(p => {
     const T = R.filter(t => t.preset === p).reverse(), s = per[p] || { n: 0, w: 0, rs: 0 };
     return `<div class="card strat-card"><div class="sh"><h2>${esc(LABELS[p] || p)}</h2>
-      <span class="sum">${s.n} trade${s.n === 1 ? "" : "s"}${s.n ? ` · win ${Math.round(s.w / s.n * 100)}%` : ""} · <b class="${s.rs >= 0 ? "up" : "down"}">${money(s.rs)}</b></span></div>
+      <span class="sum">${s.n} trade${s.n === 1 ? "" : "s"}${s.n ? ` · win ${Math.round(s.w / s.n * 100)}%` : ""} · <b class="${s.rs >= 0 ? "up" : "down"}">${money(s.rs)}</b>${isLive() ? ` · ${basis}` : ""}</span></div>
       <div class="tbl"><table><thead><tr><th>Session date</th>${isLive() ? "" : "<th>Simulated in → out</th>"}<th>Option</th>${isLive()
         ? "<th class='acc'>Account</th><th>Qty</th><th>Buy fill</th><th>Sell fill</th><th>Status</th><th>Gross ₹</th><th>Charges</th><th>Net ₹</th>"
         : "<th>Entry</th><th>Exit</th><th>Status</th><th>P&amp;L pts</th><th>P&amp;L ₹</th>"}${isLive() ? "" : "<th>Paper note</th>"}</tr></thead><tbody>${
@@ -205,7 +206,7 @@ function render() {
           ? `<td><span class="broker-cell">${window.brokerLogo ? brokerLogo(t.broker, 16) : ""}<span>${BROKERS[t.broker] || t.broker}${t.client_id ? `<small class="acc-sub">${esc(holderName(t.holder) || "")} · ${esc(t.client_id)}</small>` : ""}</span></span></td><td>${t.qty}</td>
              <td>₹${fmt(t.buyFill)}</td>
              <td>₹${fmt(t.sellFill)}</td>${status}
-             <td class="${t.gross >= 0 ? "up" : "down"}">${money(t.gross)}</td><td class="down">${money(-t.ch)}${t.realCh ? "" : ' <small class="muted">est.</small>'}</td><td class="${pc}"><b>${money(t.rs)}</b></td>`
+             <td class="${t.gross >= 0 ? "up" : "down"}">${money(t.gross)}</td><td class="${t.realCh ? "down" : "muted"}">${t.realCh ? money(-t.ch) : "Pending"}</td><td class="${t.net === null ? "muted" : t.net >= 0 ? "up" : "down"}"><b>${t.net === null ? "Pending charges" : money(t.net)}</b></td>`
           : `<td>₹${fmt(t.entry)}</td><td>₹${fmt(t.exit)}</td>${status}<td class="${pc}">${t.pnl >= 0 ? "+" : ""}${fmt(t.pnl)}</td><td class="${pc}">${money(t.rs)}</td>`;
         return `${head}${cells}
           ${!isLive() ? `<td class="note"><input type="text" data-id="${esc(t.id)}" value="${esc(J.notes[t.id] || "")}" aria-label="Note for ${esc(t.symbol)} on ${esc(t.date)}" placeholder="Add a note…"></td>` : ""}</tr>`;

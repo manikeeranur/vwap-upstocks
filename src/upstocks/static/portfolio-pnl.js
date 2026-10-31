@@ -1,10 +1,19 @@
 /* Pure reporting: broker quantities determine ownership; quotes only mark open exposure. */
 (function (root) {
   'use strict';
-  function settled(o) {
+  function closed(o) {
     const terminal = ['complete','cancelled','rejected'];
     return o.qty > 0 && o.qty === o.sold_qty && terminal.includes(o.buy_status) && terminal.includes(o.sell_status) &&
-      Number.isFinite(o.buy) && Number.isFinite(o.sell) && Number.isFinite(o.buy_charges) && Number.isFinite(o.sell_charges);
+      Number.isFinite(o.buy) && Number.isFinite(o.sell);
+  }
+  function settled(o) {
+    return closed(o) && Number.isFinite(o.buy_charges) && Number.isFinite(o.sell_charges);
+  }
+  function historySummary(rows) {
+    const pendingCharges = rows.filter(t => t.mode === 'live' && !t.realCh).length;
+    const gross = rows.reduce((sum,t) => sum + (t.gross ?? t.rs),0);
+    const charges = pendingCharges ? null : rows.reduce((sum,t) => sum + (t.ch ?? 0),0);
+    return {gross,charges,net:charges === null ? null : gross-charges,pendingCharges};
   }
   function summarize(trades, orders, marks) {
     const totals = {realized:0, valuation:0, closed:0, open:0, pending:0, charges:0, chargesComplete:true, valuationMissing:0, positions:0};
@@ -85,17 +94,22 @@
         if (strategy && preset !== strategy || day && date !== day) continue;
         for (const [account,o] of Object.entries(accounts)) {
           const source = account.split(':')[1];
-          if (broker !== 'all' && source !== broker || !settled(o)) continue;
-          const gross = (o.sell-o.buy)*o.qty, ch = o.buy_charges+o.sell_charges;
+          if (broker !== 'all' && source !== broker || !closed(o)) continue;
+          const realCh = settled(o), gross = (o.sell-o.buy)*o.qty, ch = realCh ? o.buy_charges+o.sell_charges : null;
           rows.push({id,preset,date,account,broker:source,symbol:o.symbol || signals[id]?.symbol || 'Instrument unavailable',
             type:signals[id]?.type,qty:o.qty,buyFill:o.buy,sellFill:o.sell,client_id:o.client_id || '',holder:o.holder || '',
-            gross,ch,rs:gross-ch,open:false,status:'FILLED',real:true,realCh:true,mode:'live'});
+            gross,ch,net:realCh ? gross-ch : null,open:false,status:'FILLED',real:true,realCh,mode:'live'});
         }
       }
     }
+    if (mode === 'live') {
+      // Keep one basis across the selection; never add a mixture of gross and net.
+      const basis = rows.some(t => !t.realCh) ? 'gross' : 'net';
+      for (const row of rows) { row.pnlBasis = basis; row.rs = basis === 'gross' ? row.gross : row.net; }
+    }
     return rows.sort((a,b)=>(a.date+(a.entry_time || '')).localeCompare(b.date+(b.entry_time || '')));
   }
-  const api = {summarize, settled, executionRows, executionSummary, historyRows};
+  const api = {summarize, closed, settled, executionRows, executionSummary, historyRows, historySummary};
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.UpstocksPnl = api;
 })(typeof window === 'object' ? window : globalThis);

@@ -31,8 +31,8 @@ test('live history survives a missing or replaced paper scan',()=>{
   assert.equal(rows.length,1);assert.equal(rows[0].rs,95);
   assert.equal(rows[0].date,'2026-10-30');
 });
-test('live historical totals exclude partial fills and missing charges',()=>{
-  for(const changed of [{sold_qty:5},{sell_charges:null},{buy_status:'open'}]){
+test('live historical totals exclude partial fills and unresolved execution',()=>{
+  for(const changed of [{sold_qty:5},{sell:null},{buy_status:'open'}]){
     assert.equal(historyRows({live:{[id]:{'1:kite':{...order,...changed}}}},{mode:'live'}).length,0);
   }
 });
@@ -102,4 +102,36 @@ test('cancelled unsaved-settings confirmation preserves mode and broker',async()
   assert.equal(view.get().mode,'paper');assert.equal(view.get().broker,'kite');
   assert.equal(h.paper.attrs['aria-pressed'],'true');
   assert.equal(h.live.disabled,false);assert.equal(changes,0);
+});
+
+test('closed trades remain visible with gross P&L while charges are pending',()=>{
+  const {historySummary} = require('../src/upstocks/static/portfolio-pnl.js');
+  const rows=historyRows({live:{[id]:{'1:kite':{...order,sell_charges:null}}}},{mode:'live'});
+  assert.equal(rows.length,1);assert.equal(rows[0].rs,100);
+  assert.equal(rows[0].pnlBasis,'gross');assert.equal(rows[0].net,null);assert.equal(rows[0].ch,null);
+  assert.deepEqual(historySummary(rows),{gross:100,charges:null,net:null,pendingCharges:1});
+});
+
+test('mixed fee availability never mixes gross and net in calendar or journal totals',()=>{
+  const {historySummary} = require('../src/upstocks/static/portfolio-pnl.js');
+  const mixed={live:{[id]:{'1:kite':{...order,sell_charges:null},'1:upstox':{...order,sell:120}}}};
+  const rows=historyRows(mixed,{mode:'live'});
+  assert.deepEqual(rows.map(t=>t.rs),[100,200]);
+  assert.ok(rows.every(t=>t.pnlBasis==='gross'));
+  assert.equal(rows[1].net,195);assert.equal(historySummary(rows).net,null);
+  const filtered=historyRows(mixed,{mode:'live',broker:'upstox'});
+  assert.equal(filtered[0].pnlBasis,'net');assert.equal(filtered[0].rs,195);
+  assert.equal(historySummary(filtered).net,195);
+});
+
+test('confirmed October Kite trades appear without paper scans or final fees',()=>{
+  const {historySummary} = require('../src/upstocks/static/portfolio-pnl.js');
+  const rows=historyRows({live:{
+    'harmonic|2026-10-28|10:01|NSE_FO|53636':{'1:kite':{...order,qty:65,sold_qty:65,buy:439.1,sell:543.8,buy_charges:null,sell_charges:null}},
+    'harmonic|2026-10-30|11:01|NSE_FO|54045':{'1:kite':{...order,qty:65,sold_qty:65,buy:403.9,sell:349.15,buy_charges:null,sell_charges:null}}
+  }},{mode:'live',broker:'kite'});
+  assert.equal(rows.length,2);
+  assert.deepEqual(rows.map(t=>[t.date,Math.round(t.rs*100)/100]),[['2026-10-28',6805.5],['2026-10-30',-3558.75]]);
+  assert.equal(Math.round(historySummary(rows).gross*100)/100,3246.75);
+  assert.equal(historySummary(rows).net,null);
 });

@@ -89,9 +89,9 @@
     <p class="calendar-legend"><span>Weekend</span><span>Holiday · exchange closed</span><span>Special session · limited hours</span><span>Dates and session times: IST</span></p>
   </div>
   <div class="card" id="detail" hidden></div>
-<p class="small" data-view-only="live">Live totals include only fully closed trades with confirmed quantities, fill prices and reported broker charges. Open, partial and unresolved trades are excluded.</p>
+<p class="small" data-view-only="live">Closed live trades remain visible while final charges are pending. Gross P&amp;L uses recorded fills; final net P&amp;L requires verified charges. Open, partial and unresolved trades are in Overview → Live.</p>
 </main>
-<script src="/static/portfolio-pnl.js"></script>
+<script src="/static/portfolio-pnl.js?v=20261031-history-fees"></script>
 <script src="/static/exchange-calendar.js"></script>
 <script>
 const $ = id => document.getElementById(id);
@@ -104,24 +104,20 @@ const EXCHANGES = {{ exchanges | tojson }};
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const session = key => ExchangeCalendar.session(key, C?.days?.[key], EXCHANGES[$("strat").value]);
 let cur = new Date(TODAY + "T12:00:00"); cur.setDate(1);
-let J = null, C = null, sel = null, loadVersion = 0;
+let J = null, C = null, sel = null, loadVersion = 0, visibleRows = [];
 const dataView = WorkspaceView.bind({onChange:render,descriptions:{
   paper:'Simulated intraday P&L · before charges',
-  live:'Closed broker trades · net after final charges'
+  live:'Closed live trades · gross until final charges are available'
 }});
 const historyFilters=WorkspaceUI.bindFilters({fields:{q:'history-search',result:'history-result',strategy:'strat'},reset:'clear-history-filters',onChange:render});
 const mode = () => dataView.legacy();   // "paper", "live" or "live:<broker>"
 const BROKERS = { upstox: "Upstox", kite: "Kite", indmoney: "INDmoney" };
-// Paper: every trade at the journal's quantity. Live: only trades a broker bought, at the quantity sent
-// (summed across the chosen brokers), priced at the strategy's entry/exit.
-// Same formula as the Strategy backtest page, used only when the broker's own charges aren't known.
-
 // A broker account: which broker, and whose login it was when the order went (Client ID + name).
 const holderName = h => (h || "").split(/\s+/).filter(Boolean).map(w => w[0] + w.slice(1).toLowerCase()).join(" ");
 const accLabel = x => `${BROKERS[x.broker] || x.broker}${x.client_id ? ` · ${holderName(x.holder) || x.client_id} (${x.client_id})` : ""}`;
-function accountTiles(per) {   // per: {key: {broker, client_id, holder, gross, net, n}}
-  for (const b of Object.keys(BROKERS)) if (!Object.values(per).some(x => x.broker === b)) per[b] = {broker: b, client_id: "", holder: "", gross: 0, net: 0, n: 0};
-  return Object.values(per).map(x => `<div class="broker-tile">${window.brokerLogo ? brokerLogo(x.broker, 28) : ""}<div><span>${BROKERS[x.broker]}${x.client_id ? ` · ${esc(holderName(x.holder) || "")}` : ""}</span><b class="${x.n ? (x.net >= 0 ? "up" : "down") : "muted"}">${x.n ? money(x.net) : "—"}</b></div><small>${x.client_id ? esc(x.client_id) + "<br>" : ""}${x.n} ${x.n === 1 ? "trade" : "trades"}${x.n ? ` · gross ${money(x.gross)}` : ""}</small></div>`).join("");
+function accountTiles(per, basis) {
+  for (const b of Object.keys(BROKERS)) if (!Object.values(per).some(x => x.broker === b)) per[b] = {broker:b,client_id:"",holder:"",value:0,n:0};
+  return Object.values(per).map(x => `<div class="broker-tile">${window.brokerLogo ? brokerLogo(x.broker,28) : ""}<div><span>${BROKERS[x.broker]}${x.client_id ? ` · ${esc(holderName(x.holder) || "")}` : ""}</span><b class="${x.n ? (x.value >= 0 ? "up" : "down") : "muted"}">${x.n ? money(x.value) : "—"}</b></div><small>${x.client_id ? esc(x.client_id)+"<br>" : ""}${x.n} ${x.n === 1 ? "trade" : "trades"}${x.n ? ` · ${basis}` : ""}</small></div>`).join("");
 }
 
 async function load() {
@@ -155,11 +151,14 @@ async function load() {
 }
 
 function dayTrades(d) {
-  return UpstocksPnl.historyRows(J,{...dataView.get(),strategy:$("strat").value,day:d}).filter(t=>WorkspaceUI.matches(t,historyFilters.get()));
+  return visibleRows.filter(t => t.date === d);
 }
 
 function render() {
   if (!J) return;
+  visibleRows = UpstocksPnl.historyRows(J,{...dataView.get(),strategy:$("strat").value}).filter(t=>WorkspaceUI.matches(t,historyFilters.get()));
+  const basis = visibleRows.some(t=>t.pnlBasis === 'gross') || mode() === 'paper' ? 'gross' : 'net';
+  const summary = UpstocksPnl.historySummary(visibleRows);
   $("mon").textContent = cur.toLocaleDateString("en-IN", { month: "long", year: "numeric" });
   const y = cur.getFullYear(), m = cur.getMonth(), first = new Date(y, m, 1), last = new Date(y, m + 1, 0);
   const lead = (first.getDay() + 6) % 7;  // Monday first
@@ -178,18 +177,17 @@ function render() {
   if (showBrokers) {
     const per = {};   // account-wise: broker + client ID
     for (let d = 1; d <= last.getDate(); d++) for (const t of dayTrades(iso(new Date(y, m, d))))
-      { const k = t.broker+"|"+t.client_id; const a = per[k] ||= {broker:t.broker,client_id:t.client_id,holder:t.holder,gross:0,net:0,n:0}; a.gross += t.gross; a.net += t.rs; a.n++; }
-    $("brokerTiles").innerHTML = accountTiles(per);
+      { const k = t.broker+"|"+t.client_id; const a = per[k] ||= {broker:t.broker,client_id:t.client_id,holder:t.holder,gross:0,value:0,n:0}; a.gross += t.gross; a.value += t.rs; a.n++; }
+    $("brokerTiles").innerHTML = accountTiles(per,basis);
   }
   if (mode() !== "paper") {
-    let g = 0, c = 0, n = 0, est = false;
-    for (let d = 1; d <= last.getDate(); d++) for (const t of dayTrades(iso(new Date(y, m, d)))) { g += t.gross; c += t.ch; n++; est ||= t.chEst; }
+    const {gross:g,charges:c,net:finalNet,pendingCharges} = summary, n = visibleRows.length;
     $("tiles").innerHTML = [
-      tile(`Gross P&L${mode().includes(":") ? " · " + BROKERS[mode().split(":")[1]] : ""}`, money(g), `${n} live ${n === 1 ? "trade" : "trades"} · real fill prices`, g >= 0 ? "up" : "down"),
-      tile("Charges", money(-c), est ? "Broker charges · some estimated" : "Broker charges", "down"),
-      tile("Net P&L", money(g - c), "After charges", g - c >= 0 ? "up" : "down"),
-      tile("Green days", green, `of ${vals.length} traded days · net`, "up"),
-      tile("Red days", red, "", "down"),
+      tile(`Gross P&L${mode().includes(":") ? " · " + BROKERS[mode().split(":")[1]] : ""}`, money(g), `${n} closed live ${n === 1 ? "trade" : "trades"} · recorded fills`, g >= 0 ? "up" : "down"),
+      tile("Final charges", c === null ? "Pending" : money(-c), pendingCharges ? `${pendingCharges} ${pendingCharges === 1 ? "trade awaits" : "trades await"} final charges` : "Verified charges", c === null ? "muted" : "down"),
+      tile("Net P&L", finalNet === null ? "Pending" : money(finalNet), finalNet === null ? "Available after final charges" : "After final charges", finalNet === null ? "muted" : finalNet >= 0 ? "up" : "down"),
+      tile("Green days", green, `of ${vals.length} traded days · ${basis}`, "up"),
+      tile("Red days", red, `Calendar amounts · ${basis}`, "down"),
     ].join("");
   } else $("tiles").innerHTML = [
     tile(mode() === "paper" ? "Month paper P&L" : `Month live P&L${mode().includes(":") ? " · " + BROKERS[mode().split(":")[1]] : ""}`, money(net), `${vals.reduce((a, [, v]) => a + v.n, 0)} ${mode() !== "paper" ? "live " : ""}trades · gross${mode() !== "paper" ? " · real fill prices" : ""}`, net >= 0 ? "up" : "down"),
@@ -205,11 +203,11 @@ function render() {
     const schedule = session(k);
     const a = v && v.n ? Math.min(0.85, 0.12 + Math.abs(v.rs) / maxAbs * 0.5) : 0;
     const bg = v && v.n ? `background: color-mix(in srgb, ${v.rs >= 0 ? "var(--ok)" : "var(--pe)"} ${Math.round(a * 100)}%, var(--card));` : "";
-    cells.push(`<button type="button" aria-label="${k}, ${esc([schedule.badge, schedule.label].filter((x, i, a) => x && a.indexOf(x) === i).join(", "))}${v && v.n ? `, ${money(v.rs)}, ${v.n} trades` : ", no trades"}" aria-pressed="${k === sel}" class="day ${schedule.kind} ${v && v.n ? "has" : ""} ${wk ? "wk" : ""} ${k === TODAY ? "today" : ""} ${k === sel ? "sel" : ""}" data-d="${k}" style="${bg}">
+    cells.push(`<button type="button" aria-label="${k}, ${esc([schedule.badge, schedule.label].filter((x, i, a) => x && a.indexOf(x) === i).join(", "))}${v && v.n ? `, ${money(v.rs)} ${basis}, ${v.n} trades` : ", no trades"}" aria-pressed="${k === sel}" class="day ${schedule.kind} ${v && v.n ? "has" : ""} ${wk ? "wk" : ""} ${k === TODAY ? "today" : ""} ${k === sel ? "sel" : ""}" data-d="${k}" style="${bg}">
       <span class="n">${d}</span>
       ${schedule.badge ? `<span class="session-badge">${schedule.kind === "weekend" ? `<span class="cal-full">Weekend</span><span class="cal-compact">Closed</span>` : esc(schedule.badge)}</span>` : ""}
       ${["holiday","special","mixed"].includes(schedule.kind) ? `<span class="session-name">${esc(schedule.label)}</span>` : ""}
-      ${v && v.n ? `<span class="pl ${v.rs >= 0 ? "up" : "down"}" style="${a > .45 ? "color:#fff" : ""}">${`<span class="cal-full">${money(v.rs)}</span><span class="cal-compact">${v.rs < 0 ? "−" : v.rs > 0 ? "+" : ""}₹${new Intl.NumberFormat("en-IN", {notation:"compact",maximumFractionDigits:1}).format(Math.abs(v.rs))}</span>`}</span><span class="tc" style="${a > .45 ? "color:#fffc" : ""}">${v.n} trade${v.n > 1 ? "s" : ""}</span>`
+      ${v && v.n ? `<span class="pl ${v.rs >= 0 ? "up" : "down"}" style="${a > .45 ? "color:#fff" : ""}">${`<span class="cal-full">${money(v.rs)}</span><span class="cal-compact">${v.rs < 0 ? "−" : v.rs > 0 ? "+" : ""}₹${new Intl.NumberFormat("en-IN", {notation:"compact",maximumFractionDigits:1}).format(Math.abs(v.rs))}</span>`}</span><span class="tc" style="${a > .45 ? "color:#fffc" : ""}">${v.n} trade${v.n > 1 ? "s" : ""}</span><span class="session-badge">${basis}</span>`
         : v ? `<span class="tc" style="margin-top:auto">no trade</span>` : ""}
     </button>`);
   }
@@ -223,13 +221,13 @@ function renderDetail() {
   const sessionNames = {NSE:"NSE equities", NFO:"NSE F&O", BSE:"BSE equities", BFO:"BSE F&O"};
   const marketInfo = schedule.sessions.map(s => `${sessionNames[s.code]}: ${s.kind === "holiday" || s.kind === "weekend" ? "Closed · " : s.kind === "open" || s.kind === "special" ? "Open · " : ""}${esc(s.label)}${s.session ? " · " + esc(s.session) : ""}`).join("<br>");
   $("detail").hidden = false;
-  $("detail").innerHTML = `<h3>${new Date(sel + "T12:00:00").toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" })} · ${ts.length ? `<span class="${net >= 0 ? "up" : "down"}">${money(net)}</span>` : "No trades"}</h3>
+  $("detail").innerHTML = `<h3>${new Date(sel + "T12:00:00").toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" })} · ${ts.length ? `<span class="${net >= 0 ? "up" : "down"}">${money(net)} ${ts[0].pnlBasis || "gross"}</span>` : "No trades"}</h3>
     <p class="small muted">${marketInfo}</p>
     <div class="scroll"><table><thead><tr><th>Strategy</th><th>Option</th>${mode() === "paper" ? "<th>Simulated in → out</th><th>Entry</th><th>Exit / mark</th><th>Status</th><th>Paper gross</th>" : "<th>Broker</th><th>Qty</th><th>Buy fill</th><th>Sell fill</th><th>Gross</th><th>Charges</th><th>Live net</th>"}</tr></thead><tbody>${
       ts.map(t => `<tr><td>${esc(LABELS[t.preset] || t.preset)}</td><td>${esc(t.symbol)}</td>${mode() === "paper"
         ? `<td>${ampm(t.entry_time)} → ${t.open ? "Open" : ampm(t.exit_time)}</td><td>₹${fmt(t.entry)}</td><td>₹${fmt(t.exit)}</td><td>${esc(t.open ? "OPEN" : t.status)}</td><td>${money(t.rs)}</td>`
-        : `<td>${esc(BROKERS[t.broker])}${t.client_id ? "<br>"+esc(t.client_id) : ""}</td><td>${t.qty}</td><td>₹${fmt(t.buyFill)}</td><td>₹${fmt(t.sellFill)}</td><td>${money(t.gross)}</td><td>${money(-t.ch)}</td><td>${money(t.rs)}</td>`}</tr>`).join("")
-      || `<tr><td class="muted" colspan="${mode() === "paper" ? 7 : 9}">No ${mode() === "paper" ? "paper trades" : "closed live trades with final charges"} for this session.</td></tr>`
+        : `<td>${esc(BROKERS[t.broker])}${t.client_id ? "<br>"+esc(t.client_id) : ""}</td><td>${t.qty}</td><td>₹${fmt(t.buyFill)}</td><td>₹${fmt(t.sellFill)}</td><td>${money(t.gross)}</td><td>${t.realCh ? money(-t.ch) : "Pending"}</td><td>${t.net === null ? "Pending charges" : money(t.net)}</td>`}</tr>`).join("")
+      || `<tr><td class="muted" colspan="${mode() === "paper" ? 7 : 9}">No ${mode() === "paper" ? "paper trades" : "closed live trades"} for this session.</td></tr>`
     }</tbody></table></div>`;
 
 }

@@ -113,7 +113,7 @@ until broker evidence is available. Reconnect the same broker account and inspec
 the unresolved-order alert. Never infer a completed trade solely from an order ID.
 
 Readiness reports scanner, reconciliation, momentum and reminder worker health.
-Historical journal/calendar live totals require fully closed confirmed quantities and both statement-confirmed charges. Incomplete records are excluded, never filled using simulated prices. Broker history is scoped to the signed-in user.
+Historical journal/calendar history includes fully closed confirmed quantities with recorded fill prices even when final charges are pending. In that case the selection uses gross P&L consistently for daily colors, result filters and performance metrics; final charges and net totals remain unavailable. Once every displayed trade has statement-confirmed charges, the selection uses net P&L. Open, partial and unresolved executions are excluded, never filled using simulated prices. Broker history is scoped to the signed-in user.
 
 Portfolio-specific failures remain visible in Stocks and the Overview. If storage
 fails after submission, keep automation blocked and reconcile the durable intent
