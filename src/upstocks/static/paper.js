@@ -10,7 +10,7 @@ const ampm = s => { if (!s) return '—'; const [h,m] = s.split(':').map(Number)
 const todayIST = () => { const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date()).map(v => [v.type,v.value])); return `${p.year}-${p.month}-${p.day}`; };
 const BROKER_NAMES = {upstox:'Upstox', kite:'Kite', indmoney:'INDmoney'}, BROKER_ORDER = ['upstox','kite','indmoney'];
 let B = null, brokerError = '', fillsError = '';
-function showBrokerErrors() { const errors = [brokerError,fillsError,...(S ? selectedAccounts().map(a => S.reconciliation?.[a.id]?.error) : [])].filter(Boolean); $('brokerRefreshError').hidden = !errors.length; $('brokerRefreshError').textContent = errors.join(' · '); }
+function showBrokerErrors() { const errors = [brokerError,fillsError,...(S ? selectedAccounts().flatMap(a => [S.reconciliation?.[a.id]?.error,S.fee_status?.[a.id]?.error]) : [])].filter(Boolean); $('brokerRefreshError').hidden = !errors.length; $('brokerRefreshError').textContent = errors.join(' · '); }
 const accounts = () => BROKER_ORDER.map(b => { const e = Object.entries(S.state.accounts || {}).find(([,a]) => a.broker === b); return e && {id:e[0], ...e[1]}; }).filter(Boolean);
 const account = b => accounts().find(a => a.broker === b);
 const anyLive = p => accounts().some(a => a.live[p]);
@@ -44,21 +44,24 @@ const executions = () => {
 };
 function renderLiveSummary() {
   const rows = executions(), total = UpstocksPnl.executionSummary(rows);
+  const closed = rows.filter(r=>r.stats.closed && !r.stats.open && !r.stats.pending);
+  const realized = UpstocksPnl.executionSummary(closed);
   const write = (id,value) => { $(id).textContent = value == null ? '—' : money(value); $(id).className = 'metric-value ' + (value == null ? '' : value >= 0 ? 'up' : 'down'); };
-  write('livePnl',total.closed ? total.realized : null); write('liveNet',total.net);
+  write('livePnl',realized.closed ? realized.realized : null); write('liveNet',realized.net);
   write('liveOpen',total.open && !total.valuationMissing ? total.valuation : null);
-  $('liveCaption').textContent = total.closed + (total.closed === 1 ? ' trade' : ' trades') + ' with confirmed exit fills · all saved sessions';
-  $('netCaption').textContent = total.net != null ? 'After final statement charges' : total.pending ? 'Waiting for order reconciliation' : total.open ? 'Available once positions close and charges are confirmed' : total.closed ? 'Waiting for final statement charges' : 'No confirmed closed trades';
-  $('openValuation').textContent = total.positions ? total.positions + (total.positions === 1 ? ' open position · ' : ' open positions · ') + (total.valuationMissing ? 'current quotes unavailable' : 'current quote estimate') : 'No confirmed open positions';
+  $('liveCaption').textContent = realized.closed + (realized.closed === 1 ? ' closed trade' : ' closed trades') + ' · all saved sessions';
+  $('netCaption').textContent = (realized.net != null ? (realized.chargesFinal ? 'After final statement charges' : 'Net estimate · after broker-calculated charges') : realized.closed ? 'Waiting for broker charges' : 'No confirmed closed trades') + (rows.length > closed.length ? ' · open/unresolved trades excluded' : '');
+  $('openValuation').textContent = total.positions ? total.positions + (total.positions === 1 ? ' open position · ' : ' open positions · ') + (total.valuationMissing ? 'current quotes unavailable' : 'current quote estimate · before charges') : 'No confirmed open positions';
   $('livePending').textContent = total.pending;
   $('pendingCaption').textContent = total.pending ? 'Unresolved orders · verify with the broker' : 'No unresolved saved orders';
   StableDOM.html($('liveBrokers'),selectedAccounts().map(a => {
-    const r = UpstocksPnl.executionSummary(rows.filter(x=>x.account === a.id));
-    return '<div class="live-broker"><span>'+BROKER_NAMES[a.broker]+'</span><b>'+(r.closed ? money(r.realized) : '—')+'</b><small>gross · '+r.positions+' open · '+r.pending+' unresolved</small></div>';
+    const r = UpstocksPnl.executionSummary(closed.filter(x=>x.account === a.id));
+    const activity = UpstocksPnl.executionSummary(rows.filter(x=>x.account === a.id));
+    return '<div class="live-broker"><span>'+BROKER_NAMES[a.broker]+'</span><b>'+(r.net != null ? money(r.net) : r.closed ? money(r.realized) : '—')+'</b><small>'+(r.net != null ? (r.chargesFinal ? 'net' : 'net estimate') : 'gross; fees pending')+' · '+activity.positions+' open · '+activity.pending+' unresolved</small></div>';
   }).join(''));
 }
 function liveStrategy(p) {
-  const rows = executions().filter(r=>r.preset === p && matchExecution(r)), summary = UpstocksPnl.executionSummary(rows);
+  const rows = executions().filter(r=>r.preset === p && matchExecution(r)), summary = UpstocksPnl.executionSummary(rows.filter(r=>r.stats.closed && !r.stats.open && !r.stats.pending));
   const enabled = selectedAccounts().some(a=>a.live[p]);
   const cards = rows.map(r => {
     const bought = r.buy?.filled_qty || 0, sold = r.sell?.filled_qty || 0;
@@ -70,11 +73,11 @@ function liveStrategy(p) {
       field('Buy fill',Number.isFinite(r.buy?.fill_price) ? money(r.buy.fill_price) : 'Unconfirmed')+
       field('Sell fill',Number.isFinite(r.sell?.fill_price) ? money(r.sell.fill_price) : 'Unconfirmed')+
       field('Realized gross',r.stats.closed ? money(r.stats.realized) : '—')+
-      field('Realized net',r.stats.net != null ? money(r.stats.net) : 'Unavailable')+'</dl>'+
+      field('Charges'+(r.stats.chargesFinal ? '' : ' (estimated)'),r.stats.chargesComplete ? money(r.stats.charges) : 'Pending')+field('Realized net'+(r.stats.chargesFinal ? '' : ' (estimated)'),r.stats.net != null ? money(r.stats.net) : 'Unavailable')+'</dl>'+
       '<details class="order-evidence"><summary>Order details</summary><p>Buy · '+orderCell(r.buy)+'</p><p>Sell · '+orderCell(r.sell)+'</p></details></article>';
   }).join('');
   const exits = selectedAccounts().map(a => { const n = openLive(a.id,p); return n ? '<button class="btn ghost sq" type="button" data-sq="'+p+'" data-broker="'+a.broker+'">Close all '+n+' live position'+(n===1?'':'s')+' · '+BROKER_NAMES[a.broker]+'</button>' : ''; }).join('');
-  return '<section data-key="'+esc(p)+'" class="card strat" aria-label="'+esc(LABELS[p] || p)+' live execution"><div class="strategy-top"><div class="strategy-title"><div><h3>'+esc(LABELS[p] || p)+'</h3><p>'+(paperOnly(p) ? 'Paper only · live execution unavailable' : enabled ? 'Live automation enabled' : 'New live entries disabled')+'</p></div></div><div class="strategy-pnl"><span class="pnl-label">Live realized · gross</span><b>'+(summary.closed ? money(summary.realized) : '—')+'</b><small>'+rows.length+' broker trade'+(rows.length===1?'':'s')+'</small></div></div>'+
+  return '<section data-key="'+esc(p)+'" class="card strat" aria-label="'+esc(LABELS[p] || p)+' live execution"><div class="strategy-top"><div class="strategy-title"><div><h3>'+esc(LABELS[p] || p)+'</h3><p>'+(paperOnly(p) ? 'Paper only · live execution unavailable' : enabled ? 'Live automation enabled' : 'New live entries disabled')+'</p></div></div><div class="strategy-pnl"><span class="pnl-label">Closed trades · '+(summary.net != null ? (summary.chargesFinal ? 'net' : 'net estimate') : 'gross; fees pending')+'</span><b>'+(summary.net != null ? money(summary.net) : summary.closed ? money(summary.realized) : '—')+'</b><small>'+rows.length+' broker trade'+(rows.length===1?'':'s')+'</small></div></div>'+
     (exits ? '<div class="strategy-controls">'+exits+'</div>' : '')+
     (cards ? '<div class="execution-cards">'+cards+'</div>' : '<div class="empty-state"><div><b>No live orders for this selection</b><p>Paper signals are shown in Paper mode.</p></div></div>')+'</section>';
 }

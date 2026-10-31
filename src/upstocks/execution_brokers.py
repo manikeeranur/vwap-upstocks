@@ -75,6 +75,9 @@ def normalize_order(broker, row):
         "key": row.get("instrument_token") or row.get("instrument_key"),
         "isin": row.get("isin"),
         "product": row.get("product"),
+        "order_type": row.get("order_type"),
+        "variety": row.get("variety") or ("regular" if broker == "kite" else None),
+        "segment": row.get("segment"),
         "exchange": row.get("exchange"),
         "security_id": str(row.get("security_id") or ""),
     }

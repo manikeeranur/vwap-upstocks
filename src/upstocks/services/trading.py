@@ -13,7 +13,7 @@ import logging
 import time
 import uuid
 
-from .. import brokers, execution_brokers, live, upstox
+from .. import brokers, execution_brokers, fees, live, upstox
 from ..stocks.domain import TERMINAL, PortfolioError
 from ..order_evidence import current_attempt, apply_evidence, combine
 from ..observability import redact
@@ -40,6 +40,8 @@ class TradingService:
         self.last_reconcile = None
         self.started_at = time.monotonic()
         self._fills_errors = {}
+        self._fee_errors = {}
+        self._fee_retry = {}
         self._fills_lock = asyncio.Lock()
         self._skipped = set()   # (account, trade id) already reported as "not logged in"
         self._peak_cache = {}   # closed trade -> (peak high, peak low)
@@ -98,6 +100,7 @@ class TradingService:
         return {"state": state, "view": view, "market_open": live.market_open(),
                 "market_calendar": self.calendar.day(live.now_ist().date()),
                 "now": live.now_ist().strftime("%a %d %b %H:%M:%S"), "view_revision": self.view_revision,
+                "fee_status": {a: {"error": self._fee_errors.get(a)} for a in state["accounts"]},
                 "reconciliation": {a: {"error": self._reconciliation_error(a), "age_seconds": round(time.monotonic() - self._fills_cache[a][0]) if a in self._fills_cache else None}
                                    for a in state["accounts"]}}
 
@@ -225,6 +228,10 @@ class TradingService:
                             if row["qty"] != order.get("qty") or row["side"] != side.upper():
                                 raise brokers.BrokerError("Broker order quantity or side does not match intent")
                             current = current_attempt(order)
+                            context = dict(current.get("fee_context") or {})
+                            context.update({k: row[k] for k in ("symbol", "exchange", "product", "order_type", "variety", "key", "security_id", "segment") if row.get(k)})
+                            context.update(side=side.upper(), trade_date=tid.split("|")[1])
+                            current["fee_context"] = context
                             if row["filled_qty"] < current["filled_qty"]:
                                 continue
                             updated = combine(order,apply_evidence(current,row))
@@ -235,8 +242,8 @@ class TradingService:
                             if updated != order:
                                 await asyncio.to_thread(self.repository.finish_order, tid, account, side.upper(), updated,
                                                         f"{self._who(account)} · broker status reconciled")
+                                order.clear()
                                 order.update(updated)
-                                order.pop("error", None)
                     self._fills_cache[account] = (time.monotonic(), fills)
                     if errors:
                         self._fills_errors[account] = "; ".join(sorted(set(errors)))
@@ -250,22 +257,60 @@ class TradingService:
         return out
 
     async def _store_charges(self, account, creds):
-        """Retain broker fee estimates separately from final statement charges."""
-        missing = {str(o["order_id"]): (tid, side) for tid, sides in self.state["orders"].get(account, {}).items()
-                   for side, o in sides.items() if o.get("order_id") and o.get("fill_price") is not None and o.get("execution_status") in TERMINAL and "estimated_charges" not in o and o.get("charges_source") != "operator_statement"}
-        if not missing:
-            return
-        try:
-            found = await brokers.order_charges(creds, set(missing))
-        except Exception:
-            log.warning("Broker charges unavailable", extra={"account": account})
-            return
-        for oid, total in found.items():
-            tid, side = missing[oid]
-            order = self.state["orders"][account][tid][side]
-            updated = {**order,"estimated_charges":round(total,2)}
-            await asyncio.to_thread(self.repository.finish_order,tid,account,side.upper(),updated,"Broker fee estimate refreshed")
-            order.update(updated)
+        """Store fee evidence for each actual attempt, including partial/cancelled fills."""
+        errors, budget = [], 2
+        for tid, sides in self.state["orders"].get(account, {}).items():
+            for side, order in sides.items():
+                if order.get("charges_source") == "operator_statement":
+                    continue
+                attempts = deepcopy(order.get("attempts", []))
+                current = current_attempt(order)
+                changed = False
+                for attempt in [*attempts, current]:
+                    if not attempt.get("filled_qty") or attempt.get("charges_paise") is not None or fees.valid_estimate(attempt):
+                        continue
+                    if attempt.get("client_id") != creds.client_id or not creds.client_id:
+                        errors.append("Fee account does not match the saved order")
+                        continue
+                    key = (account, attempt.get("order_id"), attempt["filled_qty"], attempt["notional"])
+                    if self._fee_retry.get(key, 0) > time.monotonic():
+                        errors.append("Broker charge calculation will retry")
+                        continue
+                    if not budget:
+                        errors.append("Additional charges will refresh on the next cycle")
+                        continue
+                    budget -= 1
+                    self._fee_retry[key] = time.monotonic() + 300
+                    context = dict(attempt.get("fee_context") or {})
+                    context.update(side=side.upper(), trade_date=tid.split("|")[1])
+                    # Legacy Kite NFO orders were submitted by kite_place as MIS MARKET.
+                    # Do not invent delivery/other-broker metadata for old manual orders.
+                    if creds.broker == "kite" and "|NSE_FO|" in tid and (attempt.get("contract") or {}).get("type") in ("CE", "PE"):
+                        for k, v in {"symbol": attempt.get("broker_symbol"), "exchange": "NFO",
+                                     "product": "MIS", "order_type": "MARKET", "variety": "regular"}.items():
+                            context.setdefault(k, v)
+                    try:
+                        attempt["fee_estimate"] = await asyncio.wait_for(fees.calculate(creds, attempt, context), 3)
+                        attempt["fee_context"] = context
+                        self._fee_retry.pop(key, None)
+                        changed = True
+                    except Exception as exc:
+                        errors.append(redact(str(exc)) or "Broker charges unavailable")
+                if changed:
+                    updated = combine(order, current, attempts)
+                    await asyncio.to_thread(self.repository.finish_order, tid, account, side.upper(), updated,
+                                            "Broker fee estimate saved for confirmed fills")
+                    order.update(updated)
+                    for field in ("charges", "charges_source", "estimated_charges", "estimated_charges_qty", "estimated_charges_notional"):
+                        if field not in updated:
+                            order.pop(field, None)
+        error = "; ".join(sorted(set(errors)))
+        if error:
+            if self._fee_errors.get(account) != error:
+                log.warning("Broker fee calculation pending", extra={"account": account, "reason": error})
+            self._fee_errors[account] = error
+        else:
+            self._fee_errors.pop(account, None)
 
     async def record_fills(self):
         users = {a["user"] for account, a in self.state["accounts"].items()
@@ -393,6 +438,11 @@ class TradingService:
             record = {"at": f"{live.now_ist():%H:%M:%S}", "created_at":live.now_ist().isoformat(), "qty": qty, "why": why, "symbol": trade.get("symbol", ""),
                       "broker": acc["broker"], "status": "pending", "client_tag": "ut" + uuid.uuid4().hex[:18],
                       "filled_qty": 0, "execution_status": "unknown",
+                      "fee_context": {"side": side, "trade_date": live.now_ist().date().isoformat(),
+                                      "key": trade.get("instrument_key"), "variety": "regular",
+                                      "order_type": "MARKET", "segment": "DERIVATIVE",
+                                      "exchange": "NFO" if acc["broker"] == "kite" else "NSE",
+                                      "product": {"kite": "MIS", "upstox": "I", "indmoney": "INTRADAY"}[acc["broker"]]},
                       # The broker account this order went to — a broker's login can change between days.
                       "client_id": client_id, "holder": holder,
                       # Kept so an exit (incl. manual square-off) can find the same contract at any broker.
@@ -413,6 +463,7 @@ class TradingService:
             if not order_id:
                 raise RuntimeError("Broker did not return an order ID")
             record.update(order_id=order_id, status="submitted", qty=sent_qty, broker_symbol=symbol)
+            record["fee_context"]["symbol"] = symbol
             message = f"{self._who(account)} · {live.LABELS[preset]}: {side} {sent_qty} {symbol} ({why}) → order {order_id}"
         except asyncio.CancelledError:
             record.update(status="unknown", error="Order interrupted. Verify its status with the broker; it will not be retried automatically.")

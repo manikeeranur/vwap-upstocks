@@ -9,6 +9,7 @@ import uuid
 from typing import Any
 
 from .database import Database, utc_now
+from .fees import order_fee
 from .observability import clean, redact, request_id
 
 PRESETS = ("frontend_live", "smc_live", "ema25_vwap", "ema_pullback", "smc_tuned", "smc_ema_combo", "harmonic", "harmonic_2y", "sensex_swing", "sensex_bigleg", "harmonic_power")
@@ -344,18 +345,21 @@ class Repository:
                 order = json.loads(r["payload"])
                 if not order.get("order_id"):
                     continue
+                fee = order_fee(order)
                 if r["side"] == "BUY":
                     live.setdefault(r["trade_id"], {})[r["account"]] = {"qty": order.get("filled_qty") or 0, "sold_qty": 0,
                                                                          "buy_status": order.get("execution_status"), "sell_status": None,
                                                                          "symbol": order.get("broker_symbol") or order.get("symbol") or "",
                                                                          "buy": order.get("fill_price"), "sell": None,
-                                                                         "buy_charges": order.get("charges") if order.get("charges_source") == "operator_statement" else None, "sell_charges": None,
+                                                                         "buy_charges": fee["amount"], "sell_charges": None,
+                                                                         "buy_fee_quality": fee["quality"], "sell_fee_quality": "missing",
                                                                          "client_id": order.get("client_id") or "", "holder": order.get("holder") or ""}
                 else:
                     sells[(r["trade_id"], r["account"])] = order
             for (tid, account), order in sells.items():
                 if account in live.get(tid, {}):
-                    live[tid][account].update(sell=order.get("fill_price"), sell_charges=order.get("charges") if order.get("charges_source") == "operator_statement" else None,
+                    live[tid][account].update(sell=order.get("fill_price"), sell_charges=order_fee(order)["amount"],
+                                                 sell_fee_quality=order_fee(order)["quality"],
                                                  sold_qty=order.get("filled_qty") or 0, sell_status=order.get("execution_status"))
             return {"days": days, "notes": notes, "live": live}
 

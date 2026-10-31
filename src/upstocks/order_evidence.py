@@ -3,6 +3,7 @@
 from copy import deepcopy
 from typing import Any
 from .stocks.domain import PortfolioError, TERMINAL, paise
+from .fees import valid_estimate
 
 Record = dict[str, Any]
 
@@ -21,6 +22,7 @@ def current_attempt(order: Record) -> Record:
                 "contract",
                 "execution_status",
                 "created_at",
+                "fee_context",
             )
             if k in order
         },
@@ -29,6 +31,7 @@ def current_attempt(order: Record) -> Record:
             "attempt_notional", paise((order.get("fill_price") or 0) * order.get("filled_qty", 0))
         ),
         "charges_paise": order.get("attempt_charges_paise"),
+        "fee_estimate": deepcopy(order.get("attempt_fee_estimate")),
     }
 
 
@@ -43,6 +46,8 @@ def combine(order: Record, current: Record, previous: list[Record] | None = None
         "attempt_filled_qty": current["filled_qty"],
         "attempt_notional": current["notional"],
         "attempt_charges_paise": current.get("charges_paise"),
+        "attempt_fee_estimate": deepcopy(current.get("fee_estimate")),
+        "fee_context": deepcopy(current.get("fee_context") or order.get("fee_context") or {}),
         "execution_status": current["execution_status"],
         "filled_qty": qty,
     }
@@ -56,6 +61,15 @@ def combine(order: Record, current: Record, previous: list[Record] | None = None
     if charged and all(a.get("charges_paise") is not None for a in charged):
         out["charges"] = sum(a["charges_paise"] for a in charged) / 100
         out["charges_source"] = "operator_statement"
+    for key in ("estimated_charges", "estimated_charges_qty", "estimated_charges_notional"):
+        out.pop(key, None)
+    if charged and all(a.get("charges_paise") is not None or valid_estimate(a) for a in charged):
+        out["estimated_charges"] = sum(
+            a["charges_paise"] if a.get("charges_paise") is not None else a["fee_estimate"]["total_paise"]
+            for a in charged
+        ) / 100
+        out["estimated_charges_qty"] = qty
+        out["estimated_charges_notional"] = value
     return out
 
 

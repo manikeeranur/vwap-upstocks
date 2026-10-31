@@ -5,7 +5,7 @@ from datetime import date, datetime, timedelta
 import logging
 import time
 
-from .. import execution_brokers as execution, live, momentum, upstox
+from .. import brokers, fees, execution_brokers as execution, live, momentum, upstox
 from ..observability import redact
 from ..stocks.domain import PortfolioError, TERMINAL, buy_quantity, decide, paise, quantity
 from ..stocks.store import StockStore
@@ -29,6 +29,8 @@ class MomentumLiveService:
         self.started_at = time.monotonic()
         self.last_error = None
         self._market_day = None
+        self._fee_retry = {}
+        self._fee_errors = {}
 
     def load(self):
         repo = self.app.state.repository
@@ -64,7 +66,7 @@ class MomentumLiveService:
         await asyncio.to_thread(self.store.ensure, [repo.user(user_id)], repo.get_json("momentum_tuned"))
         portfolios = await asyncio.to_thread(self.store.snapshot, user_id)
         return {
-            "portfolios": portfolios,
+            "portfolios": [{**p, "fee_error": self._fee_errors.get(p["id"])} for p in portfolios],
             "market_calendar": self.app.state.trading.calendar.day(live.now_ist().date()),
             "worker": self.worker_health(),
             "global_entries_paused": self.app.state.trading.state["users"]
@@ -127,6 +129,42 @@ class MomentumLiveService:
             )
         return await self.snapshot(user_id)
 
+    async def _sync_fees(self, p, rows=None):
+        missing = [o for o in p["orders"] if o["filled_qty"] and o.get("charges_paise") is None
+                   and not fees.valid_estimate(fees.stock_attempt(o))]
+        if not missing:
+            self._fee_errors.pop(p["id"], None)
+            return p
+        errors = []
+        for order in missing[:2]:
+            key = (order["id"], order["filled_qty"], order["notional"])
+            if self._fee_retry.get(key, 0) > time.monotonic():
+                errors.append("Broker charge calculation will retry")
+                continue
+            self._fee_retry[key] = time.monotonic() + 300
+            try:
+                creds = await self._creds(p)
+                context = {"symbol": order["symbol"], "key": order["instrument_key"], "side": order["side"],
+                           "exchange": "NSE", "product": "D" if p["broker"] == "upstox" else "CNC",
+                           "variety": "regular", "order_type": "LIMIT", "segment": "EQUITY",
+                           "trade_date": order["created_at"][:10]}
+                if p["broker"] == "indmoney":
+                    matching: dict = next((r for r in rows or [] if r["order_id"] == order["broker_id"]), {})
+                    context["security_id"] = matching.get("security_id") or await brokers.ind_equity_id(creds, order["isin"])
+                estimate = await asyncio.wait_for(fees.calculate(creds, fees.stock_attempt(order), context), 3)
+                await asyncio.to_thread(self.store.save_fee_estimate, order["id"], estimate)
+                self._fee_retry.pop(key, None)
+            except Exception as exc:
+                errors.append(redact(str(exc)) or "Broker charges unavailable")
+        if errors:
+            message = "; ".join(sorted(set(errors)))
+            if self._fee_errors.get(p["id"]) != message:
+                log.warning("Stock fee calculation pending", extra={"portfolio": p["id"], "reason": message})
+            self._fee_errors[p["id"]] = message
+        else:
+            self._fee_errors.pop(p["id"], None)
+        return await self._get(p["id"])
+
     async def _reconcile(self, p, evidence):
         if p["client_id"] != evidence["client_id"]:
             raise PortfolioError("Broker login differs from this portfolio's owner")
@@ -166,7 +204,8 @@ class MomentumLiveService:
             p = await self._get(pid)
             if broker != "paper":
                 evidence = await execution.stock_snapshot(await self._creds(p))
-                await self._reconcile(p, evidence)
+                p = await self._reconcile(p, evidence)
+                await self._sync_fees(p, evidence["orders"])
             else:
                 for order in p["orders"]:
                     if order["status"] not in TERMINAL:
@@ -453,6 +492,8 @@ class MomentumLiveService:
                 creds = await self._creds(p)
                 evidence = await asyncio.wait_for(execution.stock_snapshot(creds), 45)
                 p = await self._reconcile(p, evidence)
+            if p["broker"] != "paper":
+                p = await self._sync_fees(p, (evidence or {}).get("orders", []))
             await asyncio.to_thread(self.store.health, pid)
             if (
                 not p["enabled"]

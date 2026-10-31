@@ -33,7 +33,7 @@ class StorageTests(unittest.TestCase):
             self.repo.finish_order(tid, "1:kite", side, {"status": "submitted", "order_id": oid, "qty": 65, "broker_symbol": "NIFTY SAMPLE CE"}, "sent")
             self.repo.save_fill(tid, "1:kite", side, price, 60.5 if side == "BUY" else 67.58, filled_qty=65, execution_status="complete")
         live = self.repo.journal("2026-10-28", "2026-10-28")["live"]
-        self.assertEqual(live, {tid: {"1:kite": {"qty": 65, "sold_qty": 65, "buy_status": "complete", "sell_status": "complete", "buy": 439.1, "sell": 543.8, "buy_charges": None, "sell_charges": None, "client_id": "", "holder": "", "symbol": "NIFTY SAMPLE CE"}}})
+        self.assertEqual(live, {tid: {"1:kite": {"qty": 65, "sold_qty": 65, "buy_status": "complete", "sell_status": "complete", "buy": 439.1, "sell": 543.8, "buy_charges": None, "sell_charges": None, "buy_fee_quality": "missing", "sell_fee_quality": "missing", "client_id": "", "holder": "", "symbol": "NIFTY SAMPLE CE"}}})
 
     def test_journal_filters_live_orders_by_user_and_uses_actual_fills(self):
         for account in ("1:kite", "2:kite"):

@@ -109,7 +109,7 @@ test('closed trades remain visible with gross P&L while charges are pending',()=
   const rows=historyRows({live:{[id]:{'1:kite':{...order,sell_charges:null}}}},{mode:'live'});
   assert.equal(rows.length,1);assert.equal(rows[0].rs,100);
   assert.equal(rows[0].pnlBasis,'gross');assert.equal(rows[0].net,null);assert.equal(rows[0].ch,null);
-  assert.deepEqual(historySummary(rows),{gross:100,charges:null,net:null,pendingCharges:1});
+  assert.deepEqual(historySummary(rows),{gross:100,charges:null,net:null,pendingCharges:1,estimatedCharges:0});
 });
 
 test('mixed fee availability never mixes gross and net in calendar or journal totals',()=>{

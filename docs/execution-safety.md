@@ -113,7 +113,7 @@ until broker evidence is available. Reconnect the same broker account and inspec
 the unresolved-order alert. Never infer a completed trade solely from an order ID.
 
 Readiness reports scanner, reconciliation, momentum and reminder worker health.
-Historical journal/calendar history includes fully closed confirmed quantities with recorded fill prices even when final charges are pending. In that case the selection uses gross P&L consistently for daily colors, result filters and performance metrics; final charges and net totals remain unavailable. Once every displayed trade has statement-confirmed charges, the selection uses net P&L. Open, partial and unresolved executions are excluded, never filled using simulated prices. Broker history is scoped to the signed-in user.
+Historical journal/calendar history includes fully closed confirmed quantities with recorded fill prices even when final charges are pending. When any fee evidence is missing the selection uses gross P&L consistently for daily colors, result filters and performance metrics, with net unavailable. Once all displayed trades have saved fees, the selection uses net P&L, explicitly labeled estimated until statement charges are available. Open, partial and unresolved executions are excluded, never filled using simulated prices. Broker history is scoped to the signed-in user.
 
 Portfolio-specific failures remain visible in Stocks and the Overview. If storage
 fails after submission, keep automation blocked and reconcile the durable intent
@@ -211,3 +211,29 @@ orders against broker records. There is deliberately no automatic adoption of
 manual holdings, no forced fill completion, and no automatic resubmission of an
 uncertain or cancelled rotation. New stock portfolios are separate from the old
 simulated portfolio; the original JSON is retained for audit and comparison.
+
+## Automatic live charges
+
+Kite virtual contract notes, Upstox brokerage calculations, and INDmoney's margin
+calculator supply estimates for the actual filled quantity and weighted price.
+Each saved estimate includes its broker order/account identity, cumulative quantity,
+notional, request metadata, breakdown and calculation time. A changed fill invalidates
+the previous estimate. Partial/cancelled attempts and replacement exits keep separate
+fees. Repeated reconciliation does not charge an order twice. Missing or failed
+responses remain unavailable and retry with backoff; they never become zero.
+
+Overview, journal and calendar use the same saved fees. Net results based on these
+calculators are explicitly estimated. Statement-confirmed charges override estimates.
+If any selected closed trade has no fee evidence, historical totals show gross with
+net pending instead of mixing gross and net. Overview realized totals cover only
+closed confirmed trades and disclose excluded open/unresolved orders.
+
+Stock fee estimates are append-only events used for reporting estimated net returns.
+They never release conservative execution cash provisions or change usable capital.
+Delivery-sale DP charges and other back-office adjustments may only appear on final
+statements. Calculator requests have no historical tariff-date input, so backfilled
+calculations retain their calculation timestamp and remain estimates.
+
+References: Kite https://kite.trade/docs/connect/v3/margins/#virtual-contract-note ;
+Upstox https://upstox.com/developer/api-documentation/get-brokerage/ ;
+INDmoney https://api-docs.indstocks.com/margin_calculation/ .

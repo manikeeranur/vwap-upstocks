@@ -4,6 +4,7 @@ import json
 import uuid
 
 from ..database import utc_now
+from ..fees import valid_estimate, stock_attempt
 from .accounting import balances
 from .domain import PortfolioError, StaleRevision, TERMINAL, fee_provision
 
@@ -80,12 +81,21 @@ class StockStore:
 
     @staticmethod
     def _orders(c, pid):
-        return [
+        orders = [
             dict(r)
             for r in c.execute(
                 "SELECT * FROM stock_orders WHERE portfolio_id=? ORDER BY julianday(created_at),rowid", (pid,)
             )
         ]
+        latest: dict[str, dict] = {}
+        for row in c.execute("SELECT details FROM stock_events WHERE portfolio_id=? AND kind='BROKER_FEE_ESTIMATE' ORDER BY id DESC", (pid,)):
+            event = json.loads(row[0])
+            latest.setdefault(event["order_id"], event["estimate"])
+        for order in orders:
+            estimate = latest.get(order["id"])
+            if estimate and valid_estimate({**stock_attempt(order), "fee_estimate": estimate}):
+                order["fee_estimate"] = estimate
+        return orders
 
     def snapshot(self, user_id=None):
         with self.db.connect() as c:
@@ -100,6 +110,12 @@ class StockStore:
                 p["orders"] = self._orders(c, p["id"])
                 totals = balances(p["usable_capital"], p["orders"])
                 p.update({key: totals[key] for key in ("missing_charges", "net_realized")})
+                estimated_orders = [{**o, "charges_paise": o.get("charges_paise") if o.get("charges_paise") is not None
+                                     else (o.get("fee_estimate") or {}).get("total_paise")} for o in p["orders"]]
+                # Reporting estimates never release the conservative cash provision.
+                estimated = balances(p["usable_capital"], estimated_orders)
+                p["estimated_net_realized"] = estimated["net_realized"]
+                p["fees_pending"] = estimated["missing_charges"]
                 p["recoveries"] = [
                     dict(r)
                     for r in c.execute(
@@ -345,6 +361,16 @@ class StockStore:
                     (row["portfolio_id"],),
                 )
                 self.event(c, row["portfolio_id"], "RECOVERED_UNKNOWN", {"order_id": row["id"]})
+
+    def save_fee_estimate(self, order_id, estimate):
+        with self.db.connect(write=True) as c:
+            row = c.execute("SELECT * FROM stock_orders WHERE id=?", (order_id,)).fetchone()
+            if not row or not valid_estimate({**stock_attempt(dict(row)), "fee_estimate": estimate}):
+                raise PortfolioError("Order fill changed before fee evidence was saved")
+            if row["charges_paise"] is not None:
+                return
+            self.event(c, row["portfolio_id"], "BROKER_FEE_ESTIMATE",
+                       {"order_id": order_id, "estimate": estimate})
 
     def revalue(self, c, pid):
         p = self._portfolio(c, pid)

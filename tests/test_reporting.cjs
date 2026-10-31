@@ -33,3 +33,29 @@ test('fee estimates never appear as final net profit', () => {
   const r = summarize([trade], {t:{buy:{filled_qty:10,fill_price:100,execution_status:'complete',charges:5},sell:{filled_qty:10,fill_price:110,execution_status:'complete',charges:7}}}, {});
   assert.equal(r.net,null);
 });
+
+test('broker-calculated fees produce labeled net and stale fees are rejected',()=>{
+  const {orderFee} = require('../src/upstocks/static/portfolio-pnl.js');
+  const buy={filled_qty:65,fill_price:439.1,execution_status:'complete',estimated_charges:36.60,estimated_charges_qty:65,estimated_charges_notional:2854150};
+  const sell={filled_qty:65,fill_price:543.8,execution_status:'complete',estimated_charges:91.48,estimated_charges_qty:65,estimated_charges_notional:3534700};
+  const total=summarize([trade],{t:{buy,sell}},{});
+  assert.equal(Math.round(total.net*100)/100,6677.42);assert.equal(total.chargesFinal,false);
+  assert.equal(orderFee({...buy,filled_qty:64}).amount,null);
+  assert.equal(orderFee({...buy,fill_price:440}).amount,null);
+  assert.deepEqual(orderFee({...buy,charges:40,charges_source:'operator_statement'}),{amount:40,quality:'final'});
+});
+
+test('live history uses the same saved net fees as the overview',()=>{
+  const {historyRows,historySummary,settled} = require('../src/upstocks/static/portfolio-pnl.js');
+  const orders={qty:65,sold_qty:65,buy_status:'complete',sell_status:'complete',buy_fee_quality:'estimated',sell_fee_quality:'estimated'};
+  const rows=historyRows({live:{
+    'harmonic|2026-10-28|a':{'1:kite':{...orders,buy:439.1,sell:543.8,buy_charges:36.60,sell_charges:91.48}},
+    'harmonic|2026-10-30|b':{'1:kite':{...orders,buy:403.9,sell:349.15,buy_charges:35.64,sell_charges:67.18}}
+  }},{mode:'live',broker:'kite'});
+  const summary=historySummary(rows);
+  assert.equal(rows.length,2);assert.equal(summary.estimatedCharges,2);
+  assert.equal(Math.round(summary.charges*100)/100,230.90);
+  assert.equal(Math.round(summary.net*100)/100,3015.85);
+  assert.equal(rows[0].pnlBasis,'net');assert.equal(rows[0].realCh,false);
+  assert.equal(settled({...orders,buy:100,sell:110,buy_charges:1,sell_charges:1}),false);
+});

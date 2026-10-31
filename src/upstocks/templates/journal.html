@@ -93,9 +93,9 @@
   <details class="performance-detail"><summary>More performance metrics</summary><div class="tiles" id="extraTiles"></div></details>
   <p class="small" id="noteStatus" role="status">Notes autosave.</p>
   <div id="trades"></div>
-<p class="small" data-view-only="live">Closed live trades remain visible while final charges are pending. Gross P&amp;L uses recorded fills; final net P&amp;L requires verified charges. Open, partial and unresolved trades are in Overview → Live.</p>
+<p class="small" data-view-only="live">Net P&amp;L deducts saved charges. Broker-calculated charges are labeled estimated; a reconciled contract note makes them final. When charges are unavailable, gross P&amp;L is shown. Open, partial and unresolved trades are in Overview → Live.</p>
 </main>
-<script src="/static/portfolio-pnl.js?v=20261031-history-fees"></script>
+<script src="/static/portfolio-pnl.js?v=20261031-broker-fees"></script>
 <script>
 const $ = id => document.getElementById(id);
 const LABELS = { ...{{ labels | tojson }}, ema25_vwap: "VWAP + EMA25", ema_pullback: "EMA pullback", smc_ema_combo: "SMC + EMA (1/day)" }, PRESETS = {{ presets | tojson }};
@@ -146,7 +146,7 @@ function render() {
   if (!J) return;
   const R = rows(), summary = UpstocksPnl.historySummary(R);
   const basis = R.some(t=>t.pnlBasis === 'gross') || !isLive() ? 'gross' : 'net';
-  $("historyScope").textContent = isLive() ? `Live ${basis} P&L · charts, result filters and performance metrics use ${basis}. ${basis === "gross" ? "Final charges are pending; closed trades remain included." : "All displayed trades have final charges."} Open positions and unresolved orders are in Overview → Live.` : "Paper results use simulated fills and the quantity saved for each session. Notes belong to the paper journal.";
+  $("historyScope").textContent = isLive() ? `Live ${basis} P&L · charts, result filters and performance metrics use ${basis}. ${basis === "gross" ? "Charges are unavailable for part of this selection; closed trades remain included." : summary.estimatedCharges ? "Net deducts broker-calculated charges; contract notes may adjust the estimate." : "All displayed trades have final charges."} Open positions and unresolved orders are in Overview → Live.` : "Paper results use simulated fills and the quantity saved for each session. Notes belong to the paper journal.";
   const wins = R.filter(t => t.rs > 0), losses = R.filter(t => t.rs <= 0);
   const net = R.reduce((a, t) => a + t.rs, 0), gw = wins.reduce((a, t) => a + t.rs, 0), gl = -losses.reduce((a, t) => a + t.rs, 0);
   const byDay = {}; R.forEach(t => byDay[t.date] = (byDay[t.date] || 0) + t.rs);
@@ -156,7 +156,7 @@ function render() {
   const tile = (k, v, s = "", cls = "") => `<div class="tile"><span>${k}</span><b class="${cls}">${v}</b><small>${s}</small></div>`;
   const gross = summary.gross;
   $("tiles").innerHTML = [
-    isLive() ? tile("Live net P&L", summary.net === null ? "Pending" : money(summary.net), summary.net === null ? `${summary.pendingCharges} trades await final charges` : `${R.length} closed live trades · after final charges`, summary.net === null ? "muted" : summary.net >= 0 ? "up" : "down")
+    isLive() ? tile(summary.estimatedCharges ? "Live net P&L · estimated" : "Live net P&L", summary.net === null ? "Pending" : money(summary.net), summary.net === null ? `${summary.pendingCharges} trades await charges` : `${R.length} closed live trades · ${summary.estimatedCharges ? "broker-calculated charges" : "final charges"}`, summary.net === null ? "muted" : summary.net >= 0 ? "up" : "down")
              : tile("Paper P&L", money(net), `${R.length} trade${R.length===1?"":"s"} · gross, before charges`, net >= 0 ? "up" : "down"),
     tile("Win rate", R.length ? `${Math.round(wins.length / R.length * 100)}%` : "—", `${wins.length} won · ${losses.length} lost`),
     tile("Profit factor", gl > 0 ? (gw / gl).toFixed(2) : wins.length ? "∞" : "—", ""),
@@ -166,7 +166,7 @@ function render() {
   if (sourceMode() === "live") {
     const per = {};   // account-wise: broker + client ID
     R.forEach(t => { const a = per[`${t.broker}|${t.client_id}`] ||= {broker: t.broker, client_id: t.client_id, holder: t.holder, gross:0,value:0,n:0}; a.gross += t.gross; a.value += t.rs; a.n++; });
-    $("brokerTiles").innerHTML = accountTiles(per,basis);
+    $("brokerTiles").innerHTML = accountTiles(per,basis + (summary.estimatedCharges ? " · estimated fees" : ""));
   }
   $("extraTiles").innerHTML = [
     ...(isLive() ? [tile("Max drawdown", money(-dd), "peak to trough", dd ? "down" : "")] : []),
@@ -174,7 +174,7 @@ function render() {
     tile("Best day", best ? money(best[1]) : "—", best ? best[0] : "", best ? (best[1] >= 0 ? "up" : "down") : ""),
     tile("Worst day", worst ? money(worst[1]) : "—", worst ? worst[0] : "", worst ? (worst[1] >= 0 ? "up" : "down") : ""),
   ].join("");
-  $("curveLabel").textContent = isLive() ? `· Live ${basis} P&L, ₹` : "· Paper gross P&L, ₹";
+  $("curveLabel").textContent = isLive() ? `· Live ${basis} P&L${summary.estimatedCharges ? " (estimated fees)" : ""}, ₹` : "· Paper gross P&L, ₹";
   $("equity").setAttribute("aria-label",isLive() ? `Cumulative live ${basis} profit and loss` : "Cumulative paper gross profit and loss");
   lastCurve = curve; drawEquity(curve);
   const per = {}; R.forEach(t => { const s = per[t.preset] ||= { n: 0, w: 0, rs: 0 }; s.n++; s.w += t.rs > 0; s.rs += t.rs; });
@@ -206,7 +206,7 @@ function render() {
           ? `<td><span class="broker-cell">${window.brokerLogo ? brokerLogo(t.broker, 16) : ""}<span>${BROKERS[t.broker] || t.broker}${t.client_id ? `<small class="acc-sub">${esc(holderName(t.holder) || "")} · ${esc(t.client_id)}</small>` : ""}</span></span></td><td>${t.qty}</td>
              <td>₹${fmt(t.buyFill)}</td>
              <td>₹${fmt(t.sellFill)}</td>${status}
-             <td class="${t.gross >= 0 ? "up" : "down"}">${money(t.gross)}</td><td class="${t.realCh ? "down" : "muted"}">${t.realCh ? money(-t.ch) : "Pending"}</td><td class="${t.net === null ? "muted" : t.net >= 0 ? "up" : "down"}"><b>${t.net === null ? "Pending charges" : money(t.net)}</b></td>`
+             <td class="${t.gross >= 0 ? "up" : "down"}">${money(t.gross)}</td><td class="${t.feesAvailable ? "down" : "muted"}">${t.feesAvailable ? money(-t.ch) + (t.realCh ? "" : " (est.)") : "Pending"}</td><td class="${t.net === null ? "muted" : t.net >= 0 ? "up" : "down"}"><b>${t.net === null ? "Pending charges" : money(t.net) + (t.realCh ? "" : " (est.)")}</b></td>`
           : `<td>₹${fmt(t.entry)}</td><td>₹${fmt(t.exit)}</td>${status}<td class="${pc}">${t.pnl >= 0 ? "+" : ""}${fmt(t.pnl)}</td><td class="${pc}">${money(t.rs)}</td>`;
         return `${head}${cells}
           ${!isLive() ? `<td class="note"><input type="text" data-id="${esc(t.id)}" value="${esc(J.notes[t.id] || "")}" aria-label="Note for ${esc(t.symbol)} on ${esc(t.date)}" placeholder="Add a note…"></td>` : ""}</tr>`;

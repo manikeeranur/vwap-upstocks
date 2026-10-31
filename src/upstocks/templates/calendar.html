@@ -89,9 +89,9 @@
     <p class="calendar-legend"><span>Weekend</span><span>Holiday · exchange closed</span><span>Special session · limited hours</span><span>Dates and session times: IST</span></p>
   </div>
   <div class="card" id="detail" hidden></div>
-<p class="small" data-view-only="live">Closed live trades remain visible while final charges are pending. Gross P&amp;L uses recorded fills; final net P&amp;L requires verified charges. Open, partial and unresolved trades are in Overview → Live.</p>
+<p class="small" data-view-only="live">Net P&amp;L deducts saved charges. Broker-calculated charges are labeled estimated; a reconciled contract note makes them final. When charges are unavailable, gross P&amp;L is shown. Open, partial and unresolved trades are in Overview → Live.</p>
 </main>
-<script src="/static/portfolio-pnl.js?v=20261031-history-fees"></script>
+<script src="/static/portfolio-pnl.js?v=20261031-broker-fees"></script>
 <script src="/static/exchange-calendar.js"></script>
 <script>
 const $ = id => document.getElementById(id);
@@ -107,7 +107,7 @@ let cur = new Date(TODAY + "T12:00:00"); cur.setDate(1);
 let J = null, C = null, sel = null, loadVersion = 0, visibleRows = [];
 const dataView = WorkspaceView.bind({onChange:render,descriptions:{
   paper:'Simulated intraday P&L · before charges',
-  live:'Closed live trades · gross until final charges are available'
+  live:'Closed live trades · net after saved charges · estimates labeled'
 }});
 const historyFilters=WorkspaceUI.bindFilters({fields:{q:'history-search',result:'history-result',strategy:'strat'},reset:'clear-history-filters',onChange:render});
 const mode = () => dataView.legacy();   // "paper", "live" or "live:<broker>"
@@ -178,16 +178,16 @@ function render() {
     const per = {};   // account-wise: broker + client ID
     for (let d = 1; d <= last.getDate(); d++) for (const t of dayTrades(iso(new Date(y, m, d))))
       { const k = t.broker+"|"+t.client_id; const a = per[k] ||= {broker:t.broker,client_id:t.client_id,holder:t.holder,gross:0,value:0,n:0}; a.gross += t.gross; a.value += t.rs; a.n++; }
-    $("brokerTiles").innerHTML = accountTiles(per,basis);
+    $("brokerTiles").innerHTML = accountTiles(per,basis + (summary.estimatedCharges ? " · estimated fees" : ""));
   }
   if (mode() !== "paper") {
-    const {gross:g,charges:c,net:finalNet,pendingCharges} = summary, n = visibleRows.length;
+    const {gross:g,charges:c,net:finalNet,pendingCharges,estimatedCharges} = summary, n = visibleRows.length;
     $("tiles").innerHTML = [
       tile(`Gross P&L${mode().includes(":") ? " · " + BROKERS[mode().split(":")[1]] : ""}`, money(g), `${n} closed live ${n === 1 ? "trade" : "trades"} · recorded fills`, g >= 0 ? "up" : "down"),
-      tile("Final charges", c === null ? "Pending" : money(-c), pendingCharges ? `${pendingCharges} ${pendingCharges === 1 ? "trade awaits" : "trades await"} final charges` : "Verified charges", c === null ? "muted" : "down"),
-      tile("Net P&L", finalNet === null ? "Pending" : money(finalNet), finalNet === null ? "Available after final charges" : "After final charges", finalNet === null ? "muted" : finalNet >= 0 ? "up" : "down"),
+      tile(estimatedCharges ? "Charges · estimated" : "Charges", c === null ? "Pending" : money(-c), pendingCharges ? `${pendingCharges} ${pendingCharges === 1 ? "trade awaits" : "trades await"} charges` : estimatedCharges ? "Broker-calculated; contract note is final" : "Verified charges", c === null ? "muted" : "down"),
+      tile(estimatedCharges ? "Net P&L · estimated" : "Net P&L", finalNet === null ? "Pending" : money(finalNet), finalNet === null ? "Available after charges" : estimatedCharges ? "After broker-calculated charges" : "After final charges", finalNet === null ? "muted" : finalNet >= 0 ? "up" : "down"),
       tile("Green days", green, `of ${vals.length} traded days · ${basis}`, "up"),
-      tile("Red days", red, `Calendar amounts · ${basis}`, "down"),
+      tile("Red days", red, `Calendar amounts · ${basis}${estimatedCharges ? " · estimated fees" : ""}`, "down"),
     ].join("");
   } else $("tiles").innerHTML = [
     tile(mode() === "paper" ? "Month paper P&L" : `Month live P&L${mode().includes(":") ? " · " + BROKERS[mode().split(":")[1]] : ""}`, money(net), `${vals.reduce((a, [, v]) => a + v.n, 0)} ${mode() !== "paper" ? "live " : ""}trades · gross${mode() !== "paper" ? " · real fill prices" : ""}`, net >= 0 ? "up" : "down"),
@@ -207,7 +207,7 @@ function render() {
       <span class="n">${d}</span>
       ${schedule.badge ? `<span class="session-badge">${schedule.kind === "weekend" ? `<span class="cal-full">Weekend</span><span class="cal-compact">Closed</span>` : esc(schedule.badge)}</span>` : ""}
       ${["holiday","special","mixed"].includes(schedule.kind) ? `<span class="session-name">${esc(schedule.label)}</span>` : ""}
-      ${v && v.n ? `<span class="pl ${v.rs >= 0 ? "up" : "down"}" style="${a > .45 ? "color:#fff" : ""}">${`<span class="cal-full">${money(v.rs)}</span><span class="cal-compact">${v.rs < 0 ? "−" : v.rs > 0 ? "+" : ""}₹${new Intl.NumberFormat("en-IN", {notation:"compact",maximumFractionDigits:1}).format(Math.abs(v.rs))}</span>`}</span><span class="tc" style="${a > .45 ? "color:#fffc" : ""}">${v.n} trade${v.n > 1 ? "s" : ""}</span><span class="session-badge">${basis}</span>`
+      ${v && v.n ? `<span class="pl ${v.rs >= 0 ? "up" : "down"}" style="${a > .45 ? "color:#fff" : ""}">${`<span class="cal-full">${money(v.rs)}</span><span class="cal-compact">${v.rs < 0 ? "−" : v.rs > 0 ? "+" : ""}₹${new Intl.NumberFormat("en-IN", {notation:"compact",maximumFractionDigits:1}).format(Math.abs(v.rs))}</span>`}</span><span class="tc" style="${a > .45 ? "color:#fffc" : ""}">${v.n} trade${v.n > 1 ? "s" : ""}</span><span class="session-badge">${basis}${summary.estimatedCharges ? " est." : ""}</span>`
         : v ? `<span class="tc" style="margin-top:auto">no trade</span>` : ""}
     </button>`);
   }
@@ -221,12 +221,12 @@ function renderDetail() {
   const sessionNames = {NSE:"NSE equities", NFO:"NSE F&O", BSE:"BSE equities", BFO:"BSE F&O"};
   const marketInfo = schedule.sessions.map(s => `${sessionNames[s.code]}: ${s.kind === "holiday" || s.kind === "weekend" ? "Closed · " : s.kind === "open" || s.kind === "special" ? "Open · " : ""}${esc(s.label)}${s.session ? " · " + esc(s.session) : ""}`).join("<br>");
   $("detail").hidden = false;
-  $("detail").innerHTML = `<h3>${new Date(sel + "T12:00:00").toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" })} · ${ts.length ? `<span class="${net >= 0 ? "up" : "down"}">${money(net)} ${ts[0].pnlBasis || "gross"}</span>` : "No trades"}</h3>
+  $("detail").innerHTML = `<h3>${new Date(sel + "T12:00:00").toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" })} · ${ts.length ? `<span class="${net >= 0 ? "up" : "down"}">${money(net)} ${ts[0].pnlBasis || "gross"}${ts.some(t=>t.feeQuality === "estimated") ? " (est.)" : ""}</span>` : "No trades"}</h3>
     <p class="small muted">${marketInfo}</p>
     <div class="scroll"><table><thead><tr><th>Strategy</th><th>Option</th>${mode() === "paper" ? "<th>Simulated in → out</th><th>Entry</th><th>Exit / mark</th><th>Status</th><th>Paper gross</th>" : "<th>Broker</th><th>Qty</th><th>Buy fill</th><th>Sell fill</th><th>Gross</th><th>Charges</th><th>Live net</th>"}</tr></thead><tbody>${
       ts.map(t => `<tr><td>${esc(LABELS[t.preset] || t.preset)}</td><td>${esc(t.symbol)}</td>${mode() === "paper"
         ? `<td>${ampm(t.entry_time)} → ${t.open ? "Open" : ampm(t.exit_time)}</td><td>₹${fmt(t.entry)}</td><td>₹${fmt(t.exit)}</td><td>${esc(t.open ? "OPEN" : t.status)}</td><td>${money(t.rs)}</td>`
-        : `<td>${esc(BROKERS[t.broker])}${t.client_id ? "<br>"+esc(t.client_id) : ""}</td><td>${t.qty}</td><td>₹${fmt(t.buyFill)}</td><td>₹${fmt(t.sellFill)}</td><td>${money(t.gross)}</td><td>${t.realCh ? money(-t.ch) : "Pending"}</td><td>${t.net === null ? "Pending charges" : money(t.net)}</td>`}</tr>`).join("")
+        : `<td>${esc(BROKERS[t.broker])}${t.client_id ? "<br>"+esc(t.client_id) : ""}</td><td>${t.qty}</td><td>₹${fmt(t.buyFill)}</td><td>₹${fmt(t.sellFill)}</td><td>${money(t.gross)}</td><td>${t.feesAvailable ? money(-t.ch) + (t.realCh ? "" : " (est.)") : "Pending"}</td><td>${t.net === null ? "Pending charges" : money(t.net) + (t.realCh ? "" : " (est.)")}</td>`}</tr>`).join("")
       || `<tr><td class="muted" colspan="${mode() === "paper" ? 7 : 9}">No ${mode() === "paper" ? "paper trades" : "closed live trades"} for this session.</td></tr>`
     }</tbody></table></div>`;
 

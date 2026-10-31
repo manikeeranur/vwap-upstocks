@@ -131,13 +131,13 @@
   </section>
 
   <section class="sec" data-panel="positions">
-    <h2>Today’s positions</h2>
+    <h2>Today’s positions</h2><p class="small muted">Broker-reported positions include manual and strategy activity. These P&amp;L figures are before charges; strategy net P&amp;L is in Overview, Journal and Calendar.</p>
     {{ err("positions") }}
     {% set rows = a.positions.data or [] %}
     {% if a.positions.data is not none %}
     {% if rows %}
     <div class="tbl"><table>
-      <tr><th>Symbol</th><th>Product</th><th class="num">Qty</th><th class="num">Avg</th><th class="num">LTP</th><th class="num">Buy value</th><th class="num">Sell value</th><th class="num">Realised</th><th class="num">Unrealised</th><th class="num">P&amp;L</th></tr>
+      <tr><th>Symbol</th><th>Product</th><th class="num">Qty</th><th class="num">Avg</th><th class="num">LTP</th><th class="num">Buy value</th><th class="num">Sell value</th><th class="num">Realised gross</th><th class="num">Unrealised gross</th><th class="num">Gross P&amp;L</th></tr>
       {% for r in rows %}
       <tr data-account-row data-order-status="{{ (r.status or '')|lower }}"><td><b>{{ r.trading_symbol or r.tradingsymbol }}</b> <span class="muted">{{ r.exchange }}</span></td><td>{{ r.product }}</td><td class="num">{{ r.quantity }}</td>
         <td class="num">{{ money(r.average_price) }}</td><td class="num">{{ money(r.last_price) }}</td><td class="num">{{ money(r.buy_value) }}</td><td class="num">{{ money(r.sell_value) }}</td>

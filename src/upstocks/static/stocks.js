@@ -57,7 +57,7 @@
     el('capital-help').textContent = live ? 'Uses at most this limit, available strategy cash and broker cash, allowing for costs. Profits never raise the limit automatically.' : 'The simulation uses only this capital limit and its own paper cash balance. Profits do not raise your limit automatically.';
     el('holding-heading').textContent = live ? 'Live holding & next action' : 'Paper holding & next action';
     el('orders-heading').textContent = live ? 'Live orders & fills' : 'Paper trades & simulated fills';
-    el('orders-help').textContent = live ? 'Only confirmed broker fills change holdings. Final net results require statement charges.' : 'Simulated entries and exits belong only to this paper portfolio. Costs are simulated.';
+    el('orders-help').textContent = live ? 'Net results deduct saved charges; broker estimates are labeled. Cash retains conservative cost provisions until final charges are reconciled.' : 'Simulated entries and exits belong only to this paper portfolio. Costs are simulated.';
     el('entry-source-help').textContent = live ? 'Follow the current paper holding or a saved tuned backtest to enter during the next verified trading session, using only your usable capital. A saved backtest must be refreshed through the latest completed session. Monthly exits and rotations continue afterward.' : 'Start at the next monthly decision, or use a saved tuned backtest when available. All entries and exits stay in this simulated portfolio.';
     const preview = state.preview;
     if (preview?.status === 'done') el('ranking-preview').textContent = 'Close of ' + preview.ranking_date + ': ' + preview.top.map(r => r.rank + '. ' + r.symbol).join(' · ');
@@ -68,7 +68,7 @@
       ' · Last checked: ' + (p.last_checked ? new Date(p.last_checked).toLocaleString('en-IN',{timeZone:'Asia/Kolkata'}) + ' IST' : 'Awaiting first cycle');
     const reserved = p.orders.filter(o => !['complete','cancelled','rejected'].includes(o.status)).reduce((sum,o) => sum + Math.max(0,o.reserved - o.notional - o.fee_provision),0);
     StableDOM.html(el('portfolio-summary'),'<div>' + (live ? 'Live usable-capital limit' : 'Paper capital limit') + '<b>' + money(p.usable_capital) + '</b></div><div>' + (live ? 'Strategy cash after cost provisions' : 'Simulated cash') + '<b>' +
-      money(p.cash) + (p.cash_shortfall ? ' · shortfall ' + money(p.cash_shortfall) : '') + '</b></div><div>Outstanding order reservation<b>' + money(reserved) + '</b></div><div>' + (!live ? 'Paper realized · simulated costs' : p.net_realized == null ? 'Live realized · provisional costs' : 'Live realized net · statement charges') + '<b>' + money(live ? p.net_realized ?? p.realized : p.realized) + '</b></div>');
+      money(p.cash) + (p.cash_shortfall ? ' · shortfall ' + money(p.cash_shortfall) : '') + '</b></div><div>Outstanding order reservation<b>' + money(reserved) + '</b></div><div>' + (!live ? 'Paper realized · simulated costs' : p.net_realized != null ? 'Live realized net · final charges' : p.estimated_net_realized != null ? 'Live realized net · estimated charges' : 'Live realized net · charges pending') + '<b>' + (live ? (p.net_realized ?? p.estimated_net_realized) == null ? 'Unavailable' : money(p.net_realized ?? p.estimated_net_realized) : money(p.realized)) + '</b></div>');
     if (!dirty) {
       el('usable-capital').value = (p.usable_capital / 100).toFixed(2);
       el('stock-enabled').checked = !!p.enabled;
@@ -82,7 +82,7 @@
     const visibleIssue = value => value === loginError && !state.market_calendar?.login_alerts_required ? '' : value;
     const issue = (p.blocked === loginError && !state.market_calendar?.login_alerts_required ? 'Unresolved orders need verified broker evidence before new entries.' : p.blocked) || visibleIssue(p.last_error) || state.worker.error || (!state.worker.running || state.worker.stale ? 'Automation worker is unavailable; scheduled trading is stopped.' : '');
     el('stock-attention').hidden=!issue; el('stock-attention').textContent=issue;
-    el('stock-plan').textContent = issue || (p.alignment_pending ? 'Current-holding entry is pending · source: ' + p.entry_source + '. Requires a fresh ranking, verified session and entries enabled.' : '') || (p.plan ? p.plan.reason + ' · Decision date ' + p.plan.day : 'Awaiting the first eligible monthly session');
+    el('stock-plan').textContent = issue || visibleIssue(p.fee_error) || (p.alignment_pending ? 'Current-holding entry is pending · source: ' + p.entry_source + '. Requires a fresh ranking, verified session and entries enabled.' : '') || (p.plan ? p.plan.reason + ' · Decision date ' + p.plan.day : 'Awaiting the first eligible monthly session');
     el('stock-plan').setAttribute('role', issue ? 'alert' : 'status');
     const orders=p.orders.filter(o=>WorkspaceUI.matches({search:o.symbol+' '+o.id+' '+(o.broker_id || ''),side:o.side,state:['complete','cancelled','rejected'].includes(o.status)?o.status:'pending',date:WorkspaceUI.dayIST(o.created_at)},orderFilters.get()));
     el('order-filter-summary').textContent=orders.length+' of '+p.orders.length+' orders · Portfolio totals above are not filtered.';

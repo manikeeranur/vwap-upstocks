@@ -6,17 +6,27 @@
     return o.qty > 0 && o.qty === o.sold_qty && terminal.includes(o.buy_status) && terminal.includes(o.sell_status) &&
       Number.isFinite(o.buy) && Number.isFinite(o.sell);
   }
+  function hasFees(o) {
+    return Number.isFinite(o.buy_charges) && Number.isFinite(o.sell_charges);
+  }
   function settled(o) {
-    return closed(o) && Number.isFinite(o.buy_charges) && Number.isFinite(o.sell_charges);
+    return closed(o) && hasFees(o) && !['estimated','missing'].includes(o.buy_fee_quality) && !['estimated','missing'].includes(o.sell_fee_quality);
+  }
+  function orderFee(o) {
+    if (o?.charges_source === 'operator_statement' && Number.isFinite(o.charges)) return {amount:o.charges,quality:'final'};
+    if (Number.isFinite(o?.estimated_charges) && o.estimated_charges_qty === o.filled_qty &&
+        o.estimated_charges_notional === Math.round((o.fill_price || 0)*o.filled_qty*100)) return {amount:o.estimated_charges,quality:'estimated'};
+    return {amount:null,quality:'missing'};
   }
   function historySummary(rows) {
-    const pendingCharges = rows.filter(t => t.mode === 'live' && !t.realCh).length;
+    const pendingCharges = rows.filter(t => t.mode === 'live' && !t.feesAvailable).length;
+    const estimatedCharges = rows.filter(t => t.feeQuality === 'estimated').length;
     const gross = rows.reduce((sum,t) => sum + (t.gross ?? t.rs),0);
     const charges = pendingCharges ? null : rows.reduce((sum,t) => sum + (t.ch ?? 0),0);
-    return {gross,charges,net:charges === null ? null : gross-charges,pendingCharges};
+    return {gross,charges,net:charges === null ? null : gross-charges,pendingCharges,estimatedCharges};
   }
   function summarize(trades, orders, marks) {
-    const totals = {realized:0, valuation:0, closed:0, open:0, pending:0, charges:0, chargesComplete:true, valuationMissing:0, positions:0};
+    const totals = {realized:0, valuation:0, closed:0, open:0, pending:0, charges:0, chargesComplete:true, chargesFinal:true, valuationMissing:0, positions:0};
     for (const trade of trades) {
       const sides = orders[trade.id] || trade.orders || {};
       const buy = sides.buy, sell = sides.sell;
@@ -45,8 +55,10 @@
         if (Number.isFinite(mark)) totals.valuation += remaining * (mark - buy.fill_price);
         else totals.valuationMissing++;
       }
-      if (buy.charges == null || buy.charges_source !== "operator_statement" || (sold && (sell.charges == null || sell.charges_source !== "operator_statement"))) totals.chargesComplete = false;
-      totals.charges += Number(buy.charges || 0) + Number(sell?.charges || 0);
+      const buyFee = orderFee(buy), sellFee = sold ? orderFee(sell) : {amount:0,quality:'final'};
+      if (buyFee.amount === null || sellFee.amount === null) totals.chargesComplete = false;
+      if (buyFee.quality !== 'final' || sellFee.quality !== 'final') totals.chargesFinal = false;
+      totals.charges += (buyFee.amount ?? 0) + (sellFee.amount ?? 0);
     }
     totals.net = totals.chargesComplete && !totals.pending && !totals.open && totals.closed ? totals.realized - totals.charges : null;
     return totals;
@@ -67,10 +79,11 @@
     return rows.sort((a,b)=>(b.buy?.created_at || b.date || '').localeCompare(a.buy?.created_at || a.date || ''));
   }
   function executionSummary(rows) {
-    const total = {realized:0,valuation:0,closed:0,open:0,pending:0,charges:0,chargesComplete:true,valuationMissing:0,positions:0};
+    const total = {realized:0,valuation:0,closed:0,open:0,pending:0,charges:0,chargesComplete:true,chargesFinal:true,valuationMissing:0,positions:0};
     for (const {stats} of rows) {
       for (const k of ['realized','valuation','closed','open','pending','charges','valuationMissing','positions']) total[k] += stats[k] || 0;
       total.chargesComplete &&= stats.chargesComplete;
+      total.chargesFinal &&= stats.chargesFinal;
     }
     total.net = total.closed && total.chargesComplete && !total.pending && !total.open ? total.realized-total.charges : null;
     return total;
@@ -95,21 +108,21 @@
         for (const [account,o] of Object.entries(accounts)) {
           const source = account.split(':')[1];
           if (broker !== 'all' && source !== broker || !closed(o)) continue;
-          const realCh = settled(o), gross = (o.sell-o.buy)*o.qty, ch = realCh ? o.buy_charges+o.sell_charges : null;
+          const realCh = settled(o), feesAvailable = hasFees(o), gross = (o.sell-o.buy)*o.qty, ch = feesAvailable ? o.buy_charges+o.sell_charges : null;
           rows.push({id,preset,date,account,broker:source,symbol:o.symbol || signals[id]?.symbol || 'Instrument unavailable',
             type:signals[id]?.type,qty:o.qty,buyFill:o.buy,sellFill:o.sell,client_id:o.client_id || '',holder:o.holder || '',
-            gross,ch,net:realCh ? gross-ch : null,open:false,status:'FILLED',real:true,realCh,mode:'live'});
+            gross,ch,net:feesAvailable ? gross-ch : null,open:false,status:'FILLED',real:true,realCh,feesAvailable,feeQuality:realCh ? 'final' : feesAvailable ? 'estimated' : 'missing',mode:'live'});
         }
       }
     }
     if (mode === 'live') {
       // Keep one basis across the selection; never add a mixture of gross and net.
-      const basis = rows.some(t => !t.realCh) ? 'gross' : 'net';
+      const basis = rows.some(t => !t.feesAvailable) ? 'gross' : 'net';
       for (const row of rows) { row.pnlBasis = basis; row.rs = basis === 'gross' ? row.gross : row.net; }
     }
     return rows.sort((a,b)=>(a.date+(a.entry_time || '')).localeCompare(b.date+(b.entry_time || '')));
   }
-  const api = {summarize, closed, settled, executionRows, executionSummary, historyRows, historySummary};
+  const api = {summarize, closed, settled, orderFee, executionRows, executionSummary, historyRows, historySummary};
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.UpstocksPnl = api;
 })(typeof window === 'object' ? window : globalThis);
