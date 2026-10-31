@@ -12,7 +12,7 @@
 {% set active = "paper" %}{% include "_nav.html" %}
 <main id="main" tabindex="-1">
   <header class="overview-head">
-    <div><h1>Overview</h1><p class="sub">Intraday strategy workspace. Stocks have their own portfolio page.</p></div>
+    <div><h1>Intraday trading</h1><p class="sub">Intraday strategy workspace. Stocks have their own portfolio page.</p></div>
     <div class="overview-actions"><span class="mode-badge" id="modeBadge">Connecting…</span><button class="btn ghost" type="button" id="pauseEntries" data-view-only="live" hidden>Pause all live entries</button><a href="/journal" class="btn ghost">View journal {{ ui_icon("arrow") }}</a></div>
   </header>
 {% include "_mode_bar.html" %}
@@ -32,6 +32,12 @@
       <div class="metric" data-view-only="paper"><div class="metric-heading"><span class="metric-label">Intraday strategies</span>{{ ui_icon("layers", "metric-icon") }}</div><strong class="metric-value" id="activeStrats">—</strong><small id="activeCaption">Loading available strategies</small></div>
     </section>
     <div id="liveBrokers" class="live-brokers" data-view-only="live"></div>
+    <div class="filter-bar" aria-label="Filter intraday strategies">
+      <label>Strategy<select id="strategy-filter"><option value="">All strategies</option>{% for p in presets %}<option value="{{p}}">{{labels[p]}}</option>{% endfor %}</select></label>
+      <label>Position status<select id="position-filter"><option value="">All statuses</option><option value="open">Open</option><option value="closed">Closed</option><option value="pending">Needs reconciliation · Live</option></select></label>
+      <label class="search-filter">Search<input type="search" id="trade-search" placeholder="Stock, option or strategy" maxlength="100"></label>
+      <button class="btn ghost" type="button" id="clear-trade-filters">Clear filters</button>
+    </div><p class="filter-summary" id="trade-filter-summary" role="status"></p>
     <section class="strategy-region" aria-labelledby="strategy-heading">
       <div class="section-heading"><h2 id="strategy-heading">Strategies</h2><div class="heading-right"><span id="refreshHint" role="status">Market prices · 1s</span><a class="btn ghost settings-btn" href="/session" data-view-only="paper">Scan &amp; replay</a><button class="btn ghost settings-btn" type="button" id="settingsBtn" aria-haspopup="dialog" aria-controls="stratDialog"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg> <span id="settingsLabel">Paper settings</span></button></div></div>
       <div id="strats" class="strategy-list" aria-busy="true"><div class="card loading-card">Loading strategy settings…</div></div>

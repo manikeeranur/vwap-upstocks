@@ -62,7 +62,7 @@
         <label class="search-field">Search<input type="text" id="search" placeholder="Message or request ID" maxlength="200"></label>
         <button class="btn ghost" id="apply" type="submit">Apply filters</button>
       </div>
-      <div class="filter-footer"><label class="check-label"><input type="checkbox" id="include-http">Include HTTP requests</label><p>Times in IST · Export includes the full session</p></div>
+      <div class="filter-footer"><label class="check-label"><input type="checkbox" id="include-http">Include HTTP requests</label><button class="btn ghost" type="button" id="reset-filters">Clear filters</button><p>Session totals and export cover the full day; filters apply to the event stream.</p></div>
     </form>
   </section>
   <p id="error" class="log-error" role="alert" hidden></p>
@@ -109,7 +109,10 @@
     if (append && cursor) params.set('before', cursor);
     try {
       const data = await get('/api/activity?' + params);
-      if (!append) applied = new URLSearchParams(params);
+      if (!append) {
+        applied = new URLSearchParams(params);
+        const url=new URL(location.href);for(const key of ['day','level','component','q','include_http']){const value=params.get(key);if(value)url.searchParams.set(key,value);else url.searchParams.delete(key);}history.replaceState(null,'',url);
+      }
       renderEvents(data.events, append); cursor = data.next_cursor; $('load-footer').hidden = !cursor;
       if (!append) {
         const day = encodeURIComponent(applied.get('day'));
@@ -136,6 +139,14 @@
   $('load-more').addEventListener('click', () => load(true));
   $('component').addEventListener('change', () => { if ($('component').value === 'http') $('include-http').checked = true; });
   $('include-http').addEventListener('change', () => { if (!$('include-http').checked && $('component').value === 'http') $('component').value = ''; });
+  const saved=new URLSearchParams(location.search);
+  for(const [key,id] of [['day','day'],['level','level'],['component','component'],['q','search']]){
+    const value=saved.get(key);if(value===null)continue;const input=$(id);
+    if(input.tagName==='SELECT' && ![...input.options].some(o=>o.value===value))continue;
+    input.value=value;
+  }
+  $('include-http').checked=saved.get('include_http')==='true';
+  $('reset-filters').addEventListener('click',()=>{if(busy)return;$('level').value='';$('component').value='';$('search').value='';$('include-http').checked=false;load();});
   load(); health();
 })();
 </script>

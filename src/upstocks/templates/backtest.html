@@ -51,6 +51,7 @@
       <button class="btn ghost" id="clear" type="button">Clear</button>
       <button class="btn primary" id="export" type="button" disabled>{{ ui_icon("download") }} Export results</button>
     </div>
+    <div class="filter-bar"><label class="search-filter">Find a file or option<input type="search" id="csv-search" placeholder="File name or symbol" maxlength="100"></label><label>Result<select id="csv-status"><option value="">All files</option><option value="TARGET">Target hit</option><option value="SL">Stop-loss</option><option value="open">No hit / incomplete</option><option value="error">Needs attention</option></select></label><button class="btn ghost" type="button" id="clear-csv-filters">Clear filters</button></div><p class="filter-summary" id="csv-count"></p>
     <div id="summary"></div>
     <div class="scroll"><table id="tbl" hidden>
       <thead><tr>
@@ -69,6 +70,16 @@ const $ = id => document.getElementById(id);
 const MON = { JAN: "01", FEB: "02", MAR: "03", APR: "04", MAY: "05", JUN: "06", JUL: "07", AUG: "08", SEP: "09", OCT: "10", NOV: "11", DEC: "12" };
 let files = []; // { id, name, meta, candles:[{t:"YYYY-MM-DD HH:MM", o,h,l,c}], dates:[], entryDate, entryTime, entryPrice, result }
 
+const csvFilters=WorkspaceUI.bindFilters({fields:{q:'csv-search',status:'csv-status'},reset:'clear-csv-filters',onChange:filterCsv});
+function filterCsv(){
+  let count=0;const f=csvFilters.get();
+  for(const row of $('rows').querySelectorAll('[data-file]')){
+    const item=files.find(x=>String(x.id)===row.dataset.file);if(!item)continue;
+    const state=item.error || item.result?.error?'error':['TARGET','SL'].includes(item.result?.result)?item.result.result:'open';
+    row.hidden=!WorkspaceUI.matches({search:item.name+' '+item.meta.label,state},f);count+=!row.hidden;
+  }
+  $('csv-count').textContent=count+' of '+files.length+' files shown · Summary and exports include every uploaded file.';
+}
 // ─── Parsing ──────────────────────────────────────────────────────────────────
 // File name from the Download page: NIFTY_06OCT26_22500_CE_1m_….csv
 function metaFromName(name) {
@@ -176,7 +187,7 @@ function render() {
         <td class="${cls}">${p >= 0 ? "+" : "−"}₹${Math.abs(p * qty).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
         <td class="small">${fmt(r.peak)} (+${fmt(peakPct)}%)</td>`;
     }
-    return `<tr>
+    return `<tr data-file="${f.id}">
       <td>${label}</td><td>${f.meta.expiry ? `<span title="from file name">${f.meta.expiry}</span>` : "—"}</td>
       <td>${dates}</td>
       <td><input type="time" step="60" data-id="${f.id}" data-k="entryTime" value="${f.entryTime}"></td>
@@ -184,6 +195,7 @@ function render() {
       ${cells}
       <td><button class="x" data-del="${f.id}" title="Remove">×</button></td></tr>`;
   }).join("");
+  filterCsv();
   $("export").disabled = !done;
   $("summary").innerHTML = done ? `<div class="summary">
     <div><span class="small">Tested</span><b>${done} / ${files.length}</b></div>

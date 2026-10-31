@@ -172,7 +172,7 @@
         <label>Trend confirmation candles <input type="number" id="index_trend_bars" min="1" step="1"></label>
       </div>
       <div class="rule-checks">
-        <label class="check"><input type="checkbox" id="live"> Scan and enter at live prices</label>
+        <label class="check"><input type="checkbox" id="live"> Simulate entries using current market prices (no orders)</label>
         <label class="check"><input type="checkbox" id="strong_green"> Strong green candle (body larger than wicks)</label>
         <label class="check"><input type="checkbox" id="atm_offsets_only"> ATM strikes within ±150</label>
         <label class="check"><input type="checkbox" id="align_checkpoints"> Align to 5-minute checkpoints</label>
@@ -195,6 +195,7 @@
       <button class="btn primary" id="run" type="button">{{ ui_icon("play") }} Run backtest</button>
     </div>
     <div class="bar" id="bar" hidden><div></div></div>
+    <div class="filter-bar" style="margin-top:20px"><label class="search-filter">Search results<input type="search" id="result-search" placeholder="Symbol, strike or date" maxlength="100"></label><label>Option side<select id="result-side"><option value="">Calls &amp; puts</option><option value="CE">Calls · CE</option><option value="PE">Puts · PE</option></select></label><label>Net result<select id="result-outcome"><option value="">All results</option><option value="profit">Profitable</option><option value="loss">Loss-making</option><option value="flat">Break-even</option></select></label><button class="btn ghost" type="button" id="clear-result-filters">Clear filters</button></div><p id="result-filter-summary" class="filter-summary" role="status"></p>
     <div id="summary"></div>
     <div class="monthly" id="monthly" hidden></div>
     <div class="tblwrap" id="tblwrap" hidden><table class="rt" id="tbl">
@@ -284,10 +285,13 @@ const fmtFull = n => Math.abs(n).toLocaleString("en-IN", { minimumFractionDigits
 const fmtLot = n => { const a = Math.abs(n), sg = n >= 0 ? "+" : "−"; return a >= 100000 ? `${sg}₹${(a / 100000).toFixed(2)}L` : a >= 1000 ? `${sg}₹${(a / 1000).toFixed(1)}K` : `${sg}₹${a.toFixed(0)}`; };
 const tag = (txt, clr, bg = clr + "18", border = clr + "30") => `<span class="tag" style="background:${bg};color:${clr};border:1px solid ${border}">${txt}</span>`;
 
+const resultFilters=WorkspaceUI.bindFilters({fields:{q:'result-search',side:'result-side',result:'result-outcome'},prefix:'result_',reset:'clear-result-filters',onChange:render});
 function render() {
   const lots = parseFloat($("lots").value) || 0, lotSize = parseFloat($("lotsize").value) || 0, qty = lots * lotSize;
   const sorted = [...days].sort((a, b) => a.date.localeCompare(b.date));
-  const trades = sorted.flatMap(d => d.trades).sort((a, b) => (a.date + a.entry_time).localeCompare(b.date + b.entry_time));
+  const allTrades = sorted.flatMap(d => d.trades).sort((a, b) => (a.date + a.entry_time).localeCompare(b.date + b.entry_time));
+  const trades=allTrades.filter(t=>WorkspaceUI.matches({...t,side:t.type,rs:t.pnl*qty-charges(t.entry,t.entry+t.pnl,qty),search:(t.symbol || '')+' '+t.strike+' '+t.date},resultFilters.get()));
+  $('result-filter-summary').textContent=trades.length+' of '+allTrades.length+' trades · Summary and monthly results below follow these filters. Downloads contain the full run.';
   const failed = sorted.filter(d => !d.trades.length && /^error/.test(d.note || ""));
   const noTrade = sorted.filter(d => !d.trades.length && !/^error/.test(d.note || ""));
   // The combined preset mixes SMC and EMA9/26 rows — show them all in the general layout.

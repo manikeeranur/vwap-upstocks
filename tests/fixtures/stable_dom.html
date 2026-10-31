@@ -1,0 +1,29 @@
+<!doctype html><meta charset="utf-8"><title>Stable rendering regression tests</title>
+<h1>Stable rendering regression tests</h1><ul id="results"></ul><div id="fixture"></div>
+<script src="/static/stable-dom.js"></script>
+<script>
+const host=document.getElementById('fixture'),results=document.getElementById('results');
+function check(name,condition){const li=document.createElement('li');li.textContent=(condition?'PASS: ':'FAIL: ')+name;results.append(li);if(!condition)throw new Error(name);}
+const initial='<article data-key="trade"><b>100.00</b><details><summary>Evidence</summary><p>Order details</p></details><input value="saved"></article>';
+StableDOM.html(host,initial);
+const card=host.firstElementChild,input=host.querySelector('input'),details=host.querySelector('details'),price=host.querySelector('b');
+details.open=true;input.focus();input.value='unsaved';input.setSelectionRange(2,4);
+for(let i=0;i<50;i++)StableDOM.html(host,initial.replace('100.00',String(101+i)+'.00'));
+check('50 price refreshes preserve card and price node identities',host.firstElementChild===card && host.querySelector('b')===price);
+check('focused edits and selection survive refresh',document.activeElement===input && input.value==='unsaved' && input.selectionStart===2 && input.selectionEnd===4);
+check('expanded evidence stays open',host.querySelector('details')===details && details.open);
+check('latest price is displayed',price.textContent==='150.00');
+StableDOM.html(host,'<article data-key="new">New order</article>'+initial);
+check('new orders retain existing trade elements',host.querySelector('[data-key="trade"]')===card);
+StableDOM.html(host,initial);
+check('removed orders disappear without replacing the retained trade',host.children.length===1 && host.firstElementChild===card);
+host.innerHTML='<div id="horizontal" style="width:200px;overflow:auto"><div style="width:1000px"><b>Price 1</b></div></div>';
+const scroll=host.firstElementChild;scroll.scrollLeft=300;
+StableDOM.html(host,'<div id="horizontal" style="width:200px;overflow:auto"><div style="width:1000px"><b>Price 2</b></div></div>');
+check('horizontal table scroll survives value updates',host.firstElementChild===scroll && scroll.scrollLeft===300);
+StableDOM.html(host,'<input id="setting" value="1"><input id="enabled" type="checkbox"><select id="choice"><option value="a">A</option><option value="b">B</option></select>');
+host.querySelector('#setting').value='99';host.querySelector('#enabled').checked=true;host.querySelector('#choice').value='b';
+StableDOM.html(host,'<input id="setting" value="2"><input id="enabled" type="checkbox"><select id="choice"><option value="a">A</option><option value="b">B</option></select>');
+check('unfocused form controls reflect saved server values',host.querySelector('#setting').value==='2' && !host.querySelector('#enabled').checked && host.querySelector('#choice').value==='a');
+host.hidden=true;document.title='PASS · 8 stable rendering checks';
+</script>

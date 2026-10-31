@@ -75,6 +75,11 @@
 
     <div class="mnav"><button id="prev" type="button" aria-label="Previous month">‹</button><h2 id="mon"></h2><button id="next" type="button" aria-label="Next month">›</button></div>
   </div>
+  <div class="filter-bar" aria-label="Filter historical trades">
+<label class="search-filter">Search<input type="search" id="history-search" placeholder="Stock or option symbol" maxlength="100"></label>
+<label>Result<select id="history-result"><option value="">All results</option><option value="profit">Profitable</option><option value="loss">Loss-making</option><option value="flat">Break-even</option></select></label>
+<button class="btn ghost" type="button" id="clear-history-filters">Clear filters</button></div>
+<p class="filter-summary">P&amp;L totals follow the selected mode, broker, strategy and filters. Stock portfolio activity is on the Stocks page.</p>
   <p class="page-status" id="pageStatus" role="status">Loading your calendar…</p>
   <p class="small muted" id="calendarStatus" role="status"></p>
   <div class="tiles" id="tiles"></div>
@@ -104,6 +109,7 @@ const dataView = WorkspaceView.bind({onChange:render,descriptions:{
   paper:'Simulated intraday P&L · before charges',
   live:'Closed broker trades · net after final charges'
 }});
+const historyFilters=WorkspaceUI.bindFilters({fields:{q:'history-search',result:'history-result',strategy:'strat'},reset:'clear-history-filters',onChange:render});
 const mode = () => dataView.legacy();   // "paper", "live" or "live:<broker>"
 const BROKERS = { upstox: "Upstox", kite: "Kite", indmoney: "INDmoney" };
 // Paper: every trade at the journal's quantity. Live: only trades a broker bought, at the quantity sent
@@ -149,7 +155,7 @@ async function load() {
 }
 
 function dayTrades(d) {
-  return UpstocksPnl.historyRows(J,{...dataView.get(),strategy:$("strat").value,day:d});
+  return UpstocksPnl.historyRows(J,{...dataView.get(),strategy:$("strat").value,day:d}).filter(t=>WorkspaceUI.matches(t,historyFilters.get()));
 }
 
 function render() {
@@ -231,7 +237,7 @@ function renderDetail() {
 $("cal").addEventListener("click", e => { const d = e.target.closest(".day[data-d]"); if (!d) return; sel = d.dataset.d; render(); $("cal").querySelector(`[data-d="${sel}"]`)?.focus({preventScroll:true}); });
 $("prev").addEventListener("click", () => { cur.setMonth(cur.getMonth() - 1); sel = null; load(); });
 $("next").addEventListener("click", () => { cur.setMonth(cur.getMonth() + 1); sel = null; load(); });
-$("strat").addEventListener("change", render);
+
 
 load();
 </script>

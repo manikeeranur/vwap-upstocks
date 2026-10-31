@@ -10,7 +10,12 @@
 <p>One holding per portfolio. Monthly decisions from completed daily candles.</p></div>
 <a class="btn ghost" href="/momentum">Research &amp; backtests</a></header>
 {% include "_mode_bar.html" %}
+<div data-tabs="stocks" data-default-tab="portfolio">
+<nav class="workspace-sections" role="tablist" aria-label="Stock workspace sections">
+<button type="button" data-tab="portfolio">Portfolio</button><button type="button" data-tab="orders">Orders &amp; fills</button><button type="button" data-tab="settings">Capital &amp; settings</button><button type="button" data-tab="recovery" data-view-only="live">Recovery</button><button type="button" data-tab="activity">Activity</button>
+</nav>
 <div id="stock-error" role="alert" hidden></div>
+<div id="stock-attention" class="page-status error" role="alert" hidden></div>
 <p id="stock-status" role="status">Loading your portfolios…</p>
 <div class="stock-toolbar">
 <select id="portfolio" hidden aria-label="Selected portfolio"><option value="paper">Paper simulation</option><option value="upstox">Live · Upstox</option><option value="kite">Live · Kite</option><option value="indmoney">Live · INDmoney</option></select>
@@ -18,8 +23,8 @@
 <a href="/brokers" data-view-only="live">Broker connections</a>
 </div>
 <section id="portfolio-summary" aria-label="Portfolio summary" class="stock-summary"></section>
-<div class="stock-columns">
-<section class="card"><h2>Capital &amp; controls</h2>
+
+<section class="card" data-panel="settings"><h2>Capital &amp; controls</h2>
 <form id="stock-settings">
 <label for="usable-capital">Usable capital (₹)</label>
 <input id="usable-capital" name="usable_capital" type="number" min="1000" max="100000000" step="0.01" required aria-describedby="capital-help">
@@ -34,19 +39,26 @@
 </form>
 <button id="reconcile-stocks" data-view-only="live" type="button" class="btn ghost">Reconcile &amp; leave entries paused</button>
 </section>
-<section class="card"><h2 id="holding-heading">Paper holding &amp; next action</h2><div id="stock-position"></div><div id="stock-plan"></div>
+<section class="card" data-panel="portfolio"><h2 id="holding-heading">Paper holding &amp; next action</h2><div id="stock-position"></div><div id="stock-plan"></div>
 <p class="mode-summary-note">Sell from 11:00 IST, then buy from 12:00 on the first trading session of the month. A new buy waits for a completed exit.<span data-view-only="live"> Ownership must be reconciled. Live orders use price limits; an unfilled order is shown until resolved.</span></p>
 <p data-view-only="live">Manual holdings are never adopted. Shared-stock activity or an ownership mismatch blocks automation.</p>
 <button id="preview-stocks" type="button" class="btn ghost">Refresh ranking preview</button><div id="ranking-preview" role="status"></div>
-</section></div>
-<section class="card"><h2 id="orders-heading">Paper trades</h2><p id="orders-help">“Submitted” is an acknowledgement. Only confirmed fills change quantity and cash. Costs use conservative provisions until final charges are imported from a reviewed broker statement.</p>
+</section>
+<section class="card" data-panel="orders"><h2 id="orders-heading">Paper trades</h2><p id="orders-help">“Submitted” is an acknowledgement. Only confirmed fills change quantity and cash. Costs use conservative provisions until final charges are imported from a reviewed broker statement.</p>
+<div class="filter-bar" aria-label="Filter stock orders">
+<label class="search-filter">Search<input type="search" id="order-search" placeholder="Stock or order reference" maxlength="100"></label>
+<label>Status<select id="order-status"><option value="">All statuses</option><option value="pending">Pending / unresolved</option><option value="complete">Complete</option><option value="cancelled">Cancelled</option><option value="rejected">Rejected</option></select></label>
+<label>Side<select id="order-side"><option value="">Buy &amp; sell</option><option value="BUY">Buy</option><option value="SELL">Sell</option></select></label>
+<label>Order date · IST<input type="date" id="order-day"></label>
+<button type="button" class="btn ghost" id="clear-order-filters">Clear filters</button></div>
+<p id="order-filter-summary" class="filter-summary" role="status"></p>
 <div class="stock-table" role="region" aria-label="Stock orders" tabindex="0"><table><thead><tr><th>Time</th><th>Side</th><th>Stock</th><th>Filled / ordered</th><th>State</th><th>Limit</th><th>Reference</th></tr></thead><tbody id="stock-orders"></tbody></table></div></section>
-<section class="card" id="execution-recovery" data-view-only="live"><h2>Exit recovery</h2>
+<section class="card" id="execution-recovery" data-panel="recovery" data-view-only="live"><h2>Exit recovery</h2>
 <p>Replace only a confirmed cancelled or rejected exit. The replacement covers the remaining strategy-owned shares or contracts after broker verification. Stock recovery requests expire after seven days; entries stay paused.</p>
 <div id="stock-recoveries" role="status"></div>
 <h3>Intraday exits · selected broker</h3><div id="intraday-recoveries"></div>
 </section>
-<details class="card" data-view-only="live"><summary>Historical fills &amp; final charges</summary>
+<details class="card" data-panel="recovery" data-view-only="live"><summary>Historical fills &amp; final charges</summary>
 <p>Use a broker statement or contract note to reconcile saved strategy orders. <a href="/api/reconciliation/template.csv">Download CSV template</a>. Include the exact client ID, broker order ID, trade date, instrument, quantities, cumulative average fill price and final total charges in rupees. Final statuses: complete, cancelled or rejected. Leave charges blank if unavailable.</p>
 <p>Only existing strategy orders can be matched. Manual trades are excluded. This is operator-verified evidence; check the preview against your broker document before applying. Stock entries remain paused afterward.</p>
 <form id="statement-form">
@@ -56,5 +68,6 @@
 </form>
 <div id="statement-preview" role="status"></div><button id="apply-statement" class="btn primary" hidden>Apply reviewed evidence</button>
 </details>
-<details class="card"><summary>Portfolio activity</summary><ol id="stock-events"></ol></details>
+<section class="card" data-panel="activity"><h2>Portfolio activity</h2><ol id="stock-events"></ol></section>
+</div>
 </main></body></html>

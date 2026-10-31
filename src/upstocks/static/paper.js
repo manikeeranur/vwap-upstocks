@@ -29,6 +29,9 @@ async function api(path, body) {
   return j;
 }
 const dataView = WorkspaceView.bind({onChange:()=>{ if(S) render(); }});
+const tradeFilters = WorkspaceUI.bindFilters({fields:{strategy:'strategy-filter',status:'position-filter',q:'trade-search'},reset:'clear-trade-filters',onChange:()=>{if(S) render();}});
+const matchPaper = (t,p) => WorkspaceUI.matches({...t,preset:p,state:t.open?'open':'closed',search:(t.symbol || '')+' '+(LABELS[p] || p)},tradeFilters.get());
+const matchExecution = r => WorkspaceUI.matches({...r,state:[...(r.stats.pending?['pending']:[]),...(r.stats.open?['open']:r.buy?.filled_qty>0?['closed']:[])],search:r.symbol+' '+(LABELS[r.preset] || r.preset)},tradeFilters.get());
 const liveView = () => dataView.get().mode === 'live';
 const selectedAccounts = () => accounts().filter(a => dataView.get().broker === 'all' || a.broker === dataView.get().broker);
 const executions = () => {
@@ -49,19 +52,19 @@ function renderLiveSummary() {
   $('openValuation').textContent = total.positions ? total.positions + (total.positions === 1 ? ' open position · ' : ' open positions · ') + (total.valuationMissing ? 'current quotes unavailable' : 'current quote estimate') : 'No confirmed open positions';
   $('livePending').textContent = total.pending;
   $('pendingCaption').textContent = total.pending ? 'Unresolved orders · verify with the broker' : 'No unresolved saved orders';
-  $('liveBrokers').innerHTML = selectedAccounts().map(a => {
+  StableDOM.html($('liveBrokers'),selectedAccounts().map(a => {
     const r = UpstocksPnl.executionSummary(rows.filter(x=>x.account === a.id));
     return '<div class="live-broker"><span>'+BROKER_NAMES[a.broker]+'</span><b>'+(r.closed ? money(r.realized) : '—')+'</b><small>gross · '+r.positions+' open · '+r.pending+' unresolved</small></div>';
-  }).join('');
+  }).join(''));
 }
 function liveStrategy(p) {
-  const rows = executions().filter(r=>r.preset === p), summary = UpstocksPnl.executionSummary(rows);
+  const rows = executions().filter(r=>r.preset === p && matchExecution(r)), summary = UpstocksPnl.executionSummary(rows);
   const enabled = selectedAccounts().some(a=>a.live[p]);
   const cards = rows.map(r => {
     const bought = r.buy?.filled_qty || 0, sold = r.sell?.filled_qty || 0;
     const status = r.stats.pending ? 'Needs reconciliation' : r.stats.open ? 'Open position' : bought ? 'Closed position' : 'No confirmed fills';
     const field = (name,value) => '<div><dt>'+name+'</dt><dd>'+value+'</dd></div>';
-    return '<article class="trade-card execution-card"><div class="trade-card-head"><b>'+esc(r.symbol)+'</b><span class="data-tag live">'+BROKER_NAMES[r.broker]+'</span></div>'+
+    return '<article data-key="'+esc(r.account+'|'+r.id)+'" class="trade-card execution-card"><div class="trade-card-head"><b>'+esc(r.symbol)+'</b><span class="data-tag live">'+BROKER_NAMES[r.broker]+'</span></div>'+
       '<p class="mode-summary-note">'+esc(r.date)+' · '+esc(status)+(r.client_id ? ' · '+esc(r.client_id) : '')+'</p><dl>'+
       field('Bought / sold',bought+' / '+sold)+field('Remaining',r.stats.open)+
       field('Buy fill',Number.isFinite(r.buy?.fill_price) ? money(r.buy.fill_price) : 'Unconfirmed')+
@@ -70,8 +73,8 @@ function liveStrategy(p) {
       field('Realized net',r.stats.net != null ? money(r.stats.net) : 'Unavailable')+'</dl>'+
       '<details class="order-evidence"><summary>Order details</summary><p>Buy · '+orderCell(r.buy)+'</p><p>Sell · '+orderCell(r.sell)+'</p></details></article>';
   }).join('');
-  const exits = selectedAccounts().map(a => { const n = openLive(a.id,p); return n ? '<button class="btn ghost sq" type="button" data-sq="'+p+'" data-broker="'+a.broker+'">Close '+n+' live position'+(n===1?'':'s')+' · '+BROKER_NAMES[a.broker]+'</button>' : ''; }).join('');
-  return '<section class="card strat" aria-label="'+esc(LABELS[p] || p)+' live execution"><div class="strategy-top"><div class="strategy-title"><div><h3>'+esc(LABELS[p] || p)+'</h3><p>'+(paperOnly(p) ? 'Paper only · live execution unavailable' : enabled ? 'Live automation enabled' : 'New live entries disabled')+'</p></div></div><div class="strategy-pnl"><span class="pnl-label">Live realized · gross</span><b>'+(summary.closed ? money(summary.realized) : '—')+'</b><small>'+rows.length+' broker trade'+(rows.length===1?'':'s')+'</small></div></div>'+
+  const exits = selectedAccounts().map(a => { const n = openLive(a.id,p); return n ? '<button class="btn ghost sq" type="button" data-sq="'+p+'" data-broker="'+a.broker+'">Close all '+n+' live position'+(n===1?'':'s')+' · '+BROKER_NAMES[a.broker]+'</button>' : ''; }).join('');
+  return '<section data-key="'+esc(p)+'" class="card strat" aria-label="'+esc(LABELS[p] || p)+' live execution"><div class="strategy-top"><div class="strategy-title"><div><h3>'+esc(LABELS[p] || p)+'</h3><p>'+(paperOnly(p) ? 'Paper only · live execution unavailable' : enabled ? 'Live automation enabled' : 'New live entries disabled')+'</p></div></div><div class="strategy-pnl"><span class="pnl-label">Live realized · gross</span><b>'+(summary.closed ? money(summary.realized) : '—')+'</b><small>'+rows.length+' broker trade'+(rows.length===1?'':'s')+'</small></div></div>'+
     (exits ? '<div class="strategy-controls">'+exits+'</div>' : '')+
     (cards ? '<div class="execution-cards">'+cards+'</div>' : '<div class="empty-state"><div><b>No live orders for this selection</b><p>Paper signals are shown in Paper mode.</p></div></div>')+'</section>';
 }
@@ -120,7 +123,7 @@ function updateLiveValues() {
     text(node,node.hasAttribute('data-trade-points') ? `${fmt(m.pnl)}${node.dataset.unit || ''}` : money(m.pnl * m.qty)); color(node,m.pnl);
   }
   for (const node of document.querySelectorAll('[data-strategy-pnl]')) {
-    const pnl = totals[node.dataset.strategyPnl]; text(node,Object.hasOwn(S.view.results || {},node.dataset.strategyPnl) ? money(pnl) : '—'); color(node,pnl);
+    const p=node.dataset.strategyPnl; const pnl=(S.view.results?.[p] || []).filter(t=>matchPaper(t,p)).reduce((sum,t)=>sum+tradeValues(t).pnl*paperLots(p)*lotSize(p),0); text(node,Object.hasOwn(S.view.results || {},node.dataset.strategyPnl) ? money(pnl) : '—'); color(node,pnl);
   }
   if (S.view.day) { text($('totalPnl'),money(total)); color($('totalPnl'),total); }
   renderLiveSummary();
@@ -143,7 +146,7 @@ const peakCell = (price, t, qty) => price == null ? '—' : `<b class="${price >
 function tradeCard(t, qty) {
   const st = t.open ? 'OPEN' : t.status, pc = t.pnl >= 0 ? 'up' : 'down';
   const field = (label,value) => `<div><dt>${label}</dt><dd>${value}</dd></div>`;
-  return `<article class="trade-card"><div class="trade-card-head"><b style="color:${t.type === 'CE' ? 'var(--ce)' : 'var(--pe)'}">${esc(t.symbol)}</b><span class="st ${esc(st)}">${esc(st === 'TIME_EXIT' ? 'TIME EXIT' : st)}</span></div>
+  return `<article class="trade-card" data-key="${esc(t.id)}"><div class="trade-card-head"><b style="color:${t.type === 'CE' ? 'var(--ce)' : 'var(--pe)'}">${esc(t.symbol)}</b><span class="st ${esc(st)}">${esc(st === 'TIME_EXIT' ? 'TIME EXIT' : st)}</span></div>
     <dl>${field('Entry',`${ampm(t.entry_time)} · ₹${fmt(t.entry)}`)}${field(t.open ? 'Last price' : 'Exit',`${t.open ? '' : ampm(t.exit_time) + ' · '}${priceMarkup(t)}`)}${field('Stop-loss', t.sl > 0 ? `₹${fmt(t.sl)}` : 'None (trailing / time exit)')}${field('Target',`₹${fmt(t.target)}`)}${field('Max profit', peakCell(t.peak_high, t, qty))}${field('Max loss', peakCell(t.peak_low, t, qty))}</dl>
     <div class="trade-net"><span data-trade-points="${esc(t.id)}" data-unit=" pts" class="muted">${fmt(t.pnl)} pts</span><b data-trade-pnl="${esc(t.id)}" class="${pc}">${money(t.pnl * qty)}</b></div>
     </article>`;
@@ -176,29 +179,32 @@ function render() {
   $('activeCaption').textContent = 'Paper scanning · 1 simulated lot per trade';
   const errorCount = Object.keys(view.errors || {}).length;
   $('pnlCaption').textContent = errorCount ? `Incomplete scan · ${errorCount} ${errorCount === 1 ? 'error' : 'errors'}` : 'Simulated · before charges';
-  if (!$('strats').contains(document.activeElement)) {
+  {
     // Put trades and errors first; keep idle strategies available without filling the overview.
     const known = executions().map(r=>r.preset);
-    const shown = liveView() ? [...new Set([...shownPresets(),...known])].filter(p=>known.includes(p) || selectedAccounts().some(a=>a.live[p])) : shownPresets().sort((a,b)=>(view.results?.[b]?.length || 0)-(view.results?.[a]?.length || 0));
+    let shown = liveView() ? [...new Set([...shownPresets(),...known])].filter(p=>known.includes(p) || selectedAccounts().some(a=>a.live[p])) : shownPresets().sort((a,b)=>(view.results?.[b]?.length || 0)-(view.results?.[a]?.length || 0));
+    const filter=tradeFilters.get(), filtering=Object.values(filter).some(Boolean);
+    if (filtering) shown=shown.filter(p=>liveView() ? executions().some(r=>r.preset===p && matchExecution(r)) : (view.results?.[p] || []).some(t=>matchPaper(t,p)) || !filter.q && !filter.status && p===filter.strategy);
+    $('trade-filter-summary').textContent = shown.length+(shown.length===1?' strategy':' strategies')+' shown'+(filtering?' · Filters apply to the list; summary totals above cover the full selected mode and broker.':' · Summary totals cover the selected mode and broker.');
     const cards = liveView() ? shown.map(liveStrategy).join('') || '<div class="card empty-state"><div><b>No live strategy orders for this selection</b><p>Use Live trading settings to review automation. Switching this view never enables orders.</p></div></div>' : shown.map(p => { const index = PRESETS.indexOf(p);
-      const cfg = state.config[p], trades = view.results?.[p] || [], err = view.errors?.[p] || view.errors?.scan;
+      const cfg = state.config[p], trades = (view.results?.[p] || []).filter(t=>matchPaper(t,p)), err = view.errors?.[p] || view.errors?.scan;
       const qty = paperLots(p) * lotSize(p), pts = trades.reduce((a,t) => a + t.pnl,0), open = trades.filter(t => t.open).length;
       const rows = trades.map((t,i) => { const st = t.open ? 'OPEN' : t.status, pc = t.pnl >= 0 ? 'up' : 'down';
-        return `<tr><td>${i+1}</td><td>${ampm(t.entry_time)}</td><td><b style="color:${t.type === 'CE' ? 'var(--ce)' : 'var(--pe)'}">${esc(t.symbol)}</b></td><td>₹${fmt(t.entry)}</td><td>₹${fmt(t.sl)}</td><td>₹${fmt(t.target)}</td><td>${peakCell(t.peak_high, t, qty)}</td><td>${peakCell(t.peak_low, t, qty)}</td><td class="st ${esc(st)}">${esc(st === 'TIME_EXIT' ? 'TIME EXIT' : st)}</td><td>${t.open ? '—' : ampm(t.exit_time)}</td><td>${priceMarkup(t)}</td><td data-trade-points="${esc(t.id)}" class="${pc}">${fmt(t.pnl)}</td><td class="${pc}"><b data-trade-pnl="${esc(t.id)}">${money(t.pnl * qty)}</b></td></tr>`;
+        return `<tr data-key="${esc(t.id)}"><td>${i+1}</td><td>${ampm(t.entry_time)}</td><td><b style="color:${t.type === 'CE' ? 'var(--ce)' : 'var(--pe)'}">${esc(t.symbol)}</b></td><td>₹${fmt(t.entry)}</td><td>₹${fmt(t.sl)}</td><td>₹${fmt(t.target)}</td><td>${peakCell(t.peak_high, t, qty)}</td><td>${peakCell(t.peak_low, t, qty)}</td><td class="st ${esc(st)}">${esc(st === 'TIME_EXIT' ? 'TIME EXIT' : st)}</td><td>${t.open ? '—' : ampm(t.exit_time)}</td><td>${priceMarkup(t)}</td><td data-trade-points="${esc(t.id)}" class="${pc}">${fmt(t.pnl)}</td><td class="${pc}"><b data-trade-pnl="${esc(t.id)}">${money(t.pnl * qty)}</b></td></tr>`;
       }).join('');
-      return `<section class="card strat" aria-label="${esc(LABELS[p] || p)}">
+      return `<section class="card strat" data-key="${p}" aria-label="${esc(LABELS[p] || p)}">
         <div class="strategy-top"><div class="strategy-title"><span class="strategy-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="${STRATEGY_ICONS[index]}"/></svg></span><div><h3>${esc(LABELS[p] || p)}</h3><p>${DESCRIPTIONS[p]}</p></div></div><div class="strategy-pnl"><span class="pnl-label">Paper P&amp;L</span><b data-strategy-pnl="${p}" class="${pts >= 0 ? 'up' : 'down'}">${Object.hasOwn(view.results || {},p) ? money(pts * qty) : '—'}</b><small>${trades.length} trade${trades.length===1?'':'s'}${open ? ` · ${open} open` : ''}</small></div></div>
 
         ${err ? `<p class="strategy-error" role="status">${esc(err)}</p>` : ''}
         ${trades.length ? `<div class="scroll trade-scroll" tabindex="0" role="region" aria-label="${esc(LABELS[p] || p)} trades; scroll for more columns"><table><thead><tr><th>#</th><th>Entry</th><th>Option</th><th>Entry ₹</th><th>SL</th><th>Target</th><th>Max profit</th><th>Max loss</th><th>Status</th><th>Exit</th><th>Exit / LTP</th><th>P&amp;L pts</th><th>P&amp;L ₹</th></tr></thead><tbody>${rows}</tbody></table></div><div class="trade-cards">${trades.map(t => tradeCard(t,qty)).join('')}</div>` : `<div class="empty-state"><span class="empty-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/></svg></span><div><b>${!cfg.on ? 'Strategy paused' : err ? 'Market data unavailable' : !Object.hasOwn(view.results || {},p) ? 'No saved scan' : 'Awaiting signal'}</b><p>${!cfg.on ? 'Enable Paper to start tracking signals.' : err ? 'Check the message above and try scanning again.' : !Object.hasOwn(view.results || {},p) ? 'Run a paper scan to view results.' : view.day ? `No trades for ${esc(view.day)}.` : ''}</p></div></div>`}
       </section>`;
     });
-    if (liveView()) $('strats').innerHTML = cards;
+    if (liveView()) StableDOM.html($('strats'),cards);
     else {
       const hasActivity = i => view.results?.[shown[i]]?.length || view.errors?.[shown[i]] || view.errors?.scan;
       const active = cards.filter((_,i)=>hasActivity(i)), idle = cards.filter((_,i)=>!hasActivity(i));
       const expanded = $('strats').querySelector('.idle-strategies')?.open;
-      $('strats').innerHTML = active.join('') + (idle.length ? '<details class="idle-strategies"' + (expanded ? ' open' : '') + '><summary>Strategies without trades ('+idle.length+')</summary><div class="strategy-list">'+idle.join('')+'</div></details>' : '');
+      StableDOM.html($('strats'),active.join('') + (idle.length ? '<details class="idle-strategies"' + (expanded ? ' open' : '') + '><summary>Strategies without trades ('+idle.length+')</summary><div class="strategy-list">'+idle.join('')+'</div></details>' : '') || '<div class="card">No trades match these filters. Clear filters to see all strategies.</div>');
     }
   }
   $('strats').setAttribute('aria-busy','false');
@@ -224,7 +230,7 @@ function renderSettings() {
         return `<td data-label="${n} Live"><div class="set-cell ${a.live[p] ? 'on' : ''}">${brokerLogo(a.broker,20)}<label class="check tog livechk"><input type="checkbox" role="switch" aria-label="${n} live orders for ${esc(LABELS[p] || p)}" data-live="${p}" data-broker="${a.broker}" ${a.live[p] ? 'checked' : ''} ${paperOnly(p) ? 'disabled title="Paper only for now"' : ''}><span class="sw"></span></label>
           <input type="number" class="lots" aria-label="${n} lots for ${esc(LABELS[p] || p)}" title="Lots" data-lots="${p}" data-broker="${a.broker}" min="1" step="1" inputmode="numeric" value="${a.lots[p]}" required>${a.live[p] ? '<span class="live-dot" title="Live orders on">LIVE</span>' : ''}</div></td>`; }).join('')}</tr>`;
   }).join('');
-  $('stratDialogBody').innerHTML = '<div class="set-scroll"><table class="set-table"><thead><tr><th>Strategy</th>' + (liveView() ? '' : '<th>Paper scanning</th>') + head + '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+  StableDOM.html($('stratDialogBody'),'<div class="set-scroll"><table class="set-table"><thead><tr><th>Strategy</th>' + (liveView() ? '' : '<th>Paper scanning</th>') + head + '</tr></thead><tbody>' + rows + '</tbody></table></div>');
 
 }
 

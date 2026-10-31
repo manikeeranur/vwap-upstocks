@@ -34,6 +34,7 @@
       history.replaceState(null,'',url);
       try { sessionStorage.setItem('upstocks.view.v1',JSON.stringify(value)); } catch {}
       document.querySelectorAll('a[href]').forEach(link => {
+        if (link.getAttribute?.('href')?.startsWith('#')) return;
         const target = new URL(link.href,location.href);
         if (target.origin !== location.origin || !['/paper','/stocks','/journal','/calendar'].includes(target.pathname)) return;
         target.searchParams.set('mode',value.mode);

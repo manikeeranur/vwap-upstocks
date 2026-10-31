@@ -73,7 +73,17 @@
   {% macro pnl(v) %}{% if v is number %}<span class="{{ 'up' if v >= 0 else 'down' }}">{{ '+' if v >= 0 else '−' }}₹{{ "{:,.2f}".format(v|abs) }}</span>{% else %}—{% endif %}{% endmacro %}
 
   {% if a and not blocked %}
-  <section class="sec">
+  <div data-tabs="account" data-default-tab="summary">
+  <nav class="workspace-sections" role="tablist" aria-label="Broker account sections">
+  <button type="button" data-tab="summary">Summary</button><button type="button" data-tab="positions">Positions</button><button type="button" data-tab="holdings">Holdings</button><button type="button" data-tab="orders">Orders</button><button type="button" data-tab="trades">Trades &amp; charges</button>
+  </nav>
+  <div class="filter-bar" id="account-filters" hidden>
+    <label class="search-filter">Search broker records<input type="search" id="account-search" placeholder="Symbol, product or order reference" maxlength="100"></label>
+    <label id="account-status-label">Order status<select id="account-status"><option value="">All statuses</option><option value="complete">Complete</option><option value="pending">Pending / unresolved</option><option value="cancelled">Cancelled</option><option value="rejected">Rejected</option></select></label>
+    <button type="button" class="btn ghost" id="clear-account-filters">Clear filters</button>
+  </div><p class="filter-summary" id="account-filter-summary" role="status"></p>
+
+  <section class="sec" data-panel="summary">
     <h2>Profile</h2>
     {{ err("profile") }}
     {% set p = a.profile.data %}
@@ -91,7 +101,7 @@
     {% endif %}
   </section>
 
-  <section class="sec">
+  <section class="sec" data-panel="summary">
     <h2>Funds &amp; margin</h2>
     {{ err("funds") }}
     {% set f = a.funds.data %}
@@ -115,7 +125,7 @@
     {% endif %}
   </section>
 
-  <section class="sec">
+  <section class="sec" data-panel="positions">
     <h2>Today’s positions</h2>
     {{ err("positions") }}
     {% set rows = a.positions.data or [] %}
@@ -124,18 +134,18 @@
     <div class="tbl"><table>
       <tr><th>Symbol</th><th>Product</th><th class="num">Qty</th><th class="num">Avg</th><th class="num">LTP</th><th class="num">Buy value</th><th class="num">Sell value</th><th class="num">Realised</th><th class="num">Unrealised</th><th class="num">P&amp;L</th></tr>
       {% for r in rows %}
-      <tr><td><b>{{ r.trading_symbol or r.tradingsymbol }}</b> <span class="muted">{{ r.exchange }}</span></td><td>{{ r.product }}</td><td class="num">{{ r.quantity }}</td>
+      <tr data-account-row data-order-status="{{ (r.status or '')|lower }}"><td><b>{{ r.trading_symbol or r.tradingsymbol }}</b> <span class="muted">{{ r.exchange }}</span></td><td>{{ r.product }}</td><td class="num">{{ r.quantity }}</td>
         <td class="num">{{ money(r.average_price) }}</td><td class="num">{{ money(r.last_price) }}</td><td class="num">{{ money(r.buy_value) }}</td><td class="num">{{ money(r.sell_value) }}</td>
         <td class="num">{{ pnl(r.realised) }}</td><td class="num">{{ pnl(r.unrealised) }}</td><td class="num"><b>{{ pnl(r.pnl) }}</b></td></tr>
       {% endfor %}
-      <tr><td colspan="9" class="muted">Total</td><td class="num"><b>{{ pnl(rows|map(attribute="pnl")|select("number")|sum) }}</b></td></tr>
+      <tr data-account-total><td colspan="9" class="muted">Total</td><td class="num"><b>{{ pnl(rows|map(attribute="pnl")|select("number")|sum) }}</b></td></tr>
     </table></div>
     {% else %}<p class="muted">No positions today.</p>{% endif %}
     {% endif %}
   </section>
 
 
-  <section class="sec">
+  <section class="sec" data-panel="orders">
     <h2>Today’s orders</h2>
     {{ err("orders") }}
     {% set rows = a.orders.data or [] %}
@@ -144,7 +154,7 @@
     <div class="tbl"><table>
       <tr><th>Time</th><th>Symbol</th><th>Side</th><th>Type</th><th>Product</th><th class="num">Qty</th><th class="num">Filled</th><th class="num">Price</th><th class="num">Trigger</th><th class="num">Avg</th><th>Status</th><th>Message</th></tr>
       {% for r in rows|sort(attribute="order_timestamp", reverse=True) %}
-      <tr><td>{{ (r.order_timestamp or "")[11:19] }}</td><td><b>{{ r.trading_symbol or r.tradingsymbol }}</b></td>
+      <tr data-account-row data-order-status="{{ (r.status or '')|lower }}"><td>{{ (r.order_timestamp or "")[11:19] }}</td><td><b>{{ r.trading_symbol or r.tradingsymbol }}</b></td>
         <td class="{{ 'up' if r.transaction_type == 'BUY' else 'down' }}">{{ r.transaction_type }}</td><td>{{ r.order_type }}</td><td>{{ r.product }}</td>
         <td class="num">{{ r.quantity }}</td><td class="num">{{ r.filled_quantity }}</td><td class="num">{{ money(r.price) }}</td><td class="num">{{ money(r.trigger_price) }}</td><td class="num">{{ money(r.average_price) }}</td>
         <td><b>{{ r.status }}</b></td><td class="muted">{{ r.status_message or "" }}</td></tr>
@@ -154,7 +164,7 @@
     {% endif %}
   </section>
 
-  <section class="sec">
+  <section class="sec" data-panel="trades">
     <h2>Today’s trades</h2>
     {{ err("trades") }}
     {% set rows = a.trades.data or [] %}
@@ -163,7 +173,7 @@
     <div class="tbl"><table>
       <tr><th>Time</th><th>Symbol</th><th>Side</th><th class="num">Qty</th><th class="num">Price</th><th>Product</th><th>Order ID</th><th>Trade ID</th></tr>
       {% for r in rows %}
-      <tr><td>{{ (r.exchange_timestamp or r.order_timestamp or "")[11:19] }}</td><td><b>{{ r.trading_symbol or r.tradingsymbol }}</b></td>
+      <tr data-account-row data-order-status="{{ (r.status or '')|lower }}"><td>{{ (r.exchange_timestamp or r.order_timestamp or "")[11:19] }}</td><td><b>{{ r.trading_symbol or r.tradingsymbol }}</b></td>
         <td class="{{ 'up' if r.transaction_type == 'BUY' else 'down' }}">{{ r.transaction_type }}</td><td class="num">{{ r.quantity }}</td>
         <td class="num">{{ money(r.average_price) }}</td><td>{{ r.product }}</td><td class="muted">{{ r.order_id }}</td><td class="muted">{{ r.trade_id }}</td></tr>
       {% endfor %}
@@ -171,7 +181,7 @@
     {% else %}<p class="muted">No trades today.</p>{% endif %}
     {% endif %}
   </section>
-  <section class="sec">
+  <section class="sec" data-panel="trades">
     <h2>Today’s charges</h2>
     {{ err("charges") }}
     {% set rows = (a.charges.data if a.charges is defined else none) or [] %}
@@ -187,18 +197,18 @@
     <div class="tbl"><table>
       <tr><th>Time</th><th>Symbol</th><th>Side</th><th class="num">Qty</th><th class="num">Avg</th><th class="num">Brokerage</th><th class="num">STT</th><th class="num">Exchange</th><th class="num">SEBI</th><th class="num">Stamp</th><th class="num">GST</th><th class="num">Total</th></tr>
       {% for r in rows %}
-      <tr><td>{{ r.time }}</td><td><b>{{ r.symbol }}</b></td><td class="{{ 'up' if r.side == 'BUY' else 'down' }}">{{ r.side }}</td>
+      <tr data-account-row data-order-status="{{ (r.status or '')|lower }}"><td>{{ r.time }}</td><td><b>{{ r.symbol }}</b></td><td class="{{ 'up' if r.side == 'BUY' else 'down' }}">{{ r.side }}</td>
         <td class="num">{{ r.qty }}</td><td class="num">{{ money(r.price) }}</td><td class="num">{{ money(r.brokerage) }}</td><td class="num">{{ money(r.stt) }}</td>
         <td class="num">{{ money(r.exchange) }}</td><td class="num">{{ money(r.sebi) }}</td><td class="num">{{ money(r.stamp) }}</td><td class="num">{{ money(r.gst) }}</td><td class="num"><b>{{ money(r.total) }}</b></td></tr>
       {% endfor %}
-      <tr><td colspan="5" class="muted">Total</td>{% for k in ["brokerage","stt","exchange","sebi","stamp","gst"] %}<td class="num">{{ money(rows|map(attribute=k)|select("number")|sum) }}</td>{% endfor %}<td class="num"><b>{{ money(total) }}</b></td></tr>
+      <tr data-account-total><td colspan="5" class="muted">Total</td>{% for k in ["brokerage","stt","exchange","sebi","stamp","gst"] %}<td class="num">{{ money(rows|map(attribute=k)|select("number")|sum) }}</td>{% endfor %}<td class="num"><b>{{ money(total) }}</b></td></tr>
     </table></div>
     <p class="muted" style="font-size:12px">{{ a.charges.note ~ " " if a.charges.note is defined else "" }}Estimated by the broker for today; the contract note is final.</p>
     {% else %}<p class="muted">No executed orders today, so no charges.</p>{% endif %}
     {% endif %}
   </section>
 
-  <section class="sec">
+  <section class="sec" data-panel="holdings">
     <h2>Holdings</h2>
     {{ err("holdings") }}
     {% set rows = a.holdings.data or [] %}
@@ -207,18 +217,18 @@
     <div class="tbl"><table>
       <tr><th>Symbol</th><th class="num">Qty</th><th class="num">Avg</th><th class="num">LTP</th><th class="num">Invested</th><th class="num">Current</th><th class="num">P&amp;L</th><th class="num">Day change</th></tr>
       {% for r in rows %}
-      <tr><td><b>{{ r.tradingsymbol or r.trading_symbol }}</b> <span class="muted">{{ r.company_name }}</span></td><td class="num">{{ r.quantity }}</td>
+      <tr data-account-row data-order-status="{{ (r.status or '')|lower }}"><td><b>{{ r.tradingsymbol or r.trading_symbol }}</b> <span class="muted">{{ r.company_name }}</span></td><td class="num">{{ r.quantity }}</td>
         <td class="num">{{ money(r.average_price) }}</td><td class="num">{{ money(r.last_price) }}</td>
         <td class="num">{{ money((r.average_price or 0) * (r.quantity or 0)) }}</td><td class="num">{{ money((r.last_price or 0) * (r.quantity or 0)) }}</td>
         <td class="num"><b>{{ pnl(r.pnl) }}</b></td><td class="num">{{ pnl(r.day_change) }} <span class="muted">{{ "{:+.2f}%".format(r.day_change_percentage) if r.day_change_percentage is number else "" }}</span></td></tr>
       {% endfor %}
-      <tr><td colspan="6" class="muted">Total</td><td class="num"><b>{{ pnl(rows|map(attribute="pnl")|select("number")|sum) }}</b></td><td></td></tr>
+      <tr data-account-total><td colspan="6" class="muted">Total</td><td class="num"><b>{{ pnl(rows|map(attribute="pnl")|select("number")|sum) }}</b></td><td></td></tr>
     </table></div>
     {% else %}<p class="muted">No holdings.</p>{% endif %}
     {% endif %}
   </section>
   {% if a.mf_holdings is defined %}
-  <section class="sec">
+  <section class="sec" data-panel="holdings">
     <h2>Mutual funds</h2>
     {{ err("mf_holdings") }}
     {% set rows = a.mf_holdings.data or [] %}
@@ -231,19 +241,19 @@
       {% for r in rows %}
       {% set inv = (r.average_price or 0) * (r.quantity or 0) %}{% set cur = (r.last_price or 0) * (r.quantity or 0) %}
       {% set t.inv = t.inv + inv %}{% set t.cur = t.cur + cur %}
-      <tr><td><b>{{ r.fund or r.tradingsymbol }}</b></td><td class="muted">{{ r.folio or "" }}</td><td class="num">{{ "{:,.3f}".format(r.quantity) if r.quantity is number else "—" }}</td>
+      <tr data-account-row data-order-status="{{ (r.status or '')|lower }}"><td><b>{{ r.fund or r.tradingsymbol }}</b></td><td class="muted">{{ r.folio or "" }}</td><td class="num">{{ "{:,.3f}".format(r.quantity) if r.quantity is number else "—" }}</td>
         <td class="num">{{ money(r.average_price) }}</td><td class="num">{{ money(r.last_price) }} <span class="muted">{{ r.last_price_date or "" }}</span></td>
         <td class="num">{{ money(inv) }}</td><td class="num">{{ money(cur) }}</td>
         <td class="num"><b>{{ pnl(cur - inv) }}</b></td><td class="num {{ 'up' if cur >= inv else 'down' }}">{{ "{:+.2f}%".format((cur - inv) / inv * 100) if inv else "—" }}</td></tr>
       {% endfor %}
-      <tr><td colspan="5" class="muted">Total</td><td class="num">{{ money(t.inv) }}</td><td class="num">{{ money(t.cur) }}</td>
+      <tr data-account-total><td colspan="5" class="muted">Total</td><td class="num">{{ money(t.inv) }}</td><td class="num">{{ money(t.cur) }}</td>
         <td class="num"><b>{{ pnl(t.cur - t.inv) }}</b></td><td class="num {{ 'up' if t.cur >= t.inv else 'down' }}"><b>{{ "{:+.2f}%".format((t.cur - t.inv) / t.inv * 100) if t.inv else "—" }}</b></td></tr>
     </table></div>
     {% else %}<p class="muted">No mutual fund holdings.</p>{% endif %}
     {% endif %}
   </section>
 
-  <section class="sec">
+  <section class="sec" data-panel="holdings">
     <h2>SIPs</h2>
     {{ err("sips") }}
     {% set rows = a.sips.data or [] %}
@@ -252,21 +262,48 @@
     <div class="tbl"><table>
       <tr><th>Fund</th><th>Status</th><th>Frequency</th><th class="num">Amount</th><th class="num">Done</th><th class="num">Pending</th><th>Next instalment</th><th>Last instalment</th></tr>
       {% for r in rows %}
-      <tr><td><b>{{ r.fund or r.tradingsymbol }}</b></td><td class="{{ 'up' if r.status == 'ACTIVE' else 'muted' }}">{{ r.status }}</td><td>{{ (r.frequency or "")|capitalize }}</td>
+      <tr data-account-row data-order-status="{{ (r.status or '')|lower }}"><td><b>{{ r.fund or r.tradingsymbol }}</b></td><td class="{{ 'up' if r.status == 'ACTIVE' else 'muted' }}">{{ r.status }}</td><td>{{ (r.frequency or "")|capitalize }}</td>
         <td class="num">{{ money(r.instalment_amount) }}</td><td class="num">{{ r.completed_instalments if r.completed_instalments is not none else "—" }}</td>
         <td class="num">{{ r.pending_instalments if r.pending_instalments is not none and r.pending_instalments >= 0 else "—" }}</td>
         <td>{{ (r.next_instalment or "—")[:10] }}</td><td>{{ (r.last_instalment or "—")[:10] }}</td></tr>
       {% endfor %}
       {% set active = rows|selectattr("status", "equalto", "ACTIVE")|list %}
-      <tr><td colspan="3" class="muted">Active SIPs: {{ active|length }}</td><td class="num"><b>{{ money(active|map(attribute="instalment_amount")|select("number")|sum) }}</b></td><td colspan="4" class="muted">per instalment</td></tr>
+      <tr data-account-total><td colspan="3" class="muted">Active SIPs: {{ active|length }}</td><td class="num"><b>{{ money(active|map(attribute="instalment_amount")|select("number")|sum) }}</b></td><td colspan="4" class="muted">per instalment</td></tr>
     </table></div>
     {% else %}<p class="muted">No SIPs.</p>{% endif %}
     {% endif %}
   </section>
   {% else %}
-  <p class="muted" style="font-size:12px;margin-top:16px">Mutual funds and SIPs held in {{ bname }} aren’t available through its trading API, so they don’t appear here.</p>
+  <p data-panel="holdings" class="muted" style="font-size:12px;margin-top:16px">Mutual funds and SIPs held in {{ bname }} aren’t available through its trading API, so they don’t appear here.</p>
   {% endif %}
+  </div>
   {% endif %}
 </main>
-</body>
+<script>
+const accountRoot=document.querySelector('[data-tabs="account"]');
+if(accountRoot){
+  const controls=WorkspaceUI.bindFilters({fields:{q:'account-search',status:'account-status'},prefix:'account_',reset:'clear-account-filters',onChange:filterAccount});
+  function filterAccount(){
+    const section=accountRoot.querySelector('[data-tab][aria-selected=true]')?.dataset.tab || 'summary',filter=controls.get();
+    document.getElementById('account-filters').hidden=section==='summary';
+    document.getElementById('account-status-label').hidden=section!=='orders';
+    const refresh=document.querySelector('.heading-actions a');
+    if(refresh) refresh.href=location.href;
+    for(const link of document.querySelectorAll('.broker-tabs a')){
+      const broker=new URL(link.href).searchParams.get('broker'),url=new URL(location.href);url.searchParams.set('broker',broker);link.href=url;
+    }
+    let total=0,shown=0;
+    for(const panel of accountRoot.querySelectorAll('[data-panel]')){
+      for(const row of panel.querySelectorAll('[data-account-row]')){
+        const status=row.dataset.orderStatus || '',state=status.includes('cancel')?'cancelled':status.includes('reject')?'rejected':status==='complete' || status==='completed'?'complete':'pending';
+        row.hidden=!WorkspaceUI.matches({search:row.textContent,state},{q:filter.q,status:panel.dataset.panel==='orders'?filter.status:''});
+        if(panel.dataset.panel===section){total++;shown+=!row.hidden;}
+      }
+      for(const row of panel.querySelectorAll('[data-account-total]'))row.hidden=!!filter.q || panel.dataset.panel==='orders' && !!filter.status;
+    }
+    document.getElementById('account-filter-summary').textContent=section==='summary'?'Broker-reported balances include manual activity. Strategy capital is managed separately.':shown+' of '+total+' records shown · Account balances are not filtered; table totals are hidden while filtering.';
+  }
+  accountRoot.addEventListener('sectionchange',filterAccount);
+}
+</script></body>
 </html>

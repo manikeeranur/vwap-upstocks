@@ -209,3 +209,28 @@ fixed context labels instead of a misleading mode switch.
 
 Run the reporting and mode regression checks with:
 `node --test tests/test_reporting.cjs tests/test_workspace_views.cjs tests/test_exchange_calendar.cjs`.
+
+## Workspace sections and display filters
+
+Navigation separates Trading, Performance, Research, Accounts, and Data & system.
+Stock portfolios have Portfolio, Orders & fills, Capital & settings, Recovery
+(live only), and Activity sections. Broker accounts have separate summary,
+position, holding, order, and trade views; they include manual broker activity
+and never infer strategy ownership.
+
+Display filters are stored in the page URL. Intraday filters narrow the strategy
+list while summary totals continue to cover the selected mode/broker. Journal
+and Calendar totals follow their history filters. Stock order filters never
+alter portfolio totals. Research pages state whether metrics and exports cover
+the full run. The stock order date filter uses IST.
+
+Polling uses the shared `StableDOM` renderer for intraday cards, stock order
+history/recovery and scan results. Existing keyed elements, expanded details,
+focused fields and horizontal scroll containers survive value updates.
+Prices still update normally; no refresh is replaced by an artificial pause.
+
+Validation:
+- `node --test tests/test_workspace_ui.cjs tests/test_workspace_views.cjs tests/test_reporting.cjs tests/test_exchange_calendar.cjs`
+- Render `tests/fixtures/stable_dom.html` on the isolated local preview origin
+  with `/static/stable-dom.js` available. It runs seven browser assertions,
+  including 50 price updates, retained inputs/details and table scroll.

@@ -60,6 +60,7 @@
 <div class="data-context"><span class="data-tag paper">Paper results</span><span>Simulated signals and historical replay · no broker orders from this page.</span></div>
   <header class="page-heading"><div><h1>Scan &amp; replay</h1><p class="sub">Preview today’s completed candles or replay a past day. Both actions are simulated.</p></div><div class="heading-actions"><a class="btn ghost" href="/paper">Open Overview {{ ui_icon("arrow") }}</a></div></header>
 
+  {% include "_research_nav.html" %}
   <section class="card toolbar" aria-label="Trading session">
     <div class="status" id="status"><span class="status-dot" aria-hidden="true"></span><div><b id="mkt">Checking market hours</b><small id="clock">All times in IST</small></div></div>
     <label class="field">Units per NIFTY lot <input type="number" id="lotsize" readonly aria-readonly="true"></label>
@@ -137,7 +138,7 @@ function render() {
     trades.forEach((t, i) => {
       const st = t.open ? 'OPEN' : t.status, pnl = t.pnl * qty, fee = charges(t.entry, t.exit, qty);
       gross += pnl; fees += fee; count++; if (pnl - fee > 0) won++;
-      rows.push(`<tr class="${i ? '' : 'first'}"><td>${i ? '' : name}</td>
+      rows.push(`<tr data-key="${esc(t.id)}" class="${i ? '' : 'first'}"><td>${i ? '' : name}</td>
         <td><span class="opt ${esc(t.type)}">${esc(t.symbol)}</span></td>
         <td>${ampm(t.entry_time)} · ₹${fmt(t.entry)}</td>
         <td>${t.open ? '<span class="muted">open</span>' : `${ampm(t.exit_time)} · ₹${fmt(t.exit)}`}</td>
@@ -147,7 +148,7 @@ function render() {
     });
   }
   if (count) rows.push(`<tr class="total"><td colspan="7">Total · ${count} ${count === 1 ? 'trade' : 'trades'}</td><td class="num">${signed(gross)}</td><td class="num down">${money(-fees)}</td><td class="num">${signed(gross - fees)}</td></tr>`);
-  $('results').innerHTML = rows.join('') || '<tr><td colspan="10" class="empty">No scan results yet. Scan now or replay a day.</td></tr>';
+  StableDOM.html($('results'),rows.join('') || '<tr><td colspan="10" class="empty">No scan results yet. Scan now or replay a day.</td></tr>');
 
   $('kpis').hidden = !count;
   const paint = (id, v) => { $(id).textContent = money(v); $(id).className = v >= 0 ? 'up' : 'down'; };

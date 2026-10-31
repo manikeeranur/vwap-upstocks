@@ -20,6 +20,7 @@
     render();
   }});
   el('portfolio').value = dataView.get().mode === 'paper' ? 'paper' : dataView.get().broker;
+  const orderFilters=WorkspaceUI.bindFilters({fields:{q:'order-search',status:'order-status',side:'order-side',day:'order-day'},prefix:'orders_',reset:'clear-order-filters',onChange:()=>{if(state) render();}});
   const selected = () => state?.portfolios.find(p => p.broker === el('portfolio').value);
   function error(message) {
     el('stock-error').hidden = !message;
@@ -66,8 +67,8 @@
       ' · ' + (p.enabled ? p.paused || live && state.global_entries_paused ? 'Entries paused; exits continue' : 'Automation enabled' : 'Automation disabled') +
       ' · Last checked: ' + (p.last_checked ? new Date(p.last_checked).toLocaleString('en-IN',{timeZone:'Asia/Kolkata'}) + ' IST' : 'Awaiting first cycle');
     const reserved = p.orders.filter(o => !['complete','cancelled','rejected'].includes(o.status)).reduce((sum,o) => sum + Math.max(0,o.reserved - o.notional - o.fee_provision),0);
-    el('portfolio-summary').innerHTML = '<div>' + (live ? 'Live usable-capital limit' : 'Paper capital limit') + '<b>' + money(p.usable_capital) + '</b></div><div>' + (live ? 'Strategy cash after cost provisions' : 'Simulated cash') + '<b>' +
-      money(p.cash) + (p.cash_shortfall ? ' · shortfall ' + money(p.cash_shortfall) : '') + '</b></div><div>Outstanding order reservation<b>' + money(reserved) + '</b></div><div>' + (!live ? 'Paper realized · simulated costs' : p.net_realized == null ? 'Live realized · provisional costs' : 'Live realized net · statement charges') + '<b>' + money(live ? p.net_realized ?? p.realized : p.realized) + '</b></div>';
+    StableDOM.html(el('portfolio-summary'),'<div>' + (live ? 'Live usable-capital limit' : 'Paper capital limit') + '<b>' + money(p.usable_capital) + '</b></div><div>' + (live ? 'Strategy cash after cost provisions' : 'Simulated cash') + '<b>' +
+      money(p.cash) + (p.cash_shortfall ? ' · shortfall ' + money(p.cash_shortfall) : '') + '</b></div><div>Outstanding order reservation<b>' + money(reserved) + '</b></div><div>' + (!live ? 'Paper realized · simulated costs' : p.net_realized == null ? 'Live realized · provisional costs' : 'Live realized net · statement charges') + '<b>' + money(live ? p.net_realized ?? p.realized : p.realized) + '</b></div>');
     if (!dirty) {
       el('usable-capital').value = (p.usable_capital / 100).toFixed(2);
       el('stock-enabled').checked = !!p.enabled;
@@ -80,15 +81,18 @@
     const loginError = 'Broker login expired. Reconnect this account to reconcile.';
     const visibleIssue = value => value === loginError && !state.market_calendar?.login_alerts_required ? '' : value;
     const issue = (p.blocked === loginError && !state.market_calendar?.login_alerts_required ? 'Unresolved orders need verified broker evidence before new entries.' : p.blocked) || visibleIssue(p.last_error) || state.worker.error || (!state.worker.running || state.worker.stale ? 'Automation worker is unavailable; scheduled trading is stopped.' : '');
+    el('stock-attention').hidden=!issue; el('stock-attention').textContent=issue;
     el('stock-plan').textContent = issue || (p.alignment_pending ? 'Current-holding entry is pending · source: ' + p.entry_source + '. Requires a fresh ranking, verified session and entries enabled.' : '') || (p.plan ? p.plan.reason + ' · Decision date ' + p.plan.day : 'Awaiting the first eligible monthly session');
     el('stock-plan').setAttribute('role', issue ? 'alert' : 'status');
-    el('stock-orders').innerHTML = p.orders.length ? p.orders.slice().reverse().map(o => '<tr><td>' + esc(new Date(o.created_at).toLocaleString('en-IN',{timeZone:'Asia/Kolkata'})) +
+    const orders=p.orders.filter(o=>WorkspaceUI.matches({search:o.symbol+' '+o.id+' '+(o.broker_id || ''),side:o.side,state:['complete','cancelled','rejected'].includes(o.status)?o.status:'pending',date:WorkspaceUI.dayIST(o.created_at)},orderFilters.get()));
+    el('order-filter-summary').textContent=orders.length+' of '+p.orders.length+' orders · Portfolio totals above are not filtered.';
+    StableDOM.html(el('stock-orders'),orders.length ? orders.slice().reverse().map(o => '<tr data-key="'+esc(o.id)+'"><td>' + esc(new Date(o.created_at).toLocaleString('en-IN',{timeZone:'Asia/Kolkata'})) +
       '</td><td>' + esc(o.side) + '</td><td>' + esc(o.symbol) + '</td><td>' + o.filled_qty + ' / ' + o.qty +
       '</td><td>' + esc(o.status) + (o.error ? '<br>' + esc(o.error) : '') + '</td><td>' + money(o.limit_paise) +
       '</td><td><details><summary>Order reference</summary>' + esc(o.id) + '<br>' + esc(live ? o.broker_id || 'Awaiting broker confirmation' : 'Simulated fill') + '</details></td></tr>').join('') :
-      '<tr><td colspan="7">'+(live ? 'No live orders for this broker.' : 'No simulated trades in this paper portfolio.')+'</td></tr>';
-    el('stock-events').innerHTML = p.events.map(e => '<li><b>' + esc(e.kind.replaceAll('_',' ')) + '</b> · ' +
-      esc(new Date(e.created_at).toLocaleString('en-IN',{timeZone:'Asia/Kolkata'})) + '<br>' + esc(eventText(e)) + '</li>').join('');
+      '<tr><td colspan="7">'+(live ? 'No live orders match these filters.' : 'No simulated trades match these filters.')+'</td></tr>');
+    StableDOM.html(el('stock-events'),p.events.map(e => '<li data-key="'+esc(e.id || e.created_at+'|'+e.kind)+'"><b>' + esc(e.kind.replaceAll('_',' ')) + '</b> · ' +
+      esc(new Date(e.created_at).toLocaleString('en-IN',{timeZone:'Asia/Kolkata'})) + '<br>' + esc(eventText(e)) + '</li>').join(''));
     el('save-stock-settings').disabled = saving || !dirty;
     el('reconcile-stocks').disabled = saving || dirty;
     renderRecovery(p);
@@ -148,15 +152,15 @@
     const parents = new Set(p.orders.map(o => o.parent_id).filter(Boolean));
     const eligible = p.orders.filter(o => o.side === 'SELL' && ['cancelled','rejected'].includes(o.status) &&
       p.position?.isin === o.isin && !parents.has(o.id) && !queued.some(r => r.parent_id === o.id));
-    el('stock-recoveries').innerHTML = queued.map(r => '<p>Queued exit · expires ' + esc(new Date(r.expires_at).toLocaleString('en-IN')) +
+    StableDOM.html(el('stock-recoveries'),queued.map(r => '<p data-key="queue:'+esc(r.id)+'">Queued exit · expires ' + esc(new Date(r.expires_at).toLocaleString('en-IN')) +
       ' <button class="btn ghost" data-cancel-recovery="' + esc(r.id) + '">Cancel queued recovery</button></p>').join('') +
-      eligible.map(o => '<p>' + esc(o.symbol) + ' · ' + p.position.qty + ' shares remaining <button class="btn ghost" data-stock-recovery="' + esc(o.id) + '">Review replacement exit</button></p>').join('') ||
-      'No cancelled or rejected stock exit needs a replacement.';
+      eligible.map(o => '<p data-key="stock:'+esc(o.id)+'">' + esc(o.symbol) + ' · ' + p.position.qty + ' shares remaining <button class="btn ghost" data-stock-recovery="' + esc(o.id) + '">Review replacement exit</button></p>').join('') ||
+      'No cancelled or rejected stock exit needs a replacement.');
     const entries = Object.entries(intraday?.state?.orders?.[p.id] || {}).filter(([,s]) =>
       s.buy?.filled_qty > (s.sell?.filled_qty || 0) && ['cancelled','rejected'].includes(s.sell?.execution_status));
-    el('intraday-recoveries').innerHTML = entries.map(([tid,s]) => '<p>' + esc(s.buy.broker_symbol || s.buy.symbol) +
+    StableDOM.html(el('intraday-recoveries'),entries.map(([tid,s]) => '<p data-key="intraday:'+esc(tid)+'">' + esc(s.buy.broker_symbol || s.buy.symbol) +
       ' · ' + (s.buy.filled_qty - (s.sell.filled_qty || 0)) + ' units remaining <button class="btn ghost" data-intraday-recovery="' + esc(tid) +
-      '" data-order="' + esc(s.sell.order_id) + '">Review replacement exit</button></p>').join('') || 'No cancelled or rejected intraday exit needs a replacement.';
+      '" data-order="' + esc(s.sell.order_id) + '">Review replacement exit</button></p>').join('') || 'No cancelled or rejected intraday exit needs a replacement.');
     for (const b of el('execution-recovery').querySelectorAll('button')) b.disabled = saving || dirty;
     el('preview-statement').disabled = saving || dirty || p.broker === 'paper';
   }

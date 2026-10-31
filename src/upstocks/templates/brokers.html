@@ -44,15 +44,17 @@
 <main id="main" tabindex="-1">
 <div class="data-context"><span class="data-tag live">Live · connections</span><span>Connect broker accounts here. Trading is controlled separately in each strategy.</span></div>
   <header class="page-heading"><div><h1>My brokers</h1><p class="sub">Broker keys and today's login. Live orders go only to brokers logged in today.</p></div></header>
+  <div class="filter-bar"><label>Broker<select id="broker-filter"><option value="">All brokers</option><option value="upstox">Upstox</option><option value="kite">Kite</option><option value="indmoney">INDmoney</option></select></label><label>Connection<select id="connection-filter"><option value="">All connections</option><option value="connected">Connected</option><option value="disconnected">Not connected</option></select></label><button type="button" class="btn ghost" id="clear-broker-filters">Clear filters</button></div>
+  <p class="filter-summary" id="broker-filter-summary" role="status"></p>
   <div id="flash" role="status"></div>
   <div class="broker-grid" id="grid"><div class="card broker">Loading…</div></div>
 
-  <section class="card sec">
-    <h2>Telegram morning reminder</h2>
+  <details class="card sec">
+    <summary>Login reminders</summary>
     <p class="meta" style="margin:0 0 12px">On trading weekdays (excluding exchange holidays) at 08:30, 08:45, 09:00 and 09:10 you get one-tap login links if a broker with Live ON isn't logged in yet, and a final warning at 09:15. At 08:30 Upstox also sends an Approve request to your Upstox app. No login reminders are sent on weekends, including special weekend sessions. Find your chat ID by messaging <b>@userinfobot</b> on Telegram, and start a chat with this app's bot first.</p>
     <form class="tg" id="tg"><label>Telegram chat ID <input name="chat_id" inputmode="numeric" pattern="-?[0-9]*" placeholder="e.g. 123456789"></label><button class="btn primary" type="submit">Save</button></form>
     <p class="meta" id="tgState"></p>
-  </section>
+  </details>
 
   <details class="card sec">
     <summary>One-time setup in your broker's developer console</summary>
@@ -70,6 +72,14 @@ const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const NAMES = {upstox:'Upstox', kite:'Kite (Zerodha)', indmoney:'INDmoney (INDstocks)'};
 const editing = new Set(); let last = null;
+const brokerFilters=WorkspaceUI.bindFilters({fields:{broker:'broker-filter',status:'connection-filter'},prefix:'connections_',reset:'clear-broker-filters',onChange:filterBrokers});
+function filterBrokers(){
+  const f=brokerFilters.get();let shown=0;
+  document.querySelectorAll('[data-broker-card]').forEach(card=>{const b=card.dataset.brokerCard,connected=last?.brokers[b]?.logged_in;
+    card.hidden=!!(f.broker && f.broker!==b || f.status && (f.status==='connected')!==!!connected);shown+=!card.hidden;
+  });
+  $('broker-filter-summary').textContent=shown+(shown===1?' connection':' connections')+' shown · Connecting an account does not enable trading.';
+}
 const when = iso => iso ? new Date(iso).toLocaleString('en-IN',{timeZone:'Asia/Kolkata',day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}) + ' IST' : '—';
 async function api(path, body) {
   const r = await appFetch(path, body === undefined ? {} : {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
@@ -86,7 +96,7 @@ function profileCard(p) {
 // INDstocks has no login page: paste the day's token, or generate one from MPIN + authenticator code.
 function indCard(x, s) {
   const b = 'indmoney';
-  return `<section class="card broker" id="indmoney" aria-label="${NAMES[b]}">
+  return `<section class="card broker" id="indmoney" data-broker-card="indmoney" aria-label="${NAMES[b]}">
       <div class="broker-head"><h2>${brokerLogo(b,26)}${NAMES[b]}</h2><span class="status ${x.logged_in ? 'ok' : s.market_calendar?.login_alerts_required ? 'bad' : ''}">${x.logged_in ? 'Logged in today' : 'Not logged in'}</span></div>
       ${profileCard(x.profile)}
       <form data-indtoken>
@@ -111,7 +121,7 @@ function indCard(x, s) {
 function render(s) {
   last = s;
   $('grid').innerHTML = Object.entries(s.brokers).map(([b,x]) => b === 'indmoney' ? indCard(x, s) : `
-    <section class="card broker" aria-label="${NAMES[b]}">
+    <section class="card broker" data-broker-card="${b}" aria-label="${NAMES[b]}">
       <div class="broker-head"><h2>${brokerLogo(b,26)}${NAMES[b]}</h2><span class="status ${x.logged_in ? 'ok' : x.has_key && s.market_calendar?.login_alerts_required ? 'bad' : ''}">${x.logged_in ? 'Logged in today' : x.has_key ? 'Not logged in' : 'Not set up'}</span></div>
       ${profileCard(x.profile)}
       ${x.has_key && x.has_secret && !editing.has(b) ? `<div class="saved-keys"><div><span>API key</span><b>******</b></div><div><span>API secret</span><b>******</b></div><button class="btn ghost" type="button" data-edit="${b}">Change keys</button></div>` : `<form data-keys="${b}">
@@ -125,6 +135,7 @@ function render(s) {
         ${b === 'upstox' ? `<button class="btn ghost" type="button" data-approve ${x.has_key && x.has_secret ? '' : 'disabled'}>Send approval to my Upstox app</button>` : ''}
       </div>
     </section>`).join('');
+  filterBrokers();
   $('tgState').textContent = !s.telegram_bot ? 'Telegram bot is not configured on this server yet.' : s.telegram ? 'Reminders are on for your saved chat.' : 'No chat saved — reminders are off.';
 }
 async function load() { try { render(await api('/api/brokers')); } catch (e) { notifyUI(e.message, true); } }

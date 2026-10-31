@@ -66,6 +66,7 @@
   <div class="head">
     <span style="flex:1"></span>
     <div class="filters">
+      <label>Range<select id="date-range"><option value="custom">Custom dates</option><option value="today">Today</option><option value="month" selected>This month</option><option value="30d">Last 30 days</option><option value="year">This year</option></select></label>
       <label>From <input type="date" id="from"></label>
       <label>To <input type="date" id="to" value="{{ today }}"></label>
       <label>Strategy <select id="strat"><option value="">All strategies</option>
@@ -74,6 +75,11 @@
     </div>
   </div>
 
+  <div class="filter-bar" aria-label="Filter historical trades">
+<label class="search-filter">Search<input type="search" id="history-search" placeholder="Stock or option symbol" maxlength="100"></label>
+<label>Result<select id="history-result"><option value="">All results</option><option value="profit">Profitable</option><option value="loss">Loss-making</option><option value="flat">Break-even</option></select></label>
+<button class="btn ghost" type="button" id="clear-history-filters">Clear filters</button></div>
+<p class="filter-summary">P&amp;L totals follow the selected mode, broker, strategy and filters. Stock portfolio activity is on the Stocks page.</p>
   <p class="page-status" id="pageStatus" role="status">Loading your journal…</p>
   <div class="tiles" id="tiles"></div>
   <div class="broker-tiles" id="brokerTiles" hidden></div>
@@ -111,6 +117,7 @@ const dataView = WorkspaceView.bind({onChange:render,descriptions:{
   paper:'Simulated intraday trades · recorded paper quantities',
   live:'Closed broker trades with final charges · strategy orders only'
 }});
+const historyFilters=WorkspaceUI.bindFilters({fields:{q:'history-search',result:'history-result',strategy:'strat'},reset:'clear-history-filters',onChange:render});
 const sourceMode = () => dataView.legacy();
 const isLive = () => dataView.get().mode === 'live';
 
@@ -132,7 +139,7 @@ async function load() {
 }
 
 function rows() {
-  return UpstocksPnl.historyRows(J,{...dataView.get(),strategy:$("strat").value});
+  return UpstocksPnl.historyRows(J,{...dataView.get(),strategy:$("strat").value}).filter(t=>WorkspaceUI.matches(t,historyFilters.get()));
 }
 
 function render() {
@@ -175,7 +182,7 @@ function render() {
     || `<tr><td class="muted" colspan="4">No trades in this range.</td></tr>`}</tbody>`;
   $("noteStatus").hidden = isLive() || !R.length;
   if (!R.length) {
-    $("trades").innerHTML = `<div class="card journal-empty"><span class="upload-icon">{{ ui_icon("trades") }}</span><h2>No ${isLive() ? "settled live" : "paper"} trades in this range</h2><p>${isLive() ? "Open positions and unverified fills are available in Overview → Live." : "Try another date range or strategy."}</p></div>`;
+    $("trades").innerHTML = `<div class="card journal-empty"><span class="upload-icon">{{ ui_icon("trades") }}</span><h2>No ${isLive() ? "settled live" : "paper"} trades match these filters</h2><p>${isLive() ? "Open positions and unverified fills are available in Overview → Live." : "Try another date range or strategy."}</p></div>`;
     return;
   }
   // One table per strategy (in the menu's order), newest trade first.
@@ -221,8 +228,12 @@ function drawEquity(c) {
 }
 
 
-["from", "to"].forEach(id => $(id).addEventListener("change", load));
-$("strat").addEventListener("change", render);
+const savedRange=new URLSearchParams(location.search);
+for(const id of ['from','to']) if(/^\d{4}-\d{2}-\d{2}$/.test(savedRange.get(id) || '')) {$(id).value=savedRange.get(id);$('date-range').value='custom';}
+function rangeChanged(){const url=new URL(location.href);for(const id of ['from','to'])url.searchParams.set(id,$(id).value);history.replaceState(null,'',url);load();}
+["from","to"].forEach(id=>$(id).addEventListener("change",()=>{$('date-range').value='custom';rangeChanged();}));
+$('date-range').addEventListener('change',()=>{const range=WorkspaceUI.dateRange($('date-range').value,"{{ today }}");if(range){$('from').value=range.from;$('to').value=range.to;rangeChanged();}});
+
 let noteT = {}, noteVersion = {}, pendingNotes = new Set(), failedNotes = new Set(), noteQueues = {};
 function noteFeedback() {
   $("noteStatus").textContent = failedNotes.size ? "Some notes could not be saved. Edit those notes to retry." : pendingNotes.size ? "Saving notes…" : "All notes saved.";

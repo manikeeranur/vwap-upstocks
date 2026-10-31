@@ -1,0 +1,27 @@
+
+html{scrollbar-gutter:stable}
+.workspace-sections{display:flex;gap:4px;overflow-x:auto;border-bottom:1px solid var(--border);margin:12px 0 22px;padding-bottom:8px}
+.workspace-sections button{flex:none;border:0;border-radius:7px;background:transparent;color:var(--muted);font:500 13px var(--font);padding:10px 16px;min-height:42px}
+.workspace-sections button[aria-selected=true]{background:var(--accent-soft);color:var(--accent)}
+.filter-bar{display:flex;align-items:end;gap:12px;flex-wrap:wrap;padding:16px;background:var(--card);border:1px solid var(--border);border-radius:10px;margin:0 0 16px}
+.filter-bar label{flex:1;min-width:140px}.filter-bar label.search-filter{flex:2;min-width:180px}
+.filter-bar input[type=search]{width:100%;min-height:40px;background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:7px;padding:9px 12px}
+.filter-summary{font-size:12px;color:var(--muted);margin:0 0 16px;min-height:1.55em}
+.filter-bar .btn{flex:none}.filter-bar .date-shortcuts{display:flex;gap:6px;flex-wrap:wrap}
+.section-intro{font-size:12px;color:var(--muted);margin:0 0 18px}
+body .nav-label{font-weight:600;letter-spacing:.6px;text-transform:uppercase;font-size:10px}
+.menu-section{margin-top:18px}.menu-section:first-child{margin-top:0}.menu-section .nav-label{margin-top:0}
+.header-date{min-width:205px;text-align:right;font-variant-numeric:tabular-nums}
+.metric-value,.strategy-pnl b,.live-broker b{font-variant-numeric:tabular-nums}
+#refreshHint{display:inline-block;min-width:150px;text-align:right}
+.strategy-title{min-width:0}.strategy-pnl{min-width:120px}
+.trade-card dl dd,.metric-value{line-height:1.35}
+body .filter-bar select{width:100%}
+[data-tabs] [data-panel]{scroll-margin-top:90px}
+@media(max-width:650px){.filter-bar{gap:12px;padding:14px}.filter-bar label{flex:1 1 calc(50% - 12px);min-width:0}.filter-bar label.search-filter{flex-basis:100%;min-width:0}.filter-bar input[type=search]{font-size:16px;min-height:44px}.workspace-sections button{padding:10px 12px;min-height:44px}.filter-summary{font-size:11px}#refreshHint{min-width:0;text-align:left}.workspace-sections{margin-bottom:18px}}
+
+@media(prefers-color-scheme:dark){.view-switch button[aria-pressed=true]{color:#b5c3ff}.view-switch button[data-view-mode=live][aria-pressed=true],.mode-badge.live{color:#f0be7c}.data-tag{background:#26304e;color:#c3ceff}.data-tag.live{background:#42311e;color:#f0be7c}}
+.workspace-grid>.filter-bar{margin-bottom:0}.workspace-grid>.filter-summary{margin-top:-12px;margin-bottom:0}
+
+.workspace-sections{scrollbar-width:thin}
+@media(max-width:650px){.workspace-sections{flex-wrap:wrap;overflow:visible}.workspace-sections button{flex:1 1 auto;font-size:12px;padding:9px 10px}.view-bar{gap:10px;padding:12px;margin-bottom:16px}}
