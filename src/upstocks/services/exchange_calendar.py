@@ -5,7 +5,7 @@ This metadata never infers fills or enables special-session trading.
 
 import asyncio
 from calendar import monthrange
-from datetime import date, datetime
+from datetime import date, datetime, time as clock_time, timedelta
 import json
 import logging
 import sqlite3
@@ -185,6 +185,35 @@ class ExchangeCalendar:
             "login_alerts_required": not weekend
             and any(exchanges[x]["kind"] in ("open", "special") for x in EXCHANGES),
             "checked_at": snapshot["checked_at"] if snapshot else None,
+        }
+
+    def intraday_session(self, now: datetime) -> Record:
+        """Presentation session: roll at 08:30 IST only on exchange trading days."""
+        now = now.astimezone(upstox.IST)
+        today = now.date()
+        cutoff = datetime.combine(today, clock_time(8, 30), upstox.IST)
+
+        def trading_day(start: date, step: int):
+            candidate = start
+            for _ in range(370):
+                info = self.day(candidate)
+                if not info["verified"]:
+                    return None
+                if any(info["exchanges"][code]["kind"] in ("open", "special") for code in ("NFO", "BFO")):
+                    return candidate
+                candidate += timedelta(days=step)
+            return None
+
+        day = trading_day(today if now >= cutoff else today - timedelta(days=1), -1)
+        following = trading_day(today if now < cutoff else today + timedelta(days=1), 1)
+        return {
+            "day": day.isoformat() if day else None,
+            "today": today.isoformat(),
+            "phase": "current" if day == today else "previous" if day else "unavailable",
+            "server_now": now.isoformat(),
+            "next_reset_at": datetime.combine(following, clock_time(8, 30), upstox.IST).isoformat() if following else None,
+            "reset_time": "08:30",
+            "timezone": "Asia/Kolkata",
         }
 
     def month(self, year: int, month: int) -> Record:

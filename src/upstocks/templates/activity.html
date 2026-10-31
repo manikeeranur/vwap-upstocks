@@ -1,159 +1,76 @@
 <!doctype html>
 {% from "_loading.html" import skeleton %}
+{% from "_icons.html" import ui_icon %}
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>upstocks — activity &amp; logs</title>
-{% from "_icons.html" import ui_icon %}
 {% include "_style.html" %}
-<style>
-.heading-actions { flex-wrap:wrap; gap:10px; }
-.system-status { display:flex; flex-wrap:wrap; gap:10px 22px; padding:14px 18px; border:1px solid var(--border); background:var(--card); border-radius:9px; margin-bottom:24px; color:var(--muted); font-size:11px; }
-.system-status span { display:inline-flex; align-items:center; gap:7px; }
-.status-dot { width:6px; height:6px; border-radius:50%; background:var(--ok); } .system-status.warn .status-dot { background:var(--pe); }
-.session-metrics { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:16px; margin-bottom:24px; }
-.session-metric { border:1px solid var(--border); border-radius:10px; padding:18px 20px; background:var(--card); }
-.session-metric span { display:block; color:var(--muted); font-size:11px; }
-.session-metric strong { display:block; margin-top:9px; font-size:25px; font-weight:600; letter-spacing:-.7px; }
-.log-filters { display:grid; grid-template-columns:160px 140px 150px minmax(160px,1fr) auto; gap:14px; align-items:end; }
-.filter-footer { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:16px; padding-top:16px; border-top:1px solid var(--border); }
-.check-label { flex-direction:row; align-items:center; gap:8px; font-size:11px; color:var(--muted); }
-.check-label input { accent-color:var(--accent); }
-.filter-footer p { margin:0; color:var(--muted); font-size:11px; }
-.event-panel { margin-top:24px; border:1px solid var(--border); border-radius:12px; background:var(--card); overflow:hidden; }
-.event-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:18px 20px; border-bottom:1px solid var(--border); }
-.event-heading h2 { font-size:13px; margin:0; }.event-heading span { color:var(--muted); font-size:11px; }
-.event { display:grid; grid-template-columns:92px 72px minmax(0,1fr); gap:16px; padding:17px 20px; border-bottom:1px solid var(--border); }
-.event:last-child { border-bottom:0; }.event time { color:var(--muted); font:11px/1.7 var(--mono); }
-.event-level { align-self:start; justify-self:start; padding:2px 6px; border:1px solid var(--border); border-radius:5px; font-size:9px; font-weight:600; color:var(--muted); }
-.event-level.WARNING { color:#a16207; background:#fefce8; border-color:#fef08a; }
-.event-level.ERROR,.event-level.CRITICAL { color:var(--pe); border-color:color-mix(in srgb,var(--pe) 25%,var(--border)); background:color-mix(in srgb,var(--pe) 5%,var(--card)); }
-.event-message { margin:0; overflow-wrap:anywhere; font-size:12px; }.event-meta { color:var(--muted); font-size:10px; margin-top:5px; }
-.event details { margin-top:9px; font-size:11px; }.event summary { color:var(--muted); cursor:pointer; width:fit-content; }
-.event pre { white-space:pre-wrap; overflow-wrap:anywhere; max-height:320px; overflow:auto; padding:12px; border-radius:6px; background:var(--surface); border:1px solid var(--border); font:10px/1.65 var(--mono); }
-.event-empty { padding:52px 20px; text-align:center; color:var(--muted); }.event-empty strong { display:block; color:var(--text); font-size:13px; font-weight:500; }.event-empty p { margin:6px 0 0; font-size:11px; }
-.event-footer { padding:14px 20px; text-align:center; border-top:1px solid var(--border); }
-.log-error { color:var(--pe); font-size:12px; margin:16px 0 0; }
-@media(max-width:1200px) { .log-filters { grid-template-columns:repeat(3,minmax(0,1fr)); }.search-field { grid-column:1/3; } }
-@media(max-width:650px) { .page-heading { align-items:flex-start; flex-direction:column; gap:16px; }.session-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }.session-metric { padding:15px; }.log-filters { grid-template-columns:repeat(2,minmax(0,1fr)); }.search-field { grid-column:auto; }.log-filters .btn { grid-column:1/-1; }.filter-footer { align-items:flex-start; flex-direction:column; }.event { grid-template-columns:75px minmax(0,1fr); gap:8px 12px; padding:16px; }.event-level { grid-column:2; }.event-body { grid-column:1/-1; }.event-heading { padding:16px; }.event-heading span { font-size:10px; } }
-</style>
+<link rel="stylesheet" href="/static/activity.css?v=20261031-activity-8">
 </head>
-<body>
+<body class="activity-layout">
 {% set active = 'activity' %}{% include "_nav.html" %}
-<main id="main">
-<div class="data-context"><span class="data-tag system">System activity</span><span>Operational records across paper, live execution and research. Use Source to filter.</span></div>
-  <div class="page-heading">
-    <div><h1>Activity &amp; logs</h1><p class="sub">A clear record of your trading workspace.</p></div>
-    <div class="heading-actions"><button class="btn ghost" type="button" id="refresh">{{ ui_icon('refresh') }} Refresh</button><a class="btn" id="export" href="/api/activity/session.zip?day={{ today }}">{{ ui_icon('download') }} Export session</a></div>
+<main id="main" class="activity-page" data-today="{{ today }}">
+  <div class="page-heading activity-heading">
+    <div><h1>Activity &amp; logs</h1><p class="sub">Search and inspect events across your workspace.</p></div>
+    <div class="heading-actions">
+      <button class="btn ghost" type="button" id="refresh">{{ ui_icon('refresh') }} Refresh</button>
+      <a class="btn primary" id="export" href="/api/activity/session.zip?day={{ today }}" title="Download all records for the selected session as a ZIP">{{ ui_icon('download') }} Export session</a>
+    </div>
   </div>
-  <div class="system-status" id="health" role="status"><span>Checking system…</span></div>
-  <div class="session-metrics" aria-label="Selected session totals">
-    <div class="session-metric"><span>Recorded events</span><strong id="events-total">—</strong></div>
-    <div class="session-metric"><span>Decision records</span><strong id="evidence-total">—</strong></div>
-    <div class="session-metric"><span>Order attempts</span><strong id="orders-total">—</strong></div>
-    <div class="session-metric"><span>Journal trades</span><strong id="trades-total">—</strong></div>
-  </div>
-  <section class="card" aria-label="Filter activity">
-    <form id="filters">
-      <div class="log-filters">
-        <label>Session date<input type="date" id="day" value="{{ today }}" max="{{ today }}" required></label>
-        <label>Level<select id="level"><option value="">All levels</option><option value="INFO">Info</option><option value="WARNING">Warning</option><option value="ERROR">Error</option><option value="CRITICAL">Critical</option></select></label>
-        <label>Source<select id="component"><option value="">All sources</option><option value="application">Application</option><option value="trading">Trading</option><option value="scanner">Scanner</option><option value="research">Research</option><option value="http">HTTP</option></select></label>
-        <label class="search-field">Search<input type="text" id="search" placeholder="Message or request ID" maxlength="200"></label>
-        <button class="btn ghost" id="apply" type="submit">Apply filters</button>
+  <div class="activity-health-row">
+    <div class="system-status" id="health" role="status" aria-label="Current system status" aria-busy="true">
+      <div class="health-grid">
+        <div class="health-item" id="system-health" data-state="pending"><span class="health-icon" aria-hidden="true">{{ ui_icon('activity') }}</span><dl><dt>System</dt><dd id="system-health-value">Checking…</dd></dl></div>
+        <div class="health-item" id="database-health" data-state="pending"><span class="health-icon" aria-hidden="true">{{ ui_icon('layers') }}</span><dl><dt>Database</dt><dd id="database-health-value">Checking…</dd></dl></div>
+        <div class="health-item" id="scanner-health" data-state="pending"><span class="health-icon" aria-hidden="true">{{ ui_icon('activity') }}</span><dl><dt>Scanner</dt><dd id="scanner-health-value">Checking…</dd></dl></div>
+        <div class="health-item" id="backtests-health" data-state="pending"><span class="health-icon" aria-hidden="true">{{ ui_icon('chart') }}</span><dl><dt>Backtests</dt><dd id="backtests-health-value">Checking…</dd></dl></div>
       </div>
-      <div class="filter-footer"><label class="check-label"><input type="checkbox" id="include-http">Include HTTP requests</label><button class="btn ghost" type="button" id="reset-filters">Clear filters</button><p>Session totals and export cover the full day; filters apply to the event stream.</p></div>
+      <div class="health-notices" id="health-notices" hidden></div>
+    </div>
+  </div>
+  <section class="session-overview" aria-labelledby="session-title">
+    <div class="overview-heading"><h2 id="session-title">Session overview</h2><span id="summary-day">{{ today }} · IST</span></div>
+    <div class="session-metrics" id="session-metrics" aria-busy="true">
+      <div class="session-metric"><div class="metric-label">{{ ui_icon('activity') }}<span>Recorded events</span></div><strong id="events-total">—</strong><span class="metric-caption" id="events-caption">Includes HTTP requests</span></div>
+      <div class="session-metric"><div class="metric-label">{{ ui_icon('layers') }}<span>Decision records</span></div><strong id="evidence-total">—</strong><span class="metric-caption">Saved strategy decisions</span></div>
+      <div class="session-metric"><div class="metric-label">{{ ui_icon('trades') }}<span>Order attempts</span></div><strong id="orders-total">—</strong><span class="metric-caption">Recorded execution attempts</span></div>
+      <div class="session-metric"><div class="metric-label">{{ ui_icon('chart') }}<span>Journal trades</span></div><strong id="trades-total">—</strong><span class="metric-caption">Trades recorded for this day</span></div>
+    </div>
+    <p class="summary-note" id="summary-note" role="status" hidden></p>
+  </section>
+  <section class="activity-workspace" aria-label="Activity explorer">
+    <form id="filters" class="activity-filters">
+      <div class="filter-primary">
+        <label class="search-field" for="search"><span class="sr-only">Search events</span><span class="search-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg></span><input type="search" id="search" placeholder="Search messages, details or request ID…" maxlength="200" autocomplete="off"><kbd aria-hidden="true">/</kbd></label>
+        <div class="date-controls"><button type="button" class="icon-btn" id="previous-day" aria-label="Previous day">‹</button><label class="date-field"><span class="sr-only">Session date</span><input type="date" id="day" value="{{ today }}" max="{{ today }}" required></label><button type="button" class="icon-btn" id="next-day" aria-label="Next day">›</button><button type="button" class="btn ghost" id="today">Today</button></div>
+      </div>
+      <div class="filter-secondary">
+        <div class="severity-filters" role="group" aria-label="Filter by severity">
+          <button type="button" data-level="" aria-pressed="true">All events</button><button type="button" data-level="INFO" aria-pressed="false"><i class="severity-dot info"></i>Info</button><button type="button" data-level="WARNING" aria-pressed="false"><i class="severity-dot warning"></i>Warnings</button><button type="button" data-level="ERROR" aria-pressed="false"><i class="severity-dot error"></i>Errors</button><button type="button" data-level="CRITICAL" aria-pressed="false"><i class="severity-dot critical"></i>Critical</button>
+        </div>
+        <div class="source-controls"><label for="component" class="sr-only">Source</label><select id="component" aria-label="Source"><option value="">All sources</option><option value="application">Application</option><option value="trading">Trading</option><option value="scanner">Scanner</option><option value="research">Research</option><option value="reconciliation">Reconciliation</option><option value="http">HTTP requests</option></select><label class="http-toggle"><input type="checkbox" id="include-http">HTTP requests</label></div>
+      </div>
+      <button type="submit" class="sr-only">Search events</button>
     </form>
+    <div class="event-toolbar">
+      <div class="event-summary"><h2 class="sr-only">Event stream</h2><nav class="event-pagination" aria-label="Event pages">
+        <button class="icon-btn" id="previous-page" type="button" aria-label="Previous page" title="Previous page" aria-controls="events" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg></button>
+        <span id="event-count" role="status">Loading events…</span>
+        <button class="icon-btn" id="next-page" type="button" aria-label="Next page" title="Next page" aria-controls="events" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m10 6 6 6-6 6"/></svg></button>
+      </nav></div>
+      <div class="event-tools"><button class="text-button" type="button" id="reset-filters" hidden>Clear filters</button><label class="page-size">Show <select id="page-size" aria-label="Events per page"><option value="25">25</option><option value="50" selected>50</option><option value="100">100</option></select></label></div>
+    </div>
+    <div id="filter-chips" class="filter-chips" aria-label="Active filters" hidden></div>
+    <div id="error" class="activity-error" role="alert" hidden><span id="error-message"></span><button class="btn ghost small" type="button" id="retry">Try again</button></div>
+    <section id="event-panel" class="event-scroll" aria-label="Activity records, scrollable" aria-busy="true" tabindex="0">
+      <div class="event-columns" aria-hidden="true"><span>Time <small>IST</small></span><span>Severity</span><span>Source</span><span>Event</span><span></span></div>
+      <div id="events">{{ skeleton("rows",5) }}</div>
+    </section>
   </section>
-  <p id="error" class="log-error" role="alert" hidden></p>
-  <section class="event-panel" aria-label="Activity records" aria-busy="true" id="event-panel">
-    <div class="event-heading"><h2>Event stream</h2><span id="event-count">Loading…</span></div>
-    <div id="events" aria-live="polite">{{ skeleton("rows",5) }}</div>
-    <div class="event-footer" id="load-footer" hidden><button class="btn ghost small" id="load-more" type="button">Load earlier events</button></div>
-  </section>
+  <span class="sr-only" id="activity-announcement" role="status" aria-live="polite"></span>
 </main>
-<script>
-(() => {
-  const $ = id => document.getElementById(id);
-  const clock = new Intl.DateTimeFormat('en-IN', {timeZone:'Asia/Kolkata', hour:'2-digit', minute:'2-digit', second:'2-digit', hourCycle:'h23'});
-  let cursor = null, count = 0, busy = false, applied = null;
-  const node = (tag, text, className) => { const n = document.createElement(tag); if (text !== undefined) n.textContent = text; if (className) n.className = className; return n; };
-  async function get(path) {
-    const r = await appFetch(path), data = await r.json();
-    if (!r.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Could not load activity. Try again.');
-    return data;
-  }
-  function renderEvents(rows, append) {
-    if (!append) { $('events').replaceChildren(); count = 0; }
-    for (const row of rows) {
-      const item = node('article', undefined, 'event'), time = node('time', clock.format(new Date(row.created_at)));
-      time.dateTime = row.created_at; time.title = row.created_at;
-      const level = node('span', row.level, 'event-level ' + row.level), body = node('div', undefined, 'event-body');
-      body.append(node('p', row.message, 'event-message'), node('div', `${row.component} · ${row.kind}`, 'event-meta'));
-      const details = node('details'), summary = node('summary', 'View details');
-      details.append(summary, node('pre', JSON.stringify({request_id:row.request_id, ...row.details}, null, 2)));
-      body.append(details); item.append(time, level, body); $('events').append(item); count++;
-    }
-    if (!count) {
-      const empty = node('div', undefined, 'event-empty');
-      empty.append(node('strong', 'No matching events'), node('p', 'Try another date or adjust your filters.')); $('events').append(empty);
-    }
-    $('event-count').textContent = `${count} ${count === 1 ? 'event' : 'events'} · Newest first`;
-  }
-  async function load(append = false) {
-    if (busy || !$('filters').reportValidity()) return;
-    const done=LoadingUI.begin('#events',{initial:!applied,retry:()=>load()});
-    busy = true; $('error').hidden = true; $('event-panel').setAttribute('aria-busy', 'true');
-    ['refresh','apply','load-more'].forEach(id => $(id).disabled = true);
-    const params = append ? new URLSearchParams(applied) : new URLSearchParams({day:$('day').value, level:$('level').value, component:$('component').value, q:$('search').value.trim(), include_http:String($('include-http').checked || $('component').value === 'http')});
-    for (const key of ['level','component']) if (!params.get(key)) params.delete(key);
-    if (append && cursor) params.set('before', cursor);
-    const summaryTask=append?null:get('/api/activity/session?day='+encodeURIComponent(params.get('day'))).then(value=>({value}),error=>({error}));
-    try {
-      const data = await get('/api/activity?' + params);
-      if (!append) {
-        applied = new URLSearchParams(params);
-        const url=new URL(location.href);for(const key of ['day','level','component','q','include_http']){const value=params.get(key);if(value)url.searchParams.set(key,value);else url.searchParams.delete(key);}history.replaceState(null,'',url);
-      }
-      renderEvents(data.events, append); cursor = data.next_cursor; $('load-footer').hidden = !cursor;
-      if (!append) {
-        const day = encodeURIComponent(applied.get('day'));
-        $('export').href = '/api/activity/session.zip?day=' + day;
-        const summaryResult=await summaryTask;if(summaryResult.error)throw summaryResult.error;
-        const summary=summaryResult.value;
-        for (const [id,key] of [['events','events'],['evidence','evidence'],['orders','order_attempts'],['trades','journal_trades']]) $(id+'-total').textContent = summary[key].toLocaleString('en-IN');
-      }
-    } catch (e) { done(e);$('error').textContent = e.message; $('error').hidden = false; if (!count) $('event-count').textContent = 'Unable to load'; }
-    finally { done();busy = false; $('event-panel').setAttribute('aria-busy', 'false'); ['refresh','apply','load-more'].forEach(id => $(id).disabled = false); }
-  }
-  async function health() {
-    try {
-      const response = await appFetch('/health/ready'), data = await response.json();
-      const warning = !response.ok || data.orders_needing_review > 0 || data.audit_failures > 0;
-      $('health').classList.toggle('warn', warning); $('health').replaceChildren();
-      const status = node('span', undefined); status.append(node('i', undefined, 'status-dot'), node('span', warning ? 'Needs attention' : 'System healthy')); $('health').append(status);
-      for (const text of [`Database ${data.database}`, `Scanner ${data.scanner}`, `${data.active_backtests} active backtests`, `${data.people ?? 1} ${data.people === 1 ? 'person' : 'people'}`]) $('health').append(node('span', text));
-      if (data.orders_needing_review) $('health').append(node('span', `${data.orders_needing_review} orders to review`));
-      if (data.audit_failures) $('health').append(node('span', `${data.audit_failures} log write failures`));
-    } catch { $('health').classList.add('warn'); $('health').textContent = 'System status unavailable'; }
-  }
-  LoadingUI.on($('filters'),'submit',e=>{e.preventDefault();return load();});
-  LoadingUI.on($('refresh'),'click',()=>Promise.all([load(),health()]));
-  LoadingUI.on($('load-more'),'click',()=>load(true));
-  $('component').addEventListener('change', () => { if ($('component').value === 'http') $('include-http').checked = true; });
-  $('include-http').addEventListener('change', () => { if (!$('include-http').checked && $('component').value === 'http') $('component').value = ''; });
-  const saved=new URLSearchParams(location.search);
-  for(const [key,id] of [['day','day'],['level','level'],['component','component'],['q','search']]){
-    const value=saved.get(key);if(value===null)continue;const input=$(id);
-    if(input.tagName==='SELECT' && ![...input.options].some(o=>o.value===value))continue;
-    input.value=value;
-  }
-  $('include-http').checked=saved.get('include_http')==='true';
-  $('reset-filters').addEventListener('click',()=>{if(busy)return;$('level').value='';$('component').value='';$('search').value='';$('include-http').checked=false;load();});
-  LoadingUI.on($('export'),'click',e=>{e.preventDefault();return LoadingUI.download(e.currentTarget.href);});
-  load(); health();
-})();
-</script>
+<script src="/static/activity.js?v=20261031-activity-8" defer></script>
 </body>
 </html>

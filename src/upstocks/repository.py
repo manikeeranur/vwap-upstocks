@@ -307,6 +307,19 @@ class Repository:
             view = json.loads(row[0]) if row else {"day": None, "scanned_at": None, "results": {}, "errors": {}}
             return {**view, "running": False}
 
+    def paper_view(self, day):
+        """Read one saved paper session without changing the scanner or journal."""
+        view = {"day": day, "scanned_at": None, "results": {}, "errors": {}, "running": False}
+        with self.db.connect() as conn:
+            sessions = conn.execute("SELECT preset,updated FROM journal_sessions WHERE day=?", (day,)).fetchall()
+            if not sessions:
+                return view
+            view["scanned_at"] = max(row["updated"] for row in sessions)
+            view["results"] = {row["preset"]: [] for row in sessions}
+            for row in conn.execute("SELECT preset,payload FROM journal_trades WHERE day=? ORDER BY preset,position", (day,)):
+                view["results"][row["preset"]].append(json.loads(row["payload"]))
+        return view
+
     @staticmethod
     def _write_sessions(conn, day, sessions):
         for preset, session in sessions.items():

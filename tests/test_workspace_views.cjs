@@ -62,12 +62,13 @@ test('missing sell prices remain unresolved instead of producing net zero',()=>{
 });
 
 
-function viewHarness(saved={mode:'paper',broker:'kite'}) {
+function viewHarness(saved={mode:'paper',broker:'kite'},segmented=false) {
   const fs=require('node:fs'),vm=require('node:vm');
   const node = (dataset={}) => ({dataset,attrs:{},events:{},setAttribute(k,v){this.attrs[k]=v;},addEventListener(k,v){this.events[k]=v;}});
-  const paper=node({viewMode:'paper'}),live=node({viewMode:'live'}),broker=node();
+  const paper=node({viewMode:'paper'}),live=node({viewMode:'live'}),broker=segmented?null:node();
+  const brokerOptions=segmented?['all','upstox','kite','indmoney'].map(viewBrokerOption=>node({viewBrokerOption})):[];
   const items={'[data-view-title]':node(),'[data-view-description]':node(),'[data-view-broker-label]':node(),'[data-view-broker]':broker};
-  const bar={querySelectorAll:()=>[paper,live],querySelector:s=>items[s]};
+  const bar={querySelectorAll:s=>s==='[data-view-mode]'?[paper,live]:s==='[data-view-broker-option]'?brokerOptions:[],querySelector:s=>items[s]};
   const links=[{href:'https://example.test/stocks#execution-recovery'},{href:'https://example.test/account'}];
   const location={href:'https://example.test/paper?mode=paper',search:'?mode=paper',origin:'https://example.test'};
   const context={module:{exports:{}},URL,URLSearchParams,location,fetch:()=>{throw new Error('Changing views must not call an API');},
@@ -75,7 +76,7 @@ function viewHarness(saved={mode:'paper',broker:'kite'}) {
     history:{replaceState:(_state,_title,url)=>{location.href=String(url);location.search=new URL(url).search;}},
     sessionStorage:{getItem:()=>JSON.stringify(saved),setItem:(_key,value)=>{saved=JSON.parse(value);}}};
   vm.runInNewContext(fs.readFileSync(require.resolve('../src/upstocks/static/workspace-view.js'),'utf8'),context);
-  return {api:context.module.exports,paper,live,broker,links,location,items,context};
+  return {api:context.module.exports,paper,live,broker,brokerOptions,links,location,items,context};
 }
 
 test('switching views changes display and navigation without enabling orders',async()=>{
@@ -134,4 +135,43 @@ test('confirmed October Kite trades appear without paper scans or final fees',()
   assert.deepEqual(rows.map(t=>[t.date,Math.round(t.rs*100)/100]),[['2026-10-28',6805.5],['2026-10-30',-3558.75]]);
   assert.equal(Math.round(historySummary(rows).gross*100)/100,3246.75);
   assert.equal(historySummary(rows).net,null);
+});
+
+test('broker logo toggles filter live results and preserve the chosen broker across modes',async()=>{
+  const h=viewHarness({mode:'paper',broker:'all'},true),changes=[];
+  const view=h.api.bind({onChange:value=>changes.push({...value})});
+  const all=h.brokerOptions[0],kite=h.brokerOptions[2];
+  assert.ok(h.brokerOptions.every(b=>b.disabled));
+  await kite.events.click();assert.equal(view.get().broker,'all');assert.equal(changes.length,0);
+  await h.live.events.click();assert.ok(h.brokerOptions.every(b=>!b.disabled));
+  await kite.events.click();
+  assert.equal(view.get().broker,'kite');assert.equal(kite.attrs['aria-pressed'],'true');assert.equal(all.attrs['aria-pressed'],'false');
+  assert.equal(new URL(h.location.href).searchParams.get('broker'),'kite');
+  assert.equal(new URL(h.links[0].href).searchParams.get('broker'),'kite');
+  assert.equal(changes.at(-1).broker,'kite');
+  await h.paper.events.click();assert.equal(h.items['[data-view-broker-label]'].hidden,true);
+  await h.live.events.click();assert.equal(view.get().broker,'kite');assert.equal(kite.attrs['aria-pressed'],'true');
+  await all.events.click();assert.equal(view.get().broker,'all');assert.equal(all.attrs['aria-pressed'],'true');
+});
+test('existing broker dropdown still selects the requested broker',async()=>{
+  const h=viewHarness(),view=h.api.bind();
+  await h.live.events.click();await h.broker.events.change({target:{value:'indmoney'}});
+  assert.equal(view.get().broker,'indmoney');assert.equal(h.broker.value,'indmoney');
+  assert.equal(new URL(h.location.href).searchParams.get('broker'),'indmoney');
+});
+test('pending broker changes prevent duplicate selection and release controls after completion',async()=>{
+  const h=viewHarness({mode:'paper',broker:'all'},true);let finish,block=false;
+  const view=h.api.bind({onChange:()=>block?new Promise(resolve=>{finish=resolve;}):undefined});
+  await h.live.events.click();block=true;
+  const pending=h.brokerOptions[2].events.click();
+  assert.ok(h.brokerOptions.every(b=>b.disabled));
+  await h.brokerOptions[1].events.click();assert.equal(view.get().broker,'kite');
+  finish();await pending;assert.ok(h.brokerOptions.every(b=>!b.disabled));
+});
+test('cancelled broker selection retains the previous active toggle',async()=>{
+  const h=viewHarness({mode:'paper',broker:'all'},true);let allow=true;
+  const view=h.api.bind({beforeChange:()=>allow});await h.live.events.click();allow=false;
+  await h.brokerOptions[2].events.click();
+  assert.equal(view.get().broker,'all');assert.equal(h.brokerOptions[0].attrs['aria-pressed'],'true');
+  assert.equal(h.brokerOptions[2].attrs['aria-pressed'],'false');assert.ok(h.brokerOptions.every(b=>!b.disabled));
 });

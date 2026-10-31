@@ -19,6 +19,7 @@ from ..order_evidence import current_attempt, apply_evidence, combine
 from ..observability import redact
 from ..repository import account_id
 from .exchange_calendar import ExchangeCalendar
+from .execution_details import ExecutionDetails
 
 log = logging.getLogger(__name__)
 
@@ -27,6 +28,7 @@ class TradingService:
     def __init__(self, repository, vault=None):
         self.repository = repository
         self.calendar = ExchangeCalendar(repository)
+        self.execution_details = ExecutionDetails(repository)
         self.vault = vault
         self.state = repository.state()
         self.view = repository.get_view()
@@ -80,9 +82,14 @@ class TradingService:
         for key in ("users", "accounts"):
             self.state[key] = fresh[key]
 
-    def snapshot(self, user_id=None):
+    def snapshot(self, user_id=None, *, intraday=False):
         """What one person sees: shared strategy settings and scan, plus only their own accounts and orders."""
+        now = live.now_ist()
+        session = self.calendar.intraday_session(now) if intraday else None
         state, view = deepcopy(self.state), deepcopy(self.view)
+        if session is not None and view.get("day") != session["day"]:
+            view = self.repository.paper_view(session["day"]) if session["day"] else {
+                "day": None, "scanned_at": None, "results": {}, "errors": {}, "running": False}
         if user_id is not None:
             mine = {a: v for a, v in state["accounts"].items() if v["user"] == user_id}
             state["accounts"] = mine
@@ -98,8 +105,9 @@ class TradingService:
         state["lot_sizes"] = {p: live.lot_size(p, state["lot_size"]) for p in live.PRESETS}
         state["paper_only"] = [p for p in live.PRESETS if live.paper_only(p)]
         return {"state": state, "view": view, "market_open": live.market_open(),
-                "market_calendar": self.calendar.day(live.now_ist().date()),
-                "now": live.now_ist().strftime("%a %d %b %H:%M:%S"), "view_revision": self.view_revision,
+                "market_calendar": self.calendar.day(now.date()),
+                "intraday_session": session,
+                "now": now.strftime("%a %d %b %H:%M:%S"), "view_revision": self.view_revision,
                 "fee_status": {a: {"error": self._fee_errors.get(a)} for a in state["accounts"]},
                 "reconciliation": {a: {"error": self._reconciliation_error(a), "age_seconds": round(time.monotonic() - self._fills_cache[a][0]) if a in self._fills_cache else None}
                                    for a in state["accounts"]}}

@@ -1,8 +1,21 @@
+{% from "_broker_logos.html" import broker_logo %}
+{% from "_icons.html" import ui_icon %}
+{% macro mode_switch() -%}
+<div class="view-switch" role="group" aria-label="View mode">
+  <button type="button" data-view-mode="paper" aria-pressed="true">Paper</button>
+  <button type="button" data-view-mode="live" aria-pressed="false">Live</button>
+</div>
+{%- endmacro %}
+{% macro broker_switch() -%}
+<div class="broker-switch" role="group" aria-label="Live broker" data-view-broker-label hidden>
+  <button type="button" data-view-broker-option="all" aria-pressed="true" aria-label="All brokers">{{ ui_icon('layers') }}<span>All brokers</span></button>
+  {% for key, label in [('upstox','Upstox'),('kite','Kite'),('indmoney','INDmoney')] %}
+  <button type="button" data-view-broker-option="{{ key }}" aria-pressed="false">{{ broker_logo(key,20) }}<span>{{ label }}</span></button>
+  {% endfor %}
+</div>
+{%- endmacro %}
 <section class="view-bar" data-view-toolbar aria-label="Data view">
-  <div class="view-switch" role="group" aria-label="View mode">
-    <button type="button" data-view-mode="paper" aria-pressed="true">Paper</button>
-    <button type="button" data-view-mode="live" aria-pressed="false">Live</button>
-  </div>
+  {{ mode_switch() }}
   <div class="view-description"><strong data-view-title>Paper mode</strong><p data-view-description>Simulated results</p></div>
   <label class="view-broker" data-view-broker-label hidden>Broker
     <select data-view-broker aria-label="Live broker">

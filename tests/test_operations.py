@@ -152,6 +152,11 @@ class EvidenceTests(unittest.TestCase):
         second = diagnostics.events(self.db, day=DAY, level='WARNING', component='scanner', limit=1, before=first['next_cursor'])
         self.assertEqual([first['events'][0]['message'], second['events'][0]['message']], ['second', '100%_literal'])
         self.assertIsNone(second['next_cursor'])
+        self.assertEqual(first['total'], 2)
+        self.assertEqual(second['total'], 2)
+        summary = diagnostics.session_summary(self.db, DAY)
+        self.assertEqual(summary['sources'], ['http', 'research', 'scanner'])
+        self.assertEqual(summary['http_events'], 1)
         self.assertFalse(diagnostics.events(self.db, day=DAY, query="' OR 1=1 --")['events'])
         self.assertEqual(len(diagnostics.events(self.db, day=DAY, component='http', include_http=True)['events']), 1)
         with diagnostics.build_session_export(self.db, date(1990, 1, 1)) as archive, zipfile.ZipFile(archive) as bundle:

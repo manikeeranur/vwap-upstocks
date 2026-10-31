@@ -27,13 +27,15 @@ def events(database, *, day, level=None, component=None, query="", include_http=
         literal = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         clauses.append("(message LIKE ? ESCAPE '\\' OR kind LIKE ? ESCAPE '\\' OR request_id LIKE ? ESCAPE '\\' OR details LIKE ? ESCAPE '\\')")
         params.extend([f"%{literal}%"] * 4)
+    matching_clauses, matching_params = list(clauses), list(params)
     if before is not None:
         clauses.append("id < ?")
         params.append(before)
     with database.connect() as conn:
+        total = conn.execute(f"SELECT COUNT(*) FROM audit_events WHERE {' AND '.join(matching_clauses)}", matching_params).fetchone()[0]
         rows = conn.execute(f"SELECT * FROM audit_events WHERE {' AND '.join(clauses)} ORDER BY id DESC LIMIT ?", (*params, limit + 1)).fetchall()
         items = [clean({**dict(row), "details": json.loads(row["details"])}) for row in rows[:limit]]
-        return {"events": items, "next_cursor": items[-1]["id"] if len(rows) > limit else None}
+        return {"events": items, "total": total, "next_cursor": items[-1]["id"] if len(rows) > limit else None}
 
 
 def _counts(conn, day):
@@ -50,7 +52,17 @@ def _counts(conn, day):
 
 def session_summary(database, day):
     with database.connect() as conn:
-        return {"day": str(day), "timezone": "Asia/Kolkata", **_counts(conn, day)}
+        start, end = day_bounds(day)
+        sources = [row[0] for row in conn.execute(
+            "SELECT DISTINCT component FROM audit_events WHERE created_at>=? AND created_at<? ORDER BY component",
+            (start, end),
+        )]
+        http_events = conn.execute(
+            "SELECT COUNT(*) FROM audit_events WHERE created_at>=? AND created_at<? AND component='http'",
+            (start, end),
+        ).fetchone()[0]
+        return {"day": str(day), "timezone": "Asia/Kolkata", **_counts(conn, day),
+                "sources": sources, "http_events": http_events}
 
 
 def build_session_export(database, day):

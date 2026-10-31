@@ -21,13 +21,15 @@ const openLive = (acc,p) => Object.entries(S.state.orders?.[acc] || {}).filter((
 async function loadBrokers() { try { B = (await api('/api/brokers')).brokers; brokerError = ''; if (S && !confirming) render(); } catch(e) { brokerError = 'Broker status unavailable: ' + e.message; } finally { showBrokerErrors(); } }
 let S = null, busy = false, saving = false, confirming = false, refreshing = false, refreshVersion = 0;
 let Q = null, quoting = false, quoteFailed = false;
+let sessionTimer=null,sessionDeadline=null;
+let executionDetails=null,detailsLoading=false,detailsFetchedAt=0;
 async function api(path, body) {
   const r = await appFetch(path, body === undefined ? {quiet:!!S} : {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
   const j = await r.json().catch(() => ({}));
   if (!r.ok) { const error = new Error(typeof j.detail === 'string' ? j.detail : j.error || `Request failed (${r.status}). Please try again.`); error.state = j.state; throw error; }
   return j;
 }
-const dataView = WorkspaceView.bind({onChange:()=>{ if(S) render(); }});
+const dataView = WorkspaceView.bind({onChange:()=>{ if(S) { render();loadExecutionDetails(); } }});
 const tradeFilters = WorkspaceUI.bindFilters({fields:{strategy:'strategy-filter',status:'position-filter',q:'trade-search'},reset:'clear-trade-filters',onChange:()=>{if(S) render();}});
 const matchPaper = (t,p) => WorkspaceUI.matches({...t,preset:p,state:t.open?'open':'closed',search:(t.symbol || '')+' '+(LABELS[p] || p)},tradeFilters.get());
 const matchExecution = r => WorkspaceUI.matches({...r,state:[...(r.stats.pending?['pending']:[]),...(r.stats.open?['open']:r.buy?.filled_qty>0?['closed']:[])],search:r.symbol+' '+(LABELS[r.preset] || r.preset)},tradeFilters.get());
@@ -39,46 +41,98 @@ const executions = () => {
     const m = tradeValues(t);
     if (m.quote && !m.stale && S.view.day === todayIST()) prices[t.id] = m.price;
   }
-  return UpstocksPnl.executionRows(S.state,Object.values(S.view.results || {}).flat(),prices,dataView.get().broker);
+  return IntradayView.executions(UpstocksPnl.executionRows(S.state,Object.values(S.view.results || {}).flat(),prices,dataView.get().broker),S.intraday_session);
 };
 function renderLiveSummary() {
   const rows = executions(), total = UpstocksPnl.executionSummary(rows);
   const closed = rows.filter(r=>r.stats.closed && !r.stats.open && !r.stats.pending);
   const realized = UpstocksPnl.executionSummary(closed);
   const write = (id,value) => { $(id).textContent = value == null ? '—' : money(value); $(id).className = 'metric-value ' + (value == null ? '' : value >= 0 ? 'up' : 'down'); };
-  write('livePnl',realized.closed ? realized.realized : null); write('liveNet',realized.net);
+  const emptySession=!rows.length&&S.intraday_session?.day;
+  write('livePnl',realized.closed ? realized.realized : emptySession ? 0 : null); write('liveNet',emptySession ? 0 : realized.net);
   write('liveOpen',total.open && !total.valuationMissing ? total.valuation : null);
-  $('liveCaption').textContent = realized.closed + (realized.closed === 1 ? ' closed trade' : ' closed trades') + ' · all saved sessions';
-  $('netCaption').textContent = (realized.net != null ? (realized.chargesFinal ? 'After final statement charges' : 'Net estimate · after broker-calculated charges') : realized.closed ? 'Waiting for broker charges' : 'No confirmed closed trades') + (rows.length > closed.length ? ' · open/unresolved trades excluded' : '');
+  $('liveCaption').textContent = realized.closed + (realized.closed === 1 ? ' closed trade' : ' closed trades') + ' · ' + sessionLabel();
+  $('netCaption').textContent = (realized.net != null ? (realized.chargesFinal ? 'After final statement charges' : 'Net estimate · after broker-calculated charges') : realized.closed ? 'Waiting for broker charges' : 'No closed trades this session') + (rows.length > closed.length ? ' · open/unresolved trades excluded' : '');
   $('openValuation').textContent = total.positions ? total.positions + (total.positions === 1 ? ' open position · ' : ' open positions · ') + (total.valuationMissing ? 'current quotes unavailable' : 'current quote estimate · before charges') : 'No confirmed open positions';
   $('livePending').textContent = total.pending;
   $('pendingCaption').textContent = total.pending ? 'Unresolved orders · verify with the broker' : 'No unresolved saved orders';
   StableDOM.html($('liveBrokers'),selectedAccounts().map(a => {
     const r = UpstocksPnl.executionSummary(closed.filter(x=>x.account === a.id));
     const activity = UpstocksPnl.executionSummary(rows.filter(x=>x.account === a.id));
-    return '<div class="live-broker"><span>'+BROKER_NAMES[a.broker]+'</span><b>'+(r.net != null ? money(r.net) : r.closed ? money(r.realized) : '—')+'</b><small>'+(r.net != null ? (r.chargesFinal ? 'net' : 'net estimate') : 'gross; fees pending')+' · '+activity.positions+' open · '+activity.pending+' unresolved</small></div>';
+    return '<div class="live-broker"><span>'+BROKER_NAMES[a.broker]+'</span><b>'+(r.net != null ? money(r.net) : r.closed ? money(r.realized) : '—')+'</b><small>'+(r.net != null ? (r.chargesFinal ? 'net' : 'net estimate') : r.closed ? 'gross; fees pending' : 'No closed trades')+' · '+activity.positions+' open · '+activity.pending+' unresolved</small></div>';
   }).join(''));
 }
+function executionClock(value) {
+  if (!value || !Number.isFinite(Date.parse(value))) return 'Time unavailable';
+  return new Intl.DateTimeFormat('en-IN',{timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}).format(new Date(value));
+}
+function savedOrderTime(order,day,last=false) {
+  const times=[...(order?.attempts || []),order].filter(a=>a && (a.attempt_filled_qty ?? a.filled_qty)>0).map(a=> {
+    let value=a.created_at || (a.at ? day+'T'+a.at+'+05:30' : null);
+    if(value && !/(?:Z|[+-]\d{2}:?\d{2})$/i.test(value)) value+='+05:30';
+    return value && Number.isFinite(Date.parse(value)) ? value : null;
+  }).filter(Boolean).sort((a,b)=>Date.parse(a)-Date.parse(b));
+  return times.length ? times[last ? times.length-1 : 0] : null;
+}
+function executionCard(r) {
+  const bought = Number(r.buy?.filled_qty || 0), sold = Number(r.sell?.filled_qty || 0);
+  const state = r.stats.pending ? 'pending' : r.stats.open ? 'open' : bought ? 'closed' : 'empty';
+  const status = {pending:'Needs reconciliation',open:'Open position',closed:'Closed',empty:'No confirmed fills'}[state];
+  const net = r.stats.net, netTone = net == null ? 'muted' : net >= 0 ? 'up' : 'down';
+  const estimated = net != null && !r.stats.chargesFinal;
+  const info = executionDetails?.day===S.intraday_session?.day ? executionDetails.accounts?.[r.account]?.[r.id] : null;
+  const validInfo = info && info.buy_qty===bought && info.sell_qty===sold && info.buy_price===r.buy?.fill_price && info.sell_price===(r.sell?.fill_price ?? null) ? info : null;
+  const start = validInfo?.entry_at || savedOrderTime(r.buy,r.date), end = validInfo?.exit_at || savedOrderTime(r.sell,r.date,true);
+  const points = bought && sold && Number.isFinite(r.buy?.fill_price) && Number.isFinite(r.sell?.fill_price) ? r.sell.fill_price-r.buy.fill_price : null;
+  const pointText = value => (value>0?'+':value<0?'−':'')+fmt(Math.abs(value))+' pts';
+  const field = (label,value,sub='',tone='') => `<div><dt>${label}</dt><dd class="${tone}">${value}</dd>${sub ? `<dd class="execution-sub">${sub}</dd>` : ''}</div>`;
+  const price = (o) => o?.filled_qty>0 && Number.isFinite(o.fill_price) ? money(o.fill_price) : '—';
+  const peak = (label,value) => field(label,value ? money(value.price) : '—', value ? `<span>${esc(executionClock(value.at))}${value.source==='entry' ? ' · Entry' : ''}</span><span class="${value.points>=0?'up':'down'}">${pointText(value.points)}</span>` : validInfo?.status==='incomplete' ? 'Incomplete candles' : (detailsLoading || !detailsFetchedAt) && !validInfo ? 'Loading…' : 'Candles unavailable');
+  return `<article data-key="${esc(r.account+'|'+r.id)}" class="execution-card">
+    <header class="execution-head"><div class="execution-identity"><h4>${esc(r.symbol)}</h4><div class="execution-meta"><span class="execution-broker">${brokerLogo(r.broker,16)}${esc(BROKER_NAMES[r.broker] || r.broker)}</span><span>${esc(r.date)}</span>${r.carryover ? '<span class="execution-carryover">Prior-session position</span>' : ''}${r.client_id ? `<span class="execution-account">${esc(r.client_id)}</span>` : ''}</div></div><span class="execution-status ${state}">${status}</span></header>
+    <dl class="execution-facts">
+      ${field('Entry',price(r.buy),start ? 'Order · '+esc(executionClock(start)) : 'Time unavailable')}
+      ${field(r.stats.open && sold ? 'Partial exit' : 'Exit',price(r.sell),end ? 'Order · '+esc(executionClock(end)) : r.stats.open ? 'Not exited' : 'Time unavailable')}
+      ${peak('Peak high · 1m',validInfo?.high)}${peak('Peak low · 1m',validInfo?.low)}
+      ${field('Points',points==null?'—':pointText(points),sold ? 'Realized · before charges' : 'Available after exit',points==null?'muted':points>=0?'up':'down')}
+      ${field('Bought / sold',bought+' / '+sold,'Remaining '+r.stats.open)}
+      ${field('Net P&L',net==null?'—':money(net),estimated ? 'Estimated · after charges' : net!=null ? 'After final charges' : r.stats.pending ? 'Awaiting reconciliation' : r.stats.open ? 'Available after exit' : 'Charges pending',netTone)}
+    </dl>
+    <details class="order-evidence"><summary><span>Details <span class="details-chevron" aria-hidden="true">›</span></span><span class="execution-fees">Gross ${r.stats.closed?money(r.stats.realized):'—'}<span>Charges ${r.stats.chargesComplete?money(r.stats.charges):'Pending'}${!r.stats.chargesFinal&&r.stats.chargesComplete?' · est.':''}</span></span></summary>
+      <p class="execution-basis">Times in IST. Entry and exit use saved order times; exact fill times are unavailable. Peaks include the entry and exit minute candles.${validInfo?.through ? ' Candles through '+esc(executionClock(validInfo.through))+'.' : ''}</p>
+      <div class="execution-orders"><section><h5>Buy order</h5><p>${orderCell(r.buy)}</p></section><section><h5>Sell order</h5><p>${orderCell(r.sell)}</p></section></div>
+    </details>
+  </article>`;
+}
+async function loadExecutionDetails() {
+  if(!S || !liveView() || detailsLoading || document.hidden || Date.now()-detailsFetchedAt<30000) return;
+  detailsLoading=true;
+  const day=S.intraday_session?.day;
+  try {
+    const next=await api('/api/paper/execution-details');
+    if(S?.intraday_session?.day===day && next.day===day) executionDetails=next;
+  } catch { /* Keep saved fills visible when candle analytics are unavailable. */ }
+  finally { detailsLoading=false;detailsFetchedAt=Date.now();if(S && liveView() && !confirming) render(); }
+}
+
 function liveStrategy(p) {
   const rows = executions().filter(r=>r.preset === p && matchExecution(r)), summary = UpstocksPnl.executionSummary(rows.filter(r=>r.stats.closed && !r.stats.open && !r.stats.pending));
   const enabled = selectedAccounts().some(a=>a.live[p]);
-  const cards = rows.map(r => {
-    const bought = r.buy?.filled_qty || 0, sold = r.sell?.filled_qty || 0;
-    const status = r.stats.pending ? 'Needs reconciliation' : r.stats.open ? 'Open position' : bought ? 'Closed position' : 'No confirmed fills';
-    const field = (name,value) => '<div><dt>'+name+'</dt><dd>'+value+'</dd></div>';
-    return '<article data-key="'+esc(r.account+'|'+r.id)+'" class="trade-card execution-card"><div class="trade-card-head"><b>'+esc(r.symbol)+'</b><span class="data-tag live">'+BROKER_NAMES[r.broker]+'</span></div>'+
-      '<p class="mode-summary-note">'+esc(r.date)+' · '+esc(status)+(r.client_id ? ' · '+esc(r.client_id) : '')+'</p><dl>'+
-      field('Bought / sold',bought+' / '+sold)+field('Remaining',r.stats.open)+
-      field('Buy fill',Number.isFinite(r.buy?.fill_price) ? money(r.buy.fill_price) : 'Unconfirmed')+
-      field('Sell fill',Number.isFinite(r.sell?.fill_price) ? money(r.sell.fill_price) : 'Unconfirmed')+
-      field('Realized gross',r.stats.closed ? money(r.stats.realized) : '—')+
-      field('Charges'+(r.stats.chargesFinal ? '' : ' (estimated)'),r.stats.chargesComplete ? money(r.stats.charges) : 'Pending')+field('Realized net'+(r.stats.chargesFinal ? '' : ' (estimated)'),r.stats.net != null ? money(r.stats.net) : 'Unavailable')+'</dl>'+
-      '<details class="order-evidence"><summary>Order details</summary><p>Buy · '+orderCell(r.buy)+'</p><p>Sell · '+orderCell(r.sell)+'</p></details></article>';
-  }).join('');
+  const entryStatus = paperOnly(p) ? 'Paper only' : !enabled ? 'New entries disabled' : S.state.entries_paused ? 'Live entries paused' : 'Live automation enabled';
+  const active = enabled && !paperOnly(p) && !S.state.entries_paused;
+  const total = summary.net != null ? summary.net : summary.closed ? summary.realized : null;
+  const totalTone = total == null ? 'muted' : total >= 0 ? 'up' : 'down';
+  const totalLabel = summary.net != null ? (summary.chargesFinal ? 'Closed net P&L' : 'Closed net P&L · estimated') : 'Closed gross P&L · charges pending';
+  const icon = STRATEGY_ICONS[PRESETS.indexOf(p)] || STRATEGY_ICONS[0];
+  const cards = rows.map(executionCard).join('');
   const exits = selectedAccounts().map(a => { const n = openLive(a.id,p); return n ? '<button class="btn ghost sq" type="button" data-sq="'+p+'" data-broker="'+a.broker+'">Close all '+n+' live position'+(n===1?'':'s')+' · '+BROKER_NAMES[a.broker]+'</button>' : ''; }).join('');
-  return '<section data-key="'+esc(p)+'" class="card strat" aria-label="'+esc(LABELS[p] || p)+' live execution"><div class="strategy-top"><div class="strategy-title"><div><h3>'+esc(LABELS[p] || p)+'</h3><p>'+(paperOnly(p) ? 'Paper only · live execution unavailable' : enabled ? 'Live automation enabled' : 'New live entries disabled')+'</p></div></div><div class="strategy-pnl"><span class="pnl-label">Closed trades · '+(summary.net != null ? (summary.chargesFinal ? 'net' : 'net estimate') : 'gross; fees pending')+'</span><b>'+(summary.net != null ? money(summary.net) : summary.closed ? money(summary.realized) : '—')+'</b><small>'+rows.length+' broker trade'+(rows.length===1?'':'s')+'</small></div></div>'+
-    (exits ? '<div class="strategy-controls">'+exits+'</div>' : '')+
-    (cards ? '<div class="execution-cards">'+cards+'</div>' : '<div class="empty-state"><div><b>No live orders for this selection</b><p>Paper signals are shown in Paper mode.</p></div></div>')+'</section>';
+  return `<section data-key="${esc(p)}" class="card strat live-strategy" aria-label="${esc(LABELS[p] || p)} live execution">
+    <header class="strategy-top"><div class="strategy-title"><span class="strategy-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="${icon}"/></svg></span><div><h3>${esc(LABELS[p] || p)}</h3><div class="strategy-meta"><span>${rows.length} broker trade${rows.length===1?'':'s'}</span><span class="entry-status${active ? ' enabled' : ''}">${entryStatus}</span></div></div></div>
+      <div class="strategy-pnl"><span class="pnl-label">${totalLabel}</span><b class="${totalTone}">${total == null ? '—' : money(total)}</b></div>
+    </header>
+    ${exits ? '<div class="strategy-controls">'+exits+'</div>' : ''}
+    ${cards ? '<div class="execution-cards">'+cards+'</div>' : '<div class="empty-state"><div><b>No trades this session</b><p>New fills will appear here.</p></div></div>'}
+  </section>`;
 }
 function orderCell(o) {
   if (!o) return '—';
@@ -129,10 +183,10 @@ function updateLiveValues() {
   }
   if (S.view.day) { text($('totalPnl'),money(total)); color($('totalPnl'),total); }
   renderLiveSummary();
-  const replay = S.view.day && S.view.day !== todayIST();
-  const label = liveView() ? 'Saved broker fills' : replay ? 'Replay · prices fixed' : !S.market_open ? 'Market closed' : open ? (delayed ? 'Prices delayed · retrying' : 'Market prices · 1s') : 'Prices · waiting for entry';
+  const previous = S.intraday_session?.phase==='previous';
+  const label = !S.intraday_session?.day ? 'Calendar unavailable' : liveView() || previous ? sessionLabel() : !S.market_open ? 'Today · Market closed' : open ? (delayed ? 'Prices delayed · retrying' : 'Market prices · 1s') : 'Today · Awaiting entry';
   text($('refreshHint'),label); $('refreshHint').classList.toggle('quote-delayed',!liveView() && !!open && delayed);
-  $('refreshHint').title = liveView() ? 'All saved strategy orders. Open valuation requires a fresh current quote.' : open && delayed ? Q?.error || 'Waiting for a fresh price from Upstox.' : 'Open trade prices and running P&L refresh every second.';
+  $('refreshHint').title = liveView() ? 'Active trading session. Resets at 08:30 IST on trading days. Prior open or unresolved positions remain visible.' : open && delayed ? Q?.error || 'Waiting for a fresh price from Upstox.' : 'Open trade prices and running P&L refresh every second.';
 }
 async function refreshQuotes() {
   if (!S || quoting || document.hidden) return;
@@ -156,9 +210,7 @@ function tradeCard(t, qty) {
 function render() {
   if (confirming) return;
   const {state,view} = S;
-  $('sessionContext').textContent = liveView() ? 'Live strategy execution · all saved sessions · confirmed broker quantities and fills' : 'Results: ' + (view.day || 'no session') + ' · ' +
-    (!view.day ? 'NO SCANS YET' : view.day !== todayIST() ? 'HISTORICAL SESSION — replay prices' : S.market_open ? 'TODAY — market open' : 'TODAY — market closed') +
-    (liveView() ? ' · Live execution uses all saved strategy orders.' : ' · Paper simulation · 1 lot per trade · before charges.');
+  $('sessionContext').textContent = liveView() ? '' : sessionLabel()+' · 1 lot per trade · Before charges';
   showBrokerErrors();
   const liveCount = PRESETS.filter(p=>selectedAccounts().some(a=>a.live[p])).length;
   const missing = B && S.market_calendar?.login_alerts_required ? selectedAccounts().filter(a => PRESETS.some(p => a.live[p]) && !B[a.broker]?.logged_in).map(a => BROKER_NAMES[a.broker]) : [];
@@ -176,7 +228,7 @@ function render() {
   PRESETS.forEach(p => { const trades = view.results?.[p] || []; pnl += trades.reduce((a,t) => a + t.pnl * paperLots(p) * lotSize(p),0); tradesCount += trades.length; openCount += trades.filter(t => t.open).length; });
   $('totalPnl').textContent = view.day ? money(pnl) : '—'; $('totalPnl').className = 'metric-value' + (view.day ? (pnl >= 0 ? ' up' : ' down') : '');
   $('totalTrades').textContent = view.day ? tradesCount : '—'; $('openTrades').textContent = view.day ? openCount : '—';
-  $('tradeCaption').textContent = view.day ? `${view.day}${view.day !== todayIST() ? ' · Replay' : ' · Today'}` : 'No scans yet';
+  $('tradeCaption').textContent = sessionLabel();
   $('activeStrats').textContent = `${PRESETS.filter(p => state.config[p].on).length} / ${PRESETS.length}`;
   $('activeCaption').textContent = 'Paper scanning · 1 simulated lot per trade';
   const errorCount = Object.keys(view.errors || {}).length;
@@ -188,7 +240,7 @@ function render() {
     const filter=tradeFilters.get(), filtering=Object.values(filter).some(Boolean);
     if (filtering) shown=shown.filter(p=>liveView() ? executions().some(r=>r.preset===p && matchExecution(r)) : (view.results?.[p] || []).some(t=>matchPaper(t,p)) || !filter.q && !filter.status && p===filter.strategy);
     $('trade-filter-summary').textContent = shown.length+(shown.length===1?' strategy':' strategies')+' shown'+(filtering?' · Filters apply to the list; summary totals above cover the full selected mode and broker.':' · Summary totals cover the selected mode and broker.');
-    const cards = liveView() ? shown.map(liveStrategy).join('') || '<div class="card empty-state"><div><b>No live strategy orders for this selection</b><p>Use Live trading settings to review automation. Switching this view never enables orders.</p></div></div>' : shown.map(p => { const index = PRESETS.indexOf(p);
+    const cards = liveView() ? shown.map(liveStrategy).join('') || '<div class="card empty-state"><div><b>No trades this session</b><p>New strategy fills will appear here.</p></div></div>' : shown.map(p => { const index = PRESETS.indexOf(p);
       const cfg = state.config[p], trades = (view.results?.[p] || []).filter(t=>matchPaper(t,p)), err = view.errors?.[p] || view.errors?.scan;
       const qty = paperLots(p) * lotSize(p), pts = trades.reduce((a,t) => a + t.pnl,0), open = trades.filter(t => t.open).length;
       const rows = trades.map((t,i) => { const st = t.open ? 'OPEN' : t.status, pc = t.pnl >= 0 ? 'up' : 'down';
@@ -198,7 +250,7 @@ function render() {
         <div class="strategy-top"><div class="strategy-title"><span class="strategy-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="${STRATEGY_ICONS[index]}"/></svg></span><div><h3>${esc(LABELS[p] || p)}</h3><p>${DESCRIPTIONS[p]}</p></div></div><div class="strategy-pnl"><span class="pnl-label">Paper P&amp;L</span><b data-strategy-pnl="${p}" class="${pts >= 0 ? 'up' : 'down'}">${Object.hasOwn(view.results || {},p) ? money(pts * qty) : '—'}</b><small>${trades.length} trade${trades.length===1?'':'s'}${open ? ` · ${open} open` : ''}</small></div></div>
 
         ${err ? `<p class="strategy-error" role="status">${esc(err)}</p>` : ''}
-        ${trades.length ? `<div class="scroll trade-scroll" tabindex="0" role="region" aria-label="${esc(LABELS[p] || p)} trades; scroll for more columns"><table><thead><tr><th>#</th><th>Entry</th><th>Option</th><th>Entry ₹</th><th>SL</th><th>Target</th><th>Max profit</th><th>Max loss</th><th>Status</th><th>Exit</th><th>Exit / LTP</th><th>P&amp;L pts</th><th>P&amp;L ₹</th></tr></thead><tbody>${rows}</tbody></table></div><div class="trade-cards">${trades.map(t => tradeCard(t,qty)).join('')}</div>` : `<div class="empty-state"><span class="empty-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/></svg></span><div><b>${!cfg.on ? 'Strategy paused' : err ? 'Market data unavailable' : !Object.hasOwn(view.results || {},p) ? 'No saved scan' : 'Awaiting signal'}</b><p>${!cfg.on ? 'Enable Paper to start tracking signals.' : err ? 'Check the message above and try scanning again.' : !Object.hasOwn(view.results || {},p) ? 'Run a paper scan to view results.' : view.day ? `No trades for ${esc(view.day)}.` : ''}</p></div></div>`}
+        ${trades.length ? `<div class="scroll trade-scroll" tabindex="0" role="region" aria-label="${esc(LABELS[p] || p)} trades; scroll for more columns"><table><thead><tr><th>#</th><th>Entry</th><th>Option</th><th>Entry ₹</th><th>SL</th><th>Target</th><th>Max profit</th><th>Max loss</th><th>Status</th><th>Exit</th><th>Exit / LTP</th><th>P&amp;L pts</th><th>P&amp;L ₹</th></tr></thead><tbody>${rows}</tbody></table></div><div class="trade-cards">${trades.map(t => tradeCard(t,qty)).join('')}</div>` : `<div class="empty-state"><span class="empty-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/></svg></span><div><b>${!cfg.on ? 'Strategy paused' : err ? 'Market data unavailable' : !Object.hasOwn(view.results || {},p) ? 'No trades this session' : 'Awaiting signal'}</b><p>${!cfg.on ? 'Enable Paper to start tracking signals.' : err ? 'Check the message above and try scanning again.' : !Object.hasOwn(view.results || {},p) ? 'Waiting for the next scan.' : view.day ? `No trades for ${esc(view.day)}.` : ''}</p></div></div>`}
       </section>`;
     });
     if (liveView()) StableDOM.html($('strats'),cards);
@@ -211,7 +263,6 @@ function render() {
   }
   $('strats').setAttribute('aria-busy','false');
   renderSettings();
-  $('log').textContent = (state.log || []).slice().reverse().join('\n') || 'No live orders yet.';
   updateLiveValues();
 }
 const editingConfig = () => S && document.activeElement?.matches('#strats input, #stratDialog input');
@@ -236,11 +287,32 @@ function renderSettings() {
 
 }
 
+function sessionLabel() {
+  const session=S?.intraday_session;
+  if(!session?.day)return 'Trading calendar unavailable';
+  const date=new Intl.DateTimeFormat('en-IN',{day:'numeric',month:'short',timeZone:'Asia/Kolkata'}).format(new Date(session.day+'T12:00:00+05:30'));
+  return (session.phase==='current'?'Today':'Previous session')+' · '+date;
+}
+function scheduleSessionReset() {
+  clearTimeout(sessionTimer);
+  const delay=IntradayView.resetDelay(S?.intraday_session);
+  sessionDeadline=delay===null?null:performance.now()+delay;
+  if(delay!==null)sessionTimer=setTimeout(checkSessionReset,Math.min(delay,2147483647));
+}
+function checkSessionReset() {
+  if(sessionDeadline===null||performance.now()<sessionDeadline)return false;
+  const next=IntradayView.rollover(S);
+  clearTimeout(sessionTimer);sessionDeadline=null;
+  if(next===S)return false;
+  refreshVersion++;S=next;Q=null;executionDetails=null;detailsFetchedAt=0;
+  render();refresh();
+  return true;
+}
 async function refresh() {
   if (refreshing || busy || saving || confirming || editingConfig()) return;
   refreshing = true; const version = refreshVersion;
   const done=LoadingUI.begin('#strats',{initial:!S,kind:'cards',label:'Updating…',retry:refresh});
-  try { const next = await api('/api/paper'); if (version !== refreshVersion || confirming || editingConfig()) return; S = next; $('connection').hidden = true; render(); }
+  try { const next = await api('/api/paper?intraday=true'); if (version !== refreshVersion || confirming || editingConfig()) return; S = next; scheduleSessionReset(); $('connection').hidden = true; render(); }
   catch (e) { done(e); if (version !== refreshVersion) return; $('connectionText').textContent = 'Unable to update. Showing the last available data. ' + e.message; $('connection').hidden = false; $('refreshHint').textContent = 'Connection interrupted'; }
   finally { done(); refreshing = false; if (version !== refreshVersion && !busy && !saving) refresh(); }
 }
@@ -322,9 +394,9 @@ $('stratDialog').addEventListener('click',e => {   // a click on the backdrop, o
 });
 $('settingsBtn').addEventListener('click',() => { $('stratDialog').showModal(); renderSettings(); });
 $('strats').addEventListener('focusout',() => { setTimeout(() => { if(S && !saving && !confirming && !$('strats').contains(document.activeElement)) render(); },0); });
-document.addEventListener('visibilitychange',() => { if(!document.hidden) { refresh(); refreshQuotes(); } });
-refresh().then(refreshQuotes); loadBrokers();
+document.addEventListener('visibilitychange',() => { if(!document.hidden) { checkSessionReset(); refresh(); refreshQuotes(); } });
+refresh().then(()=>{ refreshQuotes();loadExecutionDetails(); }); loadBrokers();
 
 setInterval(() => { if(!document.hidden) loadBrokers(); },60000);
-setInterval(() => { if(!document.hidden) refresh(); },10000);
-setInterval(() => { if(!document.hidden) { updateLiveValues(); refreshQuotes(); } },1000);
+setInterval(() => { if(!document.hidden) { refresh();loadExecutionDetails(); } },10000);
+setInterval(() => { if(!document.hidden) { checkSessionReset(); updateLiveValues(); refreshQuotes(); } },1000);

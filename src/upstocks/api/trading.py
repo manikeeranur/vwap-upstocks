@@ -10,8 +10,14 @@ router = APIRouter()
 
 
 @router.get("/api/paper")
-async def paper_state(request: Request):
-    return request.app.state.trading.snapshot(request.state.user_id)
+async def paper_state(request: Request, intraday: bool = False):
+    return request.app.state.trading.snapshot(request.state.user_id, intraday=intraday)
+
+
+@router.get("/api/paper/execution-details")
+async def paper_execution_details(request: Request):
+    trading = request.app.state.trading
+    return await trading.execution_details.get(trading.snapshot(request.state.user_id, intraday=True))
 
 
 @router.get("/api/paper/fills")

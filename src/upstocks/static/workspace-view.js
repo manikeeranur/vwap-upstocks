@@ -13,6 +13,8 @@
   function bind(options = {}) {
     const bar = document.querySelector('[data-view-toolbar]');
     const single = !!options.single;
+    const brokerSelect = bar.querySelector('[data-view-broker]');
+    const brokerOptions = bar.querySelectorAll('[data-view-broker-option]');
     let saved; try { saved = JSON.parse(sessionStorage.getItem('upstocks.view.v1')); } catch {}
     let value = read(location.search,saved,single), changing = false;
     const descriptions = options.descriptions || {
@@ -27,7 +29,11 @@
       bar.querySelector('[data-view-title]').textContent = value.mode === 'paper' ? 'Paper mode' : 'Live mode';
       bar.querySelector('[data-view-description]').textContent = descriptions[value.mode];
       bar.querySelector('[data-view-broker-label]').hidden = value.mode !== 'live';
-      const broker = bar.querySelector('[data-view-broker]'); broker.value = value.broker; broker.disabled = changing;
+      if (brokerSelect) { brokerSelect.value = value.broker; brokerSelect.disabled = changing; }
+      brokerOptions.forEach(button => {
+        button.setAttribute('aria-pressed',String(button.dataset.viewBrokerOption === value.broker));
+        button.disabled = changing || value.mode !== 'live';
+      });
       const url = new URL(location.href);
       url.searchParams.set('mode',value.mode);
       if (value.mode === 'live') url.searchParams.set('broker',value.broker); else url.searchParams.delete('broker');
@@ -54,7 +60,10 @@
       } finally { changing = false; paint(); }
     }
     bar.querySelectorAll('[data-view-mode]').forEach(b => b.addEventListener('click',()=>change({...value,mode:b.dataset.viewMode})));
-    bar.querySelector('[data-view-broker]').addEventListener('change',e=>change({...value,broker:e.target.value}));
+    brokerSelect?.addEventListener('change',e=>change({...value,broker:e.target.value}));
+    brokerOptions.forEach(button => button.addEventListener('click',()=>{
+      if (value.mode === 'live') return change({...value,broker:button.dataset.viewBrokerOption});
+    }));
     paint();
     return {get:()=>({...value}), legacy:()=>value.mode === 'paper' ? 'paper' : value.broker === 'all' ? 'live' : 'live:'+value.broker};
   }
