@@ -44,6 +44,12 @@ class ApiTests(unittest.TestCase):
         with TestClient(create_app(self.settings)) as client:
             self.assertEqual(client.get("/api/paper").json()["state"]["accounts"]["1:upstox"]["lots"]["frontend_live"], 3)
 
+    def test_manual_scan_endpoint_requests_simulation_only(self):
+        with TestClient(self.app) as client, patch.object(self.app.state.trading, "scan", new_callable=AsyncMock) as scan:
+            scan.return_value = {"day": "2026-10-30", "results": {}}
+            self.assertEqual(client.post("/api/paper/scan", json={}).status_code, 200)
+            scan.assert_awaited_once_with(None, execute_live=False)
+
     def test_routes_headers_readiness_and_no_network(self):
         with TestClient(self.app) as client, patch("upstocks.upstox.expiries", new=AsyncMock(return_value=[])), patch("upstocks.upstox.account", new=AsyncMock(return_value={"profile": {"data": None, "error": "static IP required"}})):
             self.assertEqual(client.get("/").status_code, 200)

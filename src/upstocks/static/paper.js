@@ -10,28 +10,70 @@ const ampm = s => { if (!s) return '—'; const [h,m] = s.split(':').map(Number)
 const todayIST = () => { const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date()).map(v => [v.type,v.value])); return `${p.year}-${p.month}-${p.day}`; };
 const BROKER_NAMES = {upstox:'Upstox', kite:'Kite', indmoney:'INDmoney'}, BROKER_ORDER = ['upstox','kite','indmoney'];
 let B = null, brokerError = '', fillsError = '';
-function showBrokerErrors() { const errors = [brokerError,fillsError,...Object.values(S?.reconciliation || {}).map(v => v.error)].filter(Boolean); $('brokerRefreshError').hidden = !errors.length; $('brokerRefreshError').textContent = errors.join(' · '); }
+function showBrokerErrors() { const errors = [brokerError,fillsError,...(S ? selectedAccounts().map(a => S.reconciliation?.[a.id]?.error) : [])].filter(Boolean); $('brokerRefreshError').hidden = !errors.length; $('brokerRefreshError').textContent = errors.join(' · '); }
 const accounts = () => BROKER_ORDER.map(b => { const e = Object.entries(S.state.accounts || {}).find(([,a]) => a.broker === b); return e && {id:e[0], ...e[1]}; }).filter(Boolean);
 const account = b => accounts().find(a => a.broker === b);
-const isLive = p => accounts().some(a => a.live[p]);
+const anyLive = p => accounts().some(a => a.live[p]);
 const lotSize = p => S.state.lot_sizes?.[p] ?? S.state.lot_size;
 const paperOnly = p => (S.state.paper_only || []).includes(p);
-const paperLots = p => { const on = accounts().filter(a => a.live[p]); return on.length ? Math.max(...on.map(a => a.lots[p])) : account('upstox')?.lots[p] || 1; };
+const paperLots = () => 1; // Match the paper journal; broker lots never resize simulations.
 const openLive = (acc,p) => Object.entries(S.state.orders?.[acc] || {}).filter(([id,o]) => id.startsWith(p + '|') && (o.buy?.filled_qty || 0) > (o.sell?.filled_qty || 0)).length;
 async function loadBrokers() { try { B = (await api('/api/brokers')).brokers; brokerError = ''; if (S && !confirming) render(); } catch(e) { brokerError = 'Broker status unavailable: ' + e.message; } finally { showBrokerErrors(); } }
 let S = null, busy = false, saving = false, confirming = false, refreshing = false, refreshVersion = 0;
-let Q = null, quoting = false, quoteFailed = false, F = null;
-async function refreshFills() { try { F = await api('/api/paper/fills'); fillsError = ''; updateLiveValues(); } catch(e) { fillsError = 'Fill reconciliation unavailable: ' + e.message; } finally { showBrokerErrors(); } }
+let Q = null, quoting = false, quoteFailed = false;
+async function refreshFills() { try { await api('/api/paper/fills'); fillsError = ''; updateLiveValues(); } catch(e) { fillsError = 'Fill reconciliation unavailable: ' + e.message; } finally { showBrokerErrors(); } }
 async function api(path, body) {
   const r = await appFetch(path, body === undefined ? {} : {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
   const j = await r.json().catch(() => ({}));
   if (!r.ok) { const error = new Error(typeof j.detail === 'string' ? j.detail : j.error || `Request failed (${r.status}). Please try again.`); error.state = j.state; throw error; }
   return j;
 }
-function ordersCell(t, side) {
-  const list = Object.entries(t.orders || {}).filter(([,o]) => o[side]);
-  if (!list.length) return '—';
-  return list.map(([acc,o]) => `<span class="muted">${BROKER_NAMES[acc.split(':')[1]] || ''}</span> ${orderCell(o[side])}`).join('<br>');
+const dataView = WorkspaceView.bind({onChange:()=>{ if(S) render(); }});
+const liveView = () => dataView.get().mode === 'live';
+const selectedAccounts = () => accounts().filter(a => dataView.get().broker === 'all' || a.broker === dataView.get().broker);
+const executions = () => {
+  const prices = {};
+  for (const t of Object.values(S.view.results || {}).flat()) {
+    const m = tradeValues(t);
+    if (m.quote && !m.stale && S.view.day === todayIST()) prices[t.id] = m.price;
+  }
+  return UpstocksPnl.executionRows(S.state,Object.values(S.view.results || {}).flat(),prices,dataView.get().broker);
+};
+function renderLiveSummary() {
+  const rows = executions(), total = UpstocksPnl.executionSummary(rows);
+  const write = (id,value) => { $(id).textContent = value == null ? '—' : money(value); $(id).className = 'metric-value ' + (value == null ? '' : value >= 0 ? 'up' : 'down'); };
+  write('livePnl',total.closed ? total.realized : null); write('liveNet',total.net);
+  write('liveOpen',total.open && !total.valuationMissing ? total.valuation : null);
+  $('liveCaption').textContent = total.closed + (total.closed === 1 ? ' trade' : ' trades') + ' with confirmed exit fills · all saved sessions';
+  $('netCaption').textContent = total.net != null ? 'After final statement charges' : total.pending ? 'Waiting for order reconciliation' : total.open ? 'Available once positions close and charges are confirmed' : total.closed ? 'Waiting for final statement charges' : 'No confirmed closed trades';
+  $('openValuation').textContent = total.positions ? total.positions + (total.positions === 1 ? ' open position · ' : ' open positions · ') + (total.valuationMissing ? 'current quotes unavailable' : 'current quote estimate') : 'No confirmed open positions';
+  $('livePending').textContent = total.pending;
+  $('pendingCaption').textContent = total.pending ? 'Unresolved orders · verify with the broker' : 'No unresolved saved orders';
+  $('liveBrokers').innerHTML = selectedAccounts().map(a => {
+    const r = UpstocksPnl.executionSummary(rows.filter(x=>x.account === a.id));
+    return '<div class="live-broker"><span>'+BROKER_NAMES[a.broker]+'</span><b>'+(r.closed ? money(r.realized) : '—')+'</b><small>gross · '+r.positions+' open · '+r.pending+' unresolved</small></div>';
+  }).join('');
+}
+function liveStrategy(p) {
+  const rows = executions().filter(r=>r.preset === p), summary = UpstocksPnl.executionSummary(rows);
+  const enabled = selectedAccounts().some(a=>a.live[p]);
+  const cards = rows.map(r => {
+    const bought = r.buy?.filled_qty || 0, sold = r.sell?.filled_qty || 0;
+    const status = r.stats.pending ? 'Needs reconciliation' : r.stats.open ? 'Open position' : bought ? 'Closed position' : 'No confirmed fills';
+    const field = (name,value) => '<div><dt>'+name+'</dt><dd>'+value+'</dd></div>';
+    return '<article class="trade-card execution-card"><div class="trade-card-head"><b>'+esc(r.symbol)+'</b><span class="data-tag live">'+BROKER_NAMES[r.broker]+'</span></div>'+
+      '<p class="mode-summary-note">'+esc(r.date)+' · '+esc(status)+(r.client_id ? ' · '+esc(r.client_id) : '')+'</p><dl>'+
+      field('Bought / sold',bought+' / '+sold)+field('Remaining',r.stats.open)+
+      field('Buy fill',Number.isFinite(r.buy?.fill_price) ? money(r.buy.fill_price) : 'Unconfirmed')+
+      field('Sell fill',Number.isFinite(r.sell?.fill_price) ? money(r.sell.fill_price) : 'Unconfirmed')+
+      field('Realized gross',r.stats.closed ? money(r.stats.realized) : '—')+
+      field('Realized net',r.stats.net != null ? money(r.stats.net) : 'Unavailable')+'</dl>'+
+      '<details class="order-evidence"><summary>Order details</summary><p>Buy · '+orderCell(r.buy)+'</p><p>Sell · '+orderCell(r.sell)+'</p></details></article>';
+  }).join('');
+  const exits = selectedAccounts().map(a => { const n = openLive(a.id,p); return n ? '<button class="btn ghost sq" type="button" data-sq="'+p+'" data-broker="'+a.broker+'">Close '+n+' live position'+(n===1?'':'s')+' · '+BROKER_NAMES[a.broker]+'</button>' : ''; }).join('');
+  return '<section class="card strat" aria-label="'+esc(LABELS[p] || p)+' live execution"><div class="strategy-top"><div class="strategy-title"><div><h3>'+esc(LABELS[p] || p)+'</h3><p>'+(paperOnly(p) ? 'Paper only · live execution unavailable' : enabled ? 'Live automation enabled' : 'New live entries disabled')+'</p></div></div><div class="strategy-pnl"><span class="pnl-label">Live realized · gross</span><b>'+(summary.closed ? money(summary.realized) : '—')+'</b><small>'+rows.length+' broker trade'+(rows.length===1?'':'s')+'</small></div></div>'+
+    (exits ? '<div class="strategy-controls">'+exits+'</div>' : '')+
+    (cards ? '<div class="execution-cards">'+cards+'</div>' : '<div class="empty-state"><div><b>No live orders for this selection</b><p>Paper signals are shown in Paper mode.</p></div></div>')+'</section>';
 }
 function orderCell(o) {
   if (!o) return '—';
@@ -78,29 +120,14 @@ function updateLiveValues() {
     text(node,node.hasAttribute('data-trade-points') ? `${fmt(m.pnl)}${node.dataset.unit || ''}` : money(m.pnl * m.qty)); color(node,m.pnl);
   }
   for (const node of document.querySelectorAll('[data-strategy-pnl]')) {
-    const pnl = totals[node.dataset.strategyPnl]; text(node,S.view.day ? money(pnl) : '—'); color(node,pnl);
+    const pnl = totals[node.dataset.strategyPnl]; text(node,Object.hasOwn(S.view.results || {},node.dataset.strategyPnl) ? money(pnl) : '—'); color(node,pnl);
   }
   if (S.view.day) { text($('totalPnl'),money(total)); color($('totalPnl'),total); }
-  const reporting = {}, allTrades = Object.values(S.view.results || {}).flat(), prices = {};
-  for (const t of allTrades) prices[t.id] = tradeValues(t).price;
-  let realized = 0, valuation = 0, pending = 0, closed = 0, charges = 0, complete = true;
-  for (const acc of accounts()) {
-    const result = UpstocksPnl.summarize(allTrades, S.state.orders?.[acc.id] || {}, prices);
-    reporting[acc.broker] = result; realized += result.realized; valuation += result.valuation;
-    pending += result.pending; closed += result.closed; charges += result.charges;
-    complete &&= result.chargesComplete && !result.open && !result.pending;
-  }
-  text($('livePnl'),closed ? money(realized) : '—'); color($('livePnl'),realized);
-  text($('liveCaption'),closed + ' trades with confirmed exit fills · ' + pending + ' unresolved orders · ' +
-    (complete && closed ? 'net after reported charges ' + money(realized - charges) : !closed && !pending && !open ? 'No confirmed fills yet' : 'net unavailable until positions, orders and charges are resolved'));
-  text($('openValuation'),'Open-position valuation (estimated): ' + money(valuation));
-  $('liveBrokers').innerHTML = Object.entries(reporting).map(([broker,r]) => '<div class="live-broker"><span>' +
-    BROKER_NAMES[broker] + '</span><b>' + (r.closed ? money(r.realized) : '—') + '</b><small>' + r.pending +
-    ' unresolved · ' + r.open + ' open units</small></div>').join('');
+  renderLiveSummary();
   const replay = S.view.day && S.view.day !== todayIST();
-  const label = replay ? 'Replay · prices fixed' : !S.market_open ? 'Market closed' : open ? (delayed ? 'Prices delayed · retrying' : 'Live prices · 1s') : 'Prices · waiting for entry';
-  text($('refreshHint'),label); $('refreshHint').classList.toggle('quote-delayed',!!open && delayed);
-  $('refreshHint').title = open && delayed ? Q?.error || 'Waiting for a fresh price from Upstox.' : 'Open trade prices and running P&L refresh every second.';
+  const label = liveView() ? 'Saved broker fills' : replay ? 'Replay · prices fixed' : !S.market_open ? 'Market closed' : open ? (delayed ? 'Prices delayed · retrying' : 'Market prices · 1s') : 'Prices · waiting for entry';
+  text($('refreshHint'),label); $('refreshHint').classList.toggle('quote-delayed',!liveView() && !!open && delayed);
+  $('refreshHint').title = liveView() ? 'All saved strategy orders. Open valuation requires a fresh current quote.' : open && delayed ? Q?.error || 'Waiting for a fresh price from Upstox.' : 'Open trade prices and running P&L refresh every second.';
 }
 async function refreshQuotes() {
   if (!S || quoting || document.hidden) return;
@@ -119,24 +146,25 @@ function tradeCard(t, qty) {
   return `<article class="trade-card"><div class="trade-card-head"><b style="color:${t.type === 'CE' ? 'var(--ce)' : 'var(--pe)'}">${esc(t.symbol)}</b><span class="st ${esc(st)}">${esc(st === 'TIME_EXIT' ? 'TIME EXIT' : st)}</span></div>
     <dl>${field('Entry',`${ampm(t.entry_time)} · ₹${fmt(t.entry)}`)}${field(t.open ? 'Last price' : 'Exit',`${t.open ? '' : ampm(t.exit_time) + ' · '}${priceMarkup(t)}`)}${field('Stop-loss', t.sl > 0 ? `₹${fmt(t.sl)}` : 'None (trailing / time exit)')}${field('Target',`₹${fmt(t.target)}`)}${field('Max profit', peakCell(t.peak_high, t, qty))}${field('Max loss', peakCell(t.peak_low, t, qty))}</dl>
     <div class="trade-net"><span data-trade-points="${esc(t.id)}" data-unit=" pts" class="muted">${fmt(t.pnl)} pts</span><b data-trade-pnl="${esc(t.id)}" class="${pc}">${money(t.pnl * qty)}</b></div>
-    ${Object.keys(t.orders || {}).length ? `<div class="ord">Live BUY: ${ordersCell(t,'buy')}<br>Live SELL: ${ordersCell(t,'sell')}</div>` : ''}</article>`;
+    </article>`;
 }
 function render() {
   if (confirming) return;
   const {state,view} = S;
-  $('sessionContext').textContent = 'Results: ' + (view.day || 'no session') + ' · ' +
+  $('sessionContext').textContent = liveView() ? 'Live strategy execution · all saved sessions · confirmed broker quantities and fills' : 'Results: ' + (view.day || 'no session') + ' · ' +
     (!view.day ? 'NO SCANS YET' : view.day !== todayIST() ? 'HISTORICAL SESSION — replay prices' : S.market_open ? 'TODAY — market open' : 'TODAY — market closed') +
-    ' · Paper simulations and confirmed broker execution are reported separately.';
+    (liveView() ? ' · Live execution uses all saved strategy orders.' : ' · Paper simulation · 1 lot per trade · before charges.');
   showBrokerErrors();
-  const liveCount = PRESETS.filter(isLive).length;
-  const missing = B && S.market_calendar?.login_alerts_required ? accounts().filter(a => PRESETS.some(p => a.live[p]) && !B[a.broker]?.logged_in).map(a => BROKER_NAMES[a.broker]) : [];
+  const liveCount = PRESETS.filter(p=>selectedAccounts().some(a=>a.live[p])).length;
+  const missing = B && S.market_calendar?.login_alerts_required ? selectedAccounts().filter(a => PRESETS.some(p => a.live[p]) && !B[a.broker]?.logged_in).map(a => BROKER_NAMES[a.broker]) : [];
   $('loginBanner').hidden = !missing.length;
   $('loginText').textContent = missing.length ? `Live is ON but you are not logged in to ${missing.join(' and ')} today — those orders will be skipped.` : '';
-  $('modeBadge').textContent = liveCount ? `Live enabled · ${liveCount} ${liveCount === 1 ? 'strategy' : 'strategies'}` : 'Paper mode';
-  $('modeBadge').className = 'mode-badge' + (liveCount ? ' live' : '');
-  if (state.entries_paused) $('modeBadge').textContent = 'Live entries paused';
+  $('modeBadge').textContent = liveView() ? state.entries_paused ? 'Live entries paused' : liveCount+(liveCount===1?' strategy':' strategies')+' enabled for live orders' : PRESETS.filter(p=>state.config[p].on).length+' paper strategies enabled';
+  $('modeBadge').className = 'mode-badge'+(liveView() ? ' live' : '');
+  $('strategy-heading').textContent = liveView() ? 'Live strategy execution' : 'Paper strategies';
+  $('settingsLabel').textContent = liveView() ? 'Live trading settings' : 'Paper settings';
   $('pauseEntries').hidden = typeof state.revision !== 'number';
-  $('pauseEntries').textContent = state.entries_paused ? 'Resume entries' : 'Pause entries';
+  $('pauseEntries').textContent = state.entries_paused ? 'Resume all live entries' : 'Pause all live entries';
   $('pauseEntries').disabled = saving;
   $('pauseEntries').setAttribute('aria-pressed', String(!!state.entries_paused));
   let pnl = 0, tradesCount = 0, openCount = 0;
@@ -144,26 +172,34 @@ function render() {
   $('totalPnl').textContent = view.day ? money(pnl) : '—'; $('totalPnl').className = 'metric-value' + (view.day ? (pnl >= 0 ? ' up' : ' down') : '');
   $('totalTrades').textContent = view.day ? tradesCount : '—'; $('openTrades').textContent = view.day ? openCount : '—';
   $('tradeCaption').textContent = view.day ? `${view.day}${view.day !== todayIST() ? ' · Replay' : ' · Today'}` : 'No scans yet';
-  $('activeStrats').textContent = `${PRESETS.filter(p => state.config[p].on || isLive(p)).length} / ${PRESETS.length}`;
-  $('activeCaption').textContent = liveCount ? `${liveCount} with live orders enabled` : PRESETS.some(p => state.config[p].on) ? 'Paper trading enabled' : 'All strategies paused';
+  $('activeStrats').textContent = `${PRESETS.filter(p => state.config[p].on).length} / ${PRESETS.length}`;
+  $('activeCaption').textContent = 'Paper scanning · 1 simulated lot per trade';
   const errorCount = Object.keys(view.errors || {}).length;
   $('pnlCaption').textContent = errorCount ? `Incomplete scan · ${errorCount} ${errorCount === 1 ? 'error' : 'errors'}` : 'Simulated · before charges';
   if (!$('strats').contains(document.activeElement)) {
-    // Harmonic, then EMA pullback, then the rest; each card keeps its own icon (icons follow PRESETS order).
-    const shown = shownPresets();
-    $('strats').innerHTML = shown.map(p => { const index = PRESETS.indexOf(p);
+    // Put trades and errors first; keep idle strategies available without filling the overview.
+    const known = executions().map(r=>r.preset);
+    const shown = liveView() ? [...new Set([...shownPresets(),...known])].filter(p=>known.includes(p) || selectedAccounts().some(a=>a.live[p])) : shownPresets().sort((a,b)=>(view.results?.[b]?.length || 0)-(view.results?.[a]?.length || 0));
+    const cards = liveView() ? shown.map(liveStrategy).join('') || '<div class="card empty-state"><div><b>No live strategy orders for this selection</b><p>Use Live trading settings to review automation. Switching this view never enables orders.</p></div></div>' : shown.map(p => { const index = PRESETS.indexOf(p);
       const cfg = state.config[p], trades = view.results?.[p] || [], err = view.errors?.[p] || view.errors?.scan;
-      const qty = paperLots(p) * lotSize(p), live = isLive(p), pts = trades.reduce((a,t) => a + t.pnl,0), open = trades.filter(t => t.open).length;
+      const qty = paperLots(p) * lotSize(p), pts = trades.reduce((a,t) => a + t.pnl,0), open = trades.filter(t => t.open).length;
       const rows = trades.map((t,i) => { const st = t.open ? 'OPEN' : t.status, pc = t.pnl >= 0 ? 'up' : 'down';
-        return `<tr><td>${i+1}</td><td>${ampm(t.entry_time)}</td><td><b style="color:${t.type === 'CE' ? 'var(--ce)' : 'var(--pe)'}">${esc(t.symbol)}</b></td><td>₹${fmt(t.entry)}</td><td>₹${fmt(t.sl)}</td><td>₹${fmt(t.target)}</td><td>${peakCell(t.peak_high, t, qty)}</td><td>${peakCell(t.peak_low, t, qty)}</td><td class="st ${esc(st)}">${esc(st === 'TIME_EXIT' ? 'TIME EXIT' : st)}</td><td>${t.open ? '—' : ampm(t.exit_time)}</td><td>${priceMarkup(t)}</td><td data-trade-points="${esc(t.id)}" class="${pc}">${fmt(t.pnl)}</td><td class="${pc}"><b data-trade-pnl="${esc(t.id)}">${money(t.pnl * qty)}</b></td><td class="ord">${ordersCell(t,'buy')}</td><td class="ord">${ordersCell(t,'sell')}</td></tr>`;
+        return `<tr><td>${i+1}</td><td>${ampm(t.entry_time)}</td><td><b style="color:${t.type === 'CE' ? 'var(--ce)' : 'var(--pe)'}">${esc(t.symbol)}</b></td><td>₹${fmt(t.entry)}</td><td>₹${fmt(t.sl)}</td><td>₹${fmt(t.target)}</td><td>${peakCell(t.peak_high, t, qty)}</td><td>${peakCell(t.peak_low, t, qty)}</td><td class="st ${esc(st)}">${esc(st === 'TIME_EXIT' ? 'TIME EXIT' : st)}</td><td>${t.open ? '—' : ampm(t.exit_time)}</td><td>${priceMarkup(t)}</td><td data-trade-points="${esc(t.id)}" class="${pc}">${fmt(t.pnl)}</td><td class="${pc}"><b data-trade-pnl="${esc(t.id)}">${money(t.pnl * qty)}</b></td></tr>`;
       }).join('');
-      return `<section class="card strat ${live ? 'islive' : ''}" aria-label="${esc(LABELS[p])}">
-        <div class="strategy-top"><div class="strategy-title"><span class="strategy-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="${STRATEGY_ICONS[index]}"/></svg></span><div><h3>${esc(LABELS[p])}</h3><p>${DESCRIPTIONS[p]}</p></div></div><div class="strategy-pnl"><span class="pnl-label">P&amp;L</span><b data-strategy-pnl="${p}" class="${pts >= 0 ? 'up' : 'down'}">${view.day ? money(pts * qty) : '—'}</b><small>${trades.length} trades${open ? ` · ${open} open` : ''}</small></div></div>
-        ${(sq => sq ? `<div class="strategy-controls">${sq}</div>` : '')(accounts().map(a => { const pos = openLive(a.id,p); return pos ? `<button class="btn ghost sq" type="button" data-sq="${p}" data-broker="${a.broker}">Square off ${pos} · ${BROKER_NAMES[a.broker]}</button>` : ''; }).join(''))}
+      return `<section class="card strat" aria-label="${esc(LABELS[p] || p)}">
+        <div class="strategy-top"><div class="strategy-title"><span class="strategy-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="${STRATEGY_ICONS[index]}"/></svg></span><div><h3>${esc(LABELS[p] || p)}</h3><p>${DESCRIPTIONS[p]}</p></div></div><div class="strategy-pnl"><span class="pnl-label">Paper P&amp;L</span><b data-strategy-pnl="${p}" class="${pts >= 0 ? 'up' : 'down'}">${Object.hasOwn(view.results || {},p) ? money(pts * qty) : '—'}</b><small>${trades.length} trade${trades.length===1?'':'s'}${open ? ` · ${open} open` : ''}</small></div></div>
+
         ${err ? `<p class="strategy-error" role="status">${esc(err)}</p>` : ''}
-        ${trades.length ? `<div class="scroll trade-scroll" tabindex="0" role="region" aria-label="${esc(LABELS[p])} trades; scroll for more columns"><table><thead><tr><th>#</th><th>Entry</th><th>Option</th><th>Entry ₹</th><th>SL</th><th>Target</th><th>Max profit</th><th>Max loss</th><th>Status</th><th>Exit</th><th>Exit / LTP</th><th>P&amp;L pts</th><th>P&amp;L ₹</th><th>Live BUY</th><th>Live SELL</th></tr></thead><tbody>${rows}</tbody></table></div><div class="trade-cards">${trades.map(t => tradeCard(t,qty)).join('')}</div>` : `<div class="empty-state"><span class="empty-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/></svg></span><div><b>${!cfg.on && !live ? 'Strategy paused' : err ? 'Market data unavailable' : 'Awaiting signal'}</b><p>${!cfg.on && !live ? 'Enable Paper to start tracking signals.' : err ? 'Check the message above and try scanning again.' : view.day ? `No trades for ${esc(view.day)}.` : ''}</p></div></div>`}
+        ${trades.length ? `<div class="scroll trade-scroll" tabindex="0" role="region" aria-label="${esc(LABELS[p] || p)} trades; scroll for more columns"><table><thead><tr><th>#</th><th>Entry</th><th>Option</th><th>Entry ₹</th><th>SL</th><th>Target</th><th>Max profit</th><th>Max loss</th><th>Status</th><th>Exit</th><th>Exit / LTP</th><th>P&amp;L pts</th><th>P&amp;L ₹</th></tr></thead><tbody>${rows}</tbody></table></div><div class="trade-cards">${trades.map(t => tradeCard(t,qty)).join('')}</div>` : `<div class="empty-state"><span class="empty-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/></svg></span><div><b>${!cfg.on ? 'Strategy paused' : err ? 'Market data unavailable' : !Object.hasOwn(view.results || {},p) ? 'No saved scan' : 'Awaiting signal'}</b><p>${!cfg.on ? 'Enable Paper to start tracking signals.' : err ? 'Check the message above and try scanning again.' : !Object.hasOwn(view.results || {},p) ? 'Run a paper scan to view results.' : view.day ? `No trades for ${esc(view.day)}.` : ''}</p></div></div>`}
       </section>`;
-    }).join('');
+    });
+    if (liveView()) $('strats').innerHTML = cards;
+    else {
+      const hasActivity = i => view.results?.[shown[i]]?.length || view.errors?.[shown[i]] || view.errors?.scan;
+      const active = cards.filter((_,i)=>hasActivity(i)), idle = cards.filter((_,i)=>!hasActivity(i));
+      const expanded = $('strats').querySelector('.idle-strategies')?.open;
+      $('strats').innerHTML = active.join('') + (idle.length ? '<details class="idle-strategies"' + (expanded ? ' open' : '') + '><summary>Strategies without trades ('+idle.length+')</summary><div class="strategy-list">'+idle.join('')+'</div></details>' : '');
+    }
   }
   $('strats').setAttribute('aria-busy','false');
   renderSettings();
@@ -176,18 +212,19 @@ const shownPresets = () => { const first = ['harmonic','harmonic_2y','harmonic_p
 function renderSettings() {
   if (!S || !$('stratDialog').open) return;
   if (document.activeElement?.matches('#stratDialog input[type=number]')) return;   // don't wipe what is being typed
-  const accs = accounts();
-  $('stratDialogSub').textContent = `Paper, live orders and lots for every strategy · lot size ${S.state.lot_size} (SENSEX ${lotSize('sensex_swing')})`;
-  const head = accs.map(a => `<th><span class="th-broker">${brokerLogo(a.broker,16)}${BROKER_NAMES[a.broker]} Live · lots</span>${S.market_calendar?.login_alerts_required && B && !B[a.broker]?.logged_in ? '<small class="th-warn">Not logged in today</small>' : ''}</th>`).join('');
+  const accs = selectedAccounts();
+  $('stratDialogSub').textContent = liveView() ? 'Live broker orders · each account has its own quantity' : 'Paper simulations · one lot per trade';
+  $('settingsHelp').textContent = liveView() ? 'Changes save immediately. Enabling live orders requires confirmation.' : 'Paper scan settings save immediately. Broker order settings are separate.';
+  const head = (liveView() ? accs : []).map(a => `<th><span class="th-broker">${brokerLogo(a.broker,16)}${BROKER_NAMES[a.broker]} Live · lots</span>${S.market_calendar?.login_alerts_required && B && !B[a.broker]?.logged_in ? '<small class="th-warn">Not logged in today</small>' : ''}</th>`).join('');
   const rows = shownPresets().map(p => {
     const cfg = S.state.config[p];
-    return `<tr><td><b>${esc(LABELS[p])}</b><small>${DESCRIPTIONS[p]}</small></td>
-      <td data-label="Paper"><label class="check tog"><input type="checkbox" role="switch" aria-label="Paper scanning for ${esc(LABELS[p])}" data-on="${p}" ${cfg.on ? 'checked' : ''}><span class="sw"></span></label></td>
-      ${accs.map(a => { const n = BROKER_NAMES[a.broker];
-        return `<td data-label="${n} Live"><div class="set-cell ${a.live[p] ? 'on' : ''}">${brokerLogo(a.broker,20)}<label class="check tog livechk"><input type="checkbox" role="switch" aria-label="${n} live orders for ${esc(LABELS[p])}" data-live="${p}" data-broker="${a.broker}" ${a.live[p] ? 'checked' : ''} ${paperOnly(p) ? 'disabled title="Paper only for now"' : ''}><span class="sw"></span></label>
-          <input type="number" class="lots" aria-label="${n} lots for ${esc(LABELS[p])}" title="Lots" data-lots="${p}" data-broker="${a.broker}" min="1" step="1" inputmode="numeric" value="${a.lots[p]}" required>${a.live[p] ? '<span class="live-dot" title="Live orders on">LIVE</span>' : ''}</div></td>`; }).join('')}</tr>`;
+    return `<tr><td><b>${esc(LABELS[p] || p)}</b><small>${DESCRIPTIONS[p]}</small></td>
+      ${!liveView() ? `<td data-label="Paper"><label class="check tog"><input type="checkbox" role="switch" aria-label="Paper scanning for ${esc(LABELS[p] || p)}" data-on="${p}" ${cfg.on ? 'checked' : ''}><span class="sw"></span></label></td>` : ""}
+      ${(liveView() ? accs : []).map(a => { const n = BROKER_NAMES[a.broker];
+        return `<td data-label="${n} Live"><div class="set-cell ${a.live[p] ? 'on' : ''}">${brokerLogo(a.broker,20)}<label class="check tog livechk"><input type="checkbox" role="switch" aria-label="${n} live orders for ${esc(LABELS[p] || p)}" data-live="${p}" data-broker="${a.broker}" ${a.live[p] ? 'checked' : ''} ${paperOnly(p) ? 'disabled title="Paper only for now"' : ''}><span class="sw"></span></label>
+          <input type="number" class="lots" aria-label="${n} lots for ${esc(LABELS[p] || p)}" title="Lots" data-lots="${p}" data-broker="${a.broker}" min="1" step="1" inputmode="numeric" value="${a.lots[p]}" required>${a.live[p] ? '<span class="live-dot" title="Live orders on">LIVE</span>' : ''}</div></td>`; }).join('')}</tr>`;
   }).join('');
-  $('stratDialogBody').innerHTML = '<div class="set-scroll"><table class="set-table"><thead><tr><th>Strategy</th><th>Paper</th>' + head + '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+  $('stratDialogBody').innerHTML = '<div class="set-scroll"><table class="set-table"><thead><tr><th>Strategy</th>' + (liveView() ? '' : '<th>Paper scanning</th>') + head + '</tr></thead><tbody>' + rows + '</tbody></table></div>';
 
 }
 
@@ -229,7 +266,7 @@ async function saveConfig(body, input) {
 $('pauseEntries').addEventListener('click', async () => {
   if (!S || saving || confirming) return;
   const paused = !S.state.entries_paused;
-  const enabled = PRESETS.filter(isLive);
+  const enabled = PRESETS.filter(anyLive);
   if (!paused && enabled.length && !await confirmAction({
     title:'Resume live entries?', message:'Enabled intraday and stock portfolios can place new real orders again. Existing exits continue.',
     confirmText:'Resume entries', danger:true, facts:[['Strategies',enabled.map(p => LABELS[p]).join(', ')]]
@@ -250,7 +287,7 @@ $('strats').addEventListener('click',async e => {
   finally { saving = false; button.disabled = false; await refresh(); }
 });
 async function onConfigChange(e) {
-  const input = e.target, {on,lots,live:lv,broker,mlive,mon} = input.dataset;
+  const input = e.target, {on,lots,live:lv,broker} = input.dataset;
   if(lv) {
     const enabled = input.checked, acc = account(broker), cfg = {live:!!acc?.live[lv], lots:acc?.lots[lv] || 1};
     input.checked = cfg.live;

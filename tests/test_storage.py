@@ -30,10 +30,10 @@ class StorageTests(unittest.TestCase):
         tid, ctx = "harmonic|2026-10-28|10:01|NSE_FO|1", {"trade": {}}
         for side, oid, price in (("BUY", "b1", 439.1), ("SELL", "s1", 543.8)):
             self.assertTrue(self.repo.reserve_order(tid, "1:kite", "harmonic", side, {"status": "pending", "qty": 65}, ctx))
-            self.repo.finish_order(tid, "1:kite", side, {"status": "submitted", "order_id": oid, "qty": 65}, "sent")
+            self.repo.finish_order(tid, "1:kite", side, {"status": "submitted", "order_id": oid, "qty": 65, "broker_symbol": "NIFTY SAMPLE CE"}, "sent")
             self.repo.save_fill(tid, "1:kite", side, price, 60.5 if side == "BUY" else 67.58, filled_qty=65, execution_status="complete")
         live = self.repo.journal("2026-10-28", "2026-10-28")["live"]
-        self.assertEqual(live, {tid: {"1:kite": {"qty": 65, "sold_qty": 65, "buy_status": "complete", "sell_status": "complete", "buy": 439.1, "sell": 543.8, "buy_charges": None, "sell_charges": None, "client_id": "", "holder": ""}}})
+        self.assertEqual(live, {tid: {"1:kite": {"qty": 65, "sold_qty": 65, "buy_status": "complete", "sell_status": "complete", "buy": 439.1, "sell": 543.8, "buy_charges": None, "sell_charges": None, "client_id": "", "holder": "", "symbol": "NIFTY SAMPLE CE"}}})
 
     def test_journal_filters_live_orders_by_user_and_uses_actual_fills(self):
         for account in ("1:kite", "2:kite"):

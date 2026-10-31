@@ -41,6 +41,7 @@
 <body>
 {% set active = 'activity' %}{% include "_nav.html" %}
 <main id="main">
+<div class="data-context"><span class="data-tag system">System activity</span><span>Operational records across paper, live execution and research. Use Source to filter.</span></div>
   <div class="page-heading">
     <div><h1>Activity &amp; logs</h1><p class="sub">A clear record of your trading workspace.</p></div>
     <div class="heading-actions"><button class="btn ghost" type="button" id="refresh">{{ ui_icon('refresh') }} Refresh</button><a class="btn" id="export" href="/api/activity/session.zip?day={{ today }}">{{ ui_icon('download') }} Export session</a></div>

@@ -184,3 +184,28 @@ Explicit broker login and reconciliation controls remain available.
 
 Calendar metadata does not enable special-session trading or change execution,
 order ownership, holdings, fill accounting, or the existing market-data checks.
+
+## Paper and Live data views
+
+Overview, Journal, Calendar and Stocks share a Paper/Live view selector. The
+choice and broker filter persist within the browser tab and travel in page links.
+Changing the view never changes trading settings or enables orders. Paper scan
+and replay requests are simulation-only, including scans for today; the background
+worker remains responsible for explicitly enabled live strategies.
+
+Paper intraday results use one simulated lot per trade, independent of broker
+lot settings. Journal and Calendar use the quantity saved for each session.
+Live Overview reads all saved, account-scoped broker orders, so earlier open
+positions remain visible after a paper replay. It shows confirmed realized gross
+P&L, estimated open valuation and unresolved orders separately. Missing prices or
+final charges display as unavailable, never as paper fills or exact zero profit.
+
+Live Journal and Calendar include fully settled broker trades with final charges,
+even when their original paper scan is missing. Broker filters apply consistently.
+Stocks keeps separate paper and broker portfolios, capital limits, holdings,
+orders and activity. Switching away from unsaved stock settings requires an
+explicit discard. Backtests, market data, broker accounts and system activity have
+fixed context labels instead of a misleading mode switch.
+
+Run the reporting and mode regression checks with:
+`node --test tests/test_reporting.cjs tests/test_workspace_views.cjs tests/test_exchange_calendar.cjs`.

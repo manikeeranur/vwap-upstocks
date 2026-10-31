@@ -1,0 +1,15 @@
+<section class="view-bar" data-view-toolbar aria-label="Data view">
+  <div class="view-switch" role="group" aria-label="View mode">
+    <button type="button" data-view-mode="paper" aria-pressed="true">Paper</button>
+    <button type="button" data-view-mode="live" aria-pressed="false">Live</button>
+  </div>
+  <div class="view-description"><strong data-view-title>Paper mode</strong><p data-view-description>Simulated results</p></div>
+  <label class="view-broker" data-view-broker-label hidden>Broker
+    <select data-view-broker aria-label="Live broker">
+      {% if active != 'stocks' %}<option value="all">All brokers</option>{% endif %}
+      <option value="upstox">Upstox</option><option value="kite">Kite</option><option value="indmoney">INDmoney</option>
+    </select>
+  </label>
+  <small class="view-hint">View only · trading controls are separate</small>
+</section>
+

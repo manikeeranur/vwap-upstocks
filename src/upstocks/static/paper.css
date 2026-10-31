@@ -119,4 +119,19 @@ body .strat { padding:20px; } .strat.islive { border-color:var(--pe); }
 }
 
 .metric-value{white-space:nowrap}
-#sessionContext{padding:12px;border:1px solid var(--border);font-weight:600}
+#sessionContext{font-size:12px;line-height:1.7;color:var(--muted);margin:0 0 16px}
+
+/* Mode selection is separate from order activation. */
+.workspace-grid{grid-template-areas:none}
+.metrics,.strategy-region,.log-card,.how-it-works{grid-area:auto}
+.strategy-list{grid-template-columns:repeat(2,minmax(0,1fr))}
+.live-brokers{margin:0;gap:10px}.live-broker{flex:1 1 220px}
+.execution-cards{display:grid;gap:12px;margin-top:18px}
+.execution-card .trade-card-head{font-size:13px}.execution-card dl{font-size:12px}
+.order-evidence{margin-top:12px;font-size:11px;color:var(--muted)}.order-evidence p{overflow-wrap:anywhere}
+.mode-badge.live{color:#a25d13;border-color:#e4c7a1}
+.strategy-title p{line-height:1.6;max-width:32em}
+.strategy-pnl b{font-size:20px}
+@media(max-width:900px){.strategy-list{grid-template-columns:1fr}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+.idle-strategies{grid-column:1/-1}.idle-strategies>summary{font-size:13px;color:var(--muted);cursor:pointer;padding:12px 0}.idle-strategies>.strategy-list{margin-top:12px}

@@ -279,7 +279,7 @@ class TradingService:
     def _any_live(self, preset):
         return any(acc["live"].get(preset) for acc in self.state["accounts"].values())
 
-    async def scan(self, day: date | None = None):
+    async def scan(self, day: date | None = None, *, execute_live: bool = True):
         day = day or upstox.today_ist()
         is_today = day == upstox.today_ist()
         async with self._scan_lock:
@@ -310,7 +310,7 @@ class TradingService:
                     for trade in trades:
                         trade["open"] = is_today and live.market_open() and trade["status"] == "EOD"
                         trade["id"] = live.trade_id(preset, trade)
-                    if is_today:
+                    if is_today and execute_live:
                         await self._act(preset, trades)
                     for trade in trades:
                         trade["orders"] = ({acc: deepcopy(o[trade["id"]]) for acc, o in self.state["orders"].items() if trade["id"] in o}
@@ -330,7 +330,7 @@ class TradingService:
                                         {"config": deepcopy(self.state["config"]), "accounts": deepcopy(self.state["accounts"]),
                                          "paused": {uid: u["paused"] for uid, u in self.state["users"].items()},
                                          "lot_size": self.state["lot_size"], "revision": self.state["revision"],
-                                         "is_replay": not is_today, "market_open": live.market_open()})
+                                         "is_replay": not is_today, "execute_live": execute_live, "market_open": live.market_open()})
                 self.view = view
                 if self._report_task:
                     self._report_task.cancel()

@@ -54,7 +54,7 @@ async def paper_squareoff(body: PresetRequest, request: Request):
 async def paper_scan(request: Request, day: date | None = None):
     if day and day > upstox.today_ist():
         raise HTTPException(422, "Cannot scan a future date")
-    return await request.app.state.trading.scan(day)
+    return await request.app.state.trading.scan(day, execute_live=False)
 
 @router.post("/api/paper/recover-exit")
 async def recover_exit(body: IntradayRecovery, request: Request):

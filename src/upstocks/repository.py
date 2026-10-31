@@ -347,6 +347,7 @@ class Repository:
                 if r["side"] == "BUY":
                     live.setdefault(r["trade_id"], {})[r["account"]] = {"qty": order.get("filled_qty") or 0, "sold_qty": 0,
                                                                          "buy_status": order.get("execution_status"), "sell_status": None,
+                                                                         "symbol": order.get("broker_symbol") or order.get("symbol") or "",
                                                                          "buy": order.get("fill_price"), "sell": None,
                                                                          "buy_charges": order.get("charges") if order.get("charges_source") == "operator_statement" else None, "sell_charges": None,
                                                                          "client_id": order.get("client_id") or "", "holder": order.get("holder") or ""}

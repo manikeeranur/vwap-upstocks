@@ -57,11 +57,12 @@
 <body>
 {% set active = "session" %}{% include "_nav.html" %}
 <main id="main" tabindex="-1">
-  <header class="page-heading"><div><h1>Scan &amp; replay</h1><p class="sub">Scan today's completed candles, or replay a past day. Replays never place orders.</p></div><div class="heading-actions"><a class="btn ghost" href="/paper">Open Overview {{ ui_icon("arrow") }}</a></div></header>
+<div class="data-context"><span class="data-tag paper">Paper results</span><span>Simulated signals and historical replay · no broker orders from this page.</span></div>
+  <header class="page-heading"><div><h1>Scan &amp; replay</h1><p class="sub">Preview today’s completed candles or replay a past day. Both actions are simulated.</p></div><div class="heading-actions"><a class="btn ghost" href="/paper">Open Overview {{ ui_icon("arrow") }}</a></div></header>
 
   <section class="card toolbar" aria-label="Trading session">
     <div class="status" id="status"><span class="status-dot" aria-hidden="true"></span><div><b id="mkt">Checking market hours</b><small id="clock">All times in IST</small></div></div>
-    <label class="field">Lot size <input type="number" id="lotsize" min="1" step="1" inputmode="numeric" required></label>
+    <label class="field">Units per NIFTY lot <input type="number" id="lotsize" readonly aria-readonly="true"></label>
     <label class="field">Replay date <input type="date" id="replay"></label>
     <div class="toolbar-actions">
       <button class="btn ghost" id="replayBtn" type="button" disabled>Replay day</button>
@@ -71,9 +72,9 @@
   </section>
 
   <div class="kpis" id="kpis" hidden>
-    <div class="kpi"><span>Gross P&amp;L</span><b id="grossPnl">—</b><small>Before charges</small></div>
+    <div class="kpi"><span>Paper gross P&amp;L</span><b id="grossPnl">—</b><small>Before charges</small></div>
     <div class="kpi"><span>Charges</span><b class="down" id="chargesTotal">—</b><small>Estimated · brokerage, STT, GST, NSE</small></div>
-    <div class="kpi net"><span>Net P&amp;L</span><b id="netPnl">—</b><small>After charges</small></div>
+    <div class="kpi net"><span>Paper net · estimated</span><b id="netPnl">—</b><small>After charges</small></div>
     <div class="kpi"><span>Trades</span><b id="tradeCount">—</b><small id="winRate">—</small></div>
   </div>
 
@@ -83,7 +84,7 @@
       <thead><tr><th>Strategy</th><th>Option</th><th>Entry</th><th>Exit</th><th>Status</th><th class="num">Max profit</th><th class="num">Max loss</th><th class="num">P&amp;L</th><th class="num">Charges</th><th class="num">Net</th></tr></thead>
       <tbody id="results"><tr><td colspan="10" class="empty">Loading…</td></tr></tbody>
     </table></div>
-    <p class="foot-note">P&amp;L uses the same quantity as the Overview (lots × lot size). Max profit / max loss are the P&amp;L at the option's highest / lowest price between entry and exit.</p>
+    <p class="foot-note">P&amp;L uses one simulated lot per trade, matching Overview and the paper journal. Max profit / max loss are the P&amp;L at the option's highest / lowest price between entry and exit.</p>
   </section>
 </main>
 <script>
@@ -103,8 +104,8 @@ function charges(entry, exit, qty) {
 }
 // Harmonic, then EMA pullback, then the rest — the Overview's order.
 const shownPresets = () => { const first = ['harmonic','harmonic_2y','harmonic_power','ema_pullback','sensex_swing','sensex_bigleg'].filter(p => PRESETS.includes(p)); return [...first, ...PRESETS.filter(p => !first.includes(p))]; };
-// Same quantity as the Overview: the largest lots among live brokers for that strategy, else the Upstox lots.
-const paperLots = p => { const a = Object.values(S.state.accounts || {}), on = a.filter(x => x.live[p]); return on.length ? Math.max(...on.map(x => x.lots[p])) : a.find(x => x.broker === 'upstox')?.lots[p] || 1; };
+// Paper quantity is independent of each broker's live lot settings.
+const paperLots = () => 1;
 const signed = v => `<span class="${v >= 0 ? 'up' : 'down'}">${money(v)}</span>`;
 const peak = (price, t, qty) => price == null ? '<span class="muted">—</span>' : `${signed((price - t.entry) * qty)}<span class="at">@ ₹${fmt(price)}</span>`;
 let S = null, busy = false;
@@ -169,12 +170,7 @@ async function scan(day) {
 }
 $('scanBtn').addEventListener('click', () => scan());
 $('replayBtn').addEventListener('click', () => { const input = $('replay'); if (!input.value) { notifyUI('Choose a date to replay.', true); input.focus(); return; } input.max = todayIST(); if (input.reportValidity()) scan(input.value); });
-$('lotsize').addEventListener('change', async e => {
-  if (!S || !e.target.reportValidity()) return;
-  try { const r = await api('/api/paper/config', {lot_size:Number(e.target.value), revision:S.state.revision}); S.state = r.state; notifyUI('Lot size saved.'); }
-  catch (x) { notifyUI(x.message, true); e.target.value = S.state.lot_size; }
-  render();
-});
+
 document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
 load();
 setInterval(() => { if (!document.hidden) load(); }, 10000);

@@ -40,6 +40,7 @@
 <body>
 {% set active = "account" %}{% include "_nav.html" %}
 <main id="main" tabindex="-1">
+<div class="data-context"><span class="data-tag live">Live · broker account</span><span>Broker-reported balances and holdings, including manual activity. Separate from strategy portfolios.</span></div>
   {% set bname = {"kite": "Kite (Zerodha)", "indmoney": "INDmoney"}.get(broker, "Upstox") %}
   <header class="page-heading"><div><h1>Broker account</h1><p class="sub">Your {{ bname }} balances and activity.</p></div><div class="heading-actions"><span class="account-timestamp">{{ now }} IST</span><a class="btn ghost" href="/account?broker={{ broker }}">{{ ui_icon("refresh") }} Refresh</a></div></header>
   <nav class="seg broker-tabs" aria-label="Broker">

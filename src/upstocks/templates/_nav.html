@@ -46,6 +46,7 @@
   {{ links() }}
 </dialog>
 {% include "_dialogs.html" %}
+<script src="/static/workspace-view.js"></script>
 <script>
 (() => {
   const dashboardToken = {{ request.app.state.dashboard_token | default('') | tojson }};

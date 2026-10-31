@@ -195,6 +195,16 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             await task
             broker.assert_not_awaited()
 
+    async def test_manual_preview_never_executes_live_strategies(self):
+        await self.live()
+        with patch("upstocks.live.run_engine", AsyncMock(return_value=[])), \
+             patch.object(self.trading, "_act", AsyncMock()) as act, \
+             patch.object(self.trading, "_peaks", AsyncMock()):
+            await self.trading.scan(execute_live=False)
+            act.assert_not_awaited()
+            self.assertEqual(self.trading.state["orders"], {})
+            await self.trading.stop()
+
     async def test_slow_strategy_does_not_hold_up_fast_strategy_execution(self):
         slow_entered, release, acted = asyncio.Event(), asyncio.Event(), asyncio.Event()
         async def engine(preset, day):

@@ -4,8 +4,22 @@
   const el = id => document.getElementById(id);
   const money = value => '₹' + (Number(value) / 100).toLocaleString('en-IN', {minimumFractionDigits:2,maximumFractionDigits:2});
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  let state = null, dirty = false, saving = false, refreshing = false, previousPortfolio = 'paper', draftRevision = null;
+  let state = null, dirty = false, saving = false, refreshing = false, draftRevision = null;
   let intraday = null, statement = null;
+  const dataView = WorkspaceView.bind({single:true,descriptions:{
+    paper:'Separate simulated portfolio · no broker orders',
+    live:'Real broker portfolio · usable capital only'
+  },beforeChange:async()=>{
+    if (saving) return false;
+    if (dirty && !await confirmUI({title:'Discard unsaved settings?',message:'The current portfolio has unsaved changes.',confirmText:'Discard changes'})) return false;
+    return true;
+  },onChange:value=>{
+    el('portfolio').value = value.mode === 'paper' ? 'paper' : value.broker;
+    statement = null; el('statement-preview').textContent = ''; el('apply-statement').hidden = true;
+    dirty = false; draftRevision = null; el('stock-save-status').textContent = 'No unsaved changes'; error('');
+    render();
+  }});
+  el('portfolio').value = dataView.get().mode === 'paper' ? 'paper' : dataView.get().broker;
   const selected = () => state?.portfolios.find(p => p.broker === el('portfolio').value);
   function error(message) {
     el('stock-error').hidden = !message;
@@ -37,16 +51,23 @@
   function render() {
     const p = selected(); if (!p) return;
     const live = p.broker !== 'paper';
+    el('automation-label').textContent = live ? 'Enable live orders for this broker' : 'Enable paper simulation';
+    el('automation-help').textContent = live ? 'Disabling automation stops new buys and sells. Existing orders continue to reconcile. Global Pause entries also applies.' : 'Runs this simulated portfolio only. No broker funds or manual holdings are used.';
+    el('capital-help').textContent = live ? 'Uses at most this limit, available strategy cash and broker cash, allowing for costs. Profits never raise the limit automatically.' : 'The simulation uses only this capital limit and its own paper cash balance. Profits do not raise your limit automatically.';
+    el('holding-heading').textContent = live ? 'Live holding & next action' : 'Paper holding & next action';
+    el('orders-heading').textContent = live ? 'Live orders & fills' : 'Paper trades & simulated fills';
+    el('orders-help').textContent = live ? 'Only confirmed broker fills change holdings. Final net results require statement charges.' : 'Simulated entries and exits belong only to this paper portfolio. Costs are simulated.';
+    el('entry-source-help').textContent = live ? 'Follow the current paper holding or a saved tuned backtest to enter during the next verified trading session, using only your usable capital. A saved backtest must be refreshed through the latest completed session. Monthly exits and rotations continue afterward.' : 'Start at the next monthly decision, or use a saved tuned backtest when available. All entries and exits stay in this simulated portfolio.';
     const preview = state.preview;
     if (preview?.status === 'done') el('ranking-preview').textContent = 'Close of ' + preview.ranking_date + ': ' + preview.top.map(r => r.rank + '. ' + r.symbol).join(' · ');
     else if (preview?.status === 'error') el('ranking-preview').textContent = preview.error;
     else if (preview?.status === 'running') el('ranking-preview').textContent = 'Refreshing completed daily history in the background…';
-    el('stock-status').textContent = (live ? 'LIVE · ' + p.broker.toUpperCase() + ' · ' + (p.client_id || 'Account not bound') : 'PAPER · simulated fills') +
+    el('stock-status').textContent = (live ? p.broker.toUpperCase() + ' · ' + (p.client_id || 'Account not bound') : 'Paper portfolio') +
       ' · ' + (p.enabled ? p.paused || live && state.global_entries_paused ? 'Entries paused; exits continue' : 'Automation enabled' : 'Automation disabled') +
       ' · Last checked: ' + (p.last_checked ? new Date(p.last_checked).toLocaleString('en-IN',{timeZone:'Asia/Kolkata'}) + ' IST' : 'Awaiting first cycle');
     const reserved = p.orders.filter(o => !['complete','cancelled','rejected'].includes(o.status)).reduce((sum,o) => sum + Math.max(0,o.reserved - o.notional - o.fee_provision),0);
-    el('portfolio-summary').innerHTML = '<div>Usable-capital limit<b>' + money(p.usable_capital) + '</b></div><div>Strategy cash after cost provisions<b>' +
-      money(p.cash) + (p.cash_shortfall ? ' · shortfall ' + money(p.cash_shortfall) : '') + '</b></div><div>Outstanding order reservation<b>' + money(reserved) + '</b></div><div>' + (p.net_realized == null ? 'Provisional realized P&amp;L' : 'Realized net · statement charges') + '<b>' + money(p.net_realized ?? p.realized) + '</b></div>';
+    el('portfolio-summary').innerHTML = '<div>' + (live ? 'Live usable-capital limit' : 'Paper capital limit') + '<b>' + money(p.usable_capital) + '</b></div><div>' + (live ? 'Strategy cash after cost provisions' : 'Simulated cash') + '<b>' +
+      money(p.cash) + (p.cash_shortfall ? ' · shortfall ' + money(p.cash_shortfall) : '') + '</b></div><div>Outstanding order reservation<b>' + money(reserved) + '</b></div><div>' + (!live ? 'Paper realized · simulated costs' : p.net_realized == null ? 'Live realized · provisional costs' : 'Live realized net · statement charges') + '<b>' + money(live ? p.net_realized ?? p.realized : p.realized) + '</b></div>';
     if (!dirty) {
       el('usable-capital').value = (p.usable_capital / 100).toFixed(2);
       el('stock-enabled').checked = !!p.enabled;
@@ -55,7 +76,7 @@
       el('entry-source').value = p.entry_source;
     }
     const h = p.position;
-    el('stock-position').textContent = h ? h.symbol + ' · ' + h.qty + ' confirmed shares · recorded cost ' + money(h.cost) : 'No strategy-owned holding';
+    el('stock-position').textContent = h ? h.symbol + ' · ' + h.qty + (live ? ' confirmed shares · recorded cost ' : ' simulated shares · cost ') + money(h.cost) : live ? 'No strategy-owned live holding' : 'No simulated holding';
     const loginError = 'Broker login expired. Reconnect this account to reconcile.';
     const visibleIssue = value => value === loginError && !state.market_calendar?.login_alerts_required ? '' : value;
     const issue = (p.blocked === loginError && !state.market_calendar?.login_alerts_required ? 'Unresolved orders need verified broker evidence before new entries.' : p.blocked) || visibleIssue(p.last_error) || state.worker.error || (!state.worker.running || state.worker.stale ? 'Automation worker is unavailable; scheduled trading is stopped.' : '');
@@ -64,8 +85,8 @@
     el('stock-orders').innerHTML = p.orders.length ? p.orders.slice().reverse().map(o => '<tr><td>' + esc(new Date(o.created_at).toLocaleString('en-IN',{timeZone:'Asia/Kolkata'})) +
       '</td><td>' + esc(o.side) + '</td><td>' + esc(o.symbol) + '</td><td>' + o.filled_qty + ' / ' + o.qty +
       '</td><td>' + esc(o.status) + (o.error ? '<br>' + esc(o.error) : '') + '</td><td>' + money(o.limit_paise) +
-      '</td><td><details><summary>Order reference</summary>' + esc(o.id) + '<br>' + esc(o.broker_id || 'Awaiting broker confirmation') + '</details></td></tr>').join('') :
-      '<tr><td colspan="7">No orders in this portfolio.</td></tr>';
+      '</td><td><details><summary>Order reference</summary>' + esc(o.id) + '<br>' + esc(live ? o.broker_id || 'Awaiting broker confirmation' : 'Simulated fill') + '</details></td></tr>').join('') :
+      '<tr><td colspan="7">'+(live ? 'No live orders for this broker.' : 'No simulated trades in this paper portfolio.')+'</td></tr>';
     el('stock-events').innerHTML = p.events.map(e => '<li><b>' + esc(e.kind.replaceAll('_',' ')) + '</b> · ' +
       esc(new Date(e.created_at).toLocaleString('en-IN',{timeZone:'Asia/Kolkata'})) + '<br>' + esc(eventText(e)) + '</li>').join('');
     el('save-stock-settings').disabled = saving || !dirty;
@@ -83,17 +104,6 @@
   el('stock-settings').addEventListener('input', () => {
     if (!dirty) draftRevision = selected()?.revision;
     dirty = true; el('reconcile-stocks').disabled = true; el('stock-save-status').textContent = 'Unsaved changes'; el('save-stock-settings').disabled = false;
-  });
-  el('portfolio').addEventListener('change', async () => {
-    const requestedPortfolio = el('portfolio').value;
-    el('portfolio').value = previousPortfolio;
-    if (dirty && !await confirmUI({title:'Discard unsaved settings?',message:'Your portfolio settings have not been saved.',confirmText:'Discard changes'})) {
-      render(); return;
-    }
-    el('portfolio').value = requestedPortfolio;
-    previousPortfolio = requestedPortfolio;
-    statement = null; el('statement-preview').textContent = ''; el('apply-statement').hidden = true;
-    dirty = false; draftRevision = null; el('stock-save-status').textContent = 'No unsaved changes'; error(''); render();
   });
   el('stock-settings').addEventListener('submit', async event => {
     event.preventDefault(); if (saving || !selected()) return;
