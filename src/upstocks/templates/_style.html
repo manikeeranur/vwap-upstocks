@@ -31,7 +31,7 @@ body .card,body .sec { background:var(--card); border:1px solid var(--border); b
 .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:20px; }
 .grid > *, .two > *, .head > *, .filters > * { min-width:0; }
 label { display:flex; flex-direction:column; gap:8px; font-size:12px; font-weight:500; color:var(--text); }
-body select,body input[type=date],body input[type=number],body input[type=time],body input[type=text],body textarea {
+body select,body input:not([type]),body input[type=password],body input[type=email],body input[type=tel],body input[type=search],body input[type=date],body input[type=number],body input[type=time],body input[type=text],body textarea {
   min-width:0; max-width:100%; min-height:40px; font:inherit; font-size:13px; color:var(--text); background:var(--card); border:1px solid var(--border); border-radius:7px; padding:9px 12px; letter-spacing:0; text-transform:none; box-shadow:var(--shadow); transition:border-color .15s,box-shadow .15s;
 }
 select:hover,input:hover { border-color:color-mix(in srgb,var(--muted) 50%,var(--border)); }
@@ -142,6 +142,14 @@ summary { cursor:pointer; color:var(--muted); font-weight:500; padding:10px 0; }
 body .mhead .seg2 button,body .cbtn { min-height:40px; min-width:40px; }
 @media(max-width:1200px) { :root { --sidebar:212px; } body main { padding:28px 24px 48px; } .side { padding-left:12px; padding-right:12px; } .desktop-header { padding-left:24px; padding-right:24px; } }
 @media(max-width:820px) {
+  body select,body input:not([type]),body input[type=password],body input[type=email],body input[type=tel],body input[type=search],body input[type=date],body input[type=time],body input[type=text],body input[type=number],body textarea { font-size:16px !important; min-height:44px; }
+  body .btn,body .toolbar-actions .btn,body .seg button,body .seg2 button,body .view-switch button,body .workspace-sections button { min-height:44px; }
+  .icon-btn { min-height:44px; min-width:44px; flex:none; }
+  .research-nav a,.menu a { min-height:44px; } .research-nav a { display:flex; align-items:center; justify-content:center; }
+  body .mnav button { min-width:44px; min-height:44px; }
+  body .view-broker select { min-height:44px; }
+  .nav-dialog:not(.strat-dialog) .dialog-head { position:sticky; top:0; z-index:2; background:var(--card); padding-bottom:12px; }
+  .confirm-close,.toast-close { width:44px; height:44px; }
   body { padding-left:0; } .side,.desktop-header { display:none; }
   .mobile-head { display:flex; align-items:center; justify-content:space-between; position:sticky; top:0; z-index:50; min-height:64px; padding:10px 20px; background:var(--card); border-bottom:1px solid var(--border); } .mobile-head .brand-wordmark { font-size:19px; }
   .mobile-tabs { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); position:fixed; bottom:0; left:0; right:0; z-index:50; background:var(--card); border-top:1px solid var(--border); padding:6px 8px max(6px,env(safe-area-inset-bottom)); }
@@ -157,8 +165,9 @@ body .mhead .seg2 button,body .cbtn { min-height:40px; min-width:40px; }
   .page-heading { flex-wrap:wrap; gap:16px; } body .card,body .sec { padding:18px; border-radius:10px; }
   body .grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px 12px; } body .grid > label[style*='span 2'] { grid-column:1/-1 !important; }
   body .tiles,body .summary { grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; } body .tile { padding:16px; } body .tile b { font-size:21px; } body .tile span { font-size:11px; }
-  body select,body input[type=date],body input[type=time],body input[type=text],body input[type=number],body textarea { font-size:16px !important; width:100%; min-height:44px; }
-  .btn,.icon-btn { min-height:44px; } .row { gap:10px; } .row > .check { flex-basis:100%; } .row > .btn { flex:1 1 130px; } .row > span[style*='flex:1'] { display:none; }
+  body select,body input:not([type]),body input[type=password],body input[type=email],body input[type=tel],body input[type=search],body input[type=date],body input[type=time],body input[type=text],body input[type=number],body textarea { width:100%; }
+  body .btn { min-height:44px; max-width:100%; white-space:normal; text-align:center; overflow-wrap:anywhere; }
+  .row { gap:10px; } .row > .check { flex-basis:100%; } .row > .btn { flex:1 1 130px; } .row > span[style*='flex:1'] { display:none; }
   body .filters { grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px 12px; padding:16px; }
   .research-nav { width:100%; gap:2px; } .research-nav a { flex:1; text-align:center; font-size:11px; padding:7px 8px; }
   body .settings { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); } body .settings label { min-width:0; } body .settings > span { display:none; }
