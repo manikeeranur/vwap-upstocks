@@ -58,6 +58,13 @@ class TradingService:
                 # The saved session has no peaks (they are added after a scan): work them out again on start.
                 self._report_task = asyncio.create_task(self._enrich_loaded(), name="trade-statistics")
 
+    def _paper_lots(self, preset):
+        """Paper trades 1 lot — except a compounding strategy, which trades its current compounded lots
+        (the compounding service keeps every account's lots for it equal)."""
+        if preset not in live.SAME_TRADES:
+            return 1
+        return max((acc["lots"].get(preset, 1) for acc in self.state["accounts"].values()), default=1)
+
     async def _enrich_loaded(self):
         try:
             day = date.fromisoformat(self.view["day"])
@@ -115,6 +122,7 @@ class TradingService:
                     trade["orders"] = {a: o for a, o in (trade.get("orders") or {}).items() if a in mine}
         state["lot_sizes"] = {p: live.lot_size(p, state["lot_size"]) for p in live.PRESETS}
         state["paper_only"] = [p for p in live.PRESETS if live.paper_only(p)]
+        state["paper_lots"] = {p: self._paper_lots(p) for p in live.SAME_TRADES}
         return {"state": state, "view": view, "market_open": live.market_open(),
                 "market_calendar": self.calendar.day(now.date()),
                 "intraday_session": session,
@@ -387,14 +395,17 @@ class TradingService:
                     results[preset] = trades
                 view = {"day": day.isoformat(), "scanned_at": f"{live.now_ist():%H:%M:%S}",
                         "results": results, "errors": errors, "running": False}
-                sessions = None
-                if is_today and live.market_open():
-                    sessions = {p: {"lots": 1, "lot_size": live.lot_size(p, self.state["lot_size"]),
-                                    "updated": f"{live.now_ist():%Y-%m-%d %H:%M}",
-                                    "trades": [{**{k: t.get(k) for k in live.KEEP}, "id": t["id"], "open": t["open"],
-                                                "live": any(o.get("buy", {}).get("order_id") for o in t["orders"].values())}
-                                               for t in trades]}
-                                for p, trades in results.items()}
+                def journal_sessions():
+                    return {p: {"lots": self._paper_lots(p), "lot_size": live.lot_size(p, self.state["lot_size"]),
+                                "updated": f"{live.now_ist():%Y-%m-%d %H:%M}",
+                                "trades": [{**{k: t.get(k) for k in live.KEEP}, "id": t["id"], "open": t["open"],
+                                            "live": any(o.get("buy", {}).get("order_id") for o in t["orders"].values())}
+                                           for t in trades]}
+                            for p, trades in results.items()}
+                sessions = journal_sessions() if is_today and live.market_open() else None
+                if sessions is None and results and (not is_today or live.now_ist().strftime("%H:%M") > "15:30"):
+                    # A replay (or a scan after the close) fills strategies with no recorded session that day.
+                    await asyncio.to_thread(self.repository.fill_sessions, day.isoformat(), journal_sessions())
                 await asyncio.to_thread(self.repository.save_scan, view, sessions,
                                         {"config": deepcopy(self.state["config"]), "accounts": deepcopy(self.state["accounts"]),
                                          "paused": {uid: u["paused"] for uid, u in self.state["users"].items()},

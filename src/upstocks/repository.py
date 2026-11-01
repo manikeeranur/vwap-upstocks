@@ -330,6 +330,16 @@ class Repository:
             for position, trade in enumerate(session["trades"]):
                 conn.execute("INSERT INTO journal_trades VALUES (?,?,?,?,?)", (day, preset, trade["id"], position, encode(trade)))
 
+    def fill_sessions(self, day, sessions):
+        """Journal sessions only for strategies with none recorded that day — a replay fills gaps (a new
+        strategy's past days, a day the app was down) but never overwrites a recorded session."""
+        with self.db.connect(write=True) as conn:
+            have = {r[0] for r in conn.execute("SELECT preset FROM journal_sessions WHERE day=?", (day,))}
+            new = {p: s for p, s in sessions.items() if p not in have}
+            if new:
+                self._write_sessions(conn, day, new)
+            return sorted(new)
+
     def save_scan(self, view, sessions=None, context=None):
         with self.db.connect(write=True) as conn:
             _setting(conn, "latest_scan", {**view, "running": False})

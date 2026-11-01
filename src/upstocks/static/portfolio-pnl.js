@@ -92,7 +92,7 @@
     const signals = {};
     for (const [date, presets] of Object.entries(journal?.days || {})) {
       for (const [preset, session] of Object.entries(presets)) {
-        for (const trade of session.trades) signals[trade.id] = {...trade,date,preset,qty:session.lots * session.lot_size};
+        for (const trade of session.trades) signals[trade.id] = {...trade,date,preset,qty:session.lots * session.lot_size,lots:session.lots};
       }
     }
     const rows = [];

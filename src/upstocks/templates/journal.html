@@ -96,7 +96,7 @@
   <div id="trades" aria-busy="true">{{ skeleton("rows",4) }}</div>
 <p class="small" data-view-only="live">Net P&amp;L deducts saved charges. Broker-calculated charges are labeled estimated; a reconciled contract note makes them final. When charges are unavailable, gross P&amp;L is shown. Open, partial and unresolved trades are in Overview → Live.</p>
 </main>
-<script src="/static/portfolio-pnl.js?v=20261031-loading"></script>
+<script src="/static/portfolio-pnl.js?v=20261101-lots"></script>
 <script>
 const $ = id => document.getElementById(id);
 const LABELS = { ...{{ labels | tojson }}, ema25_vwap: "VWAP + EMA25", ema_pullback: "EMA pullback", smc_ema_combo: "SMC + EMA (1/day)" }, PRESETS = {{ presets | tojson }};

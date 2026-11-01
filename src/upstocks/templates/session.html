@@ -93,7 +93,7 @@
     <p class="foot-note">P&amp;L uses one simulated lot per trade, matching Intraday trading and the paper journal. Max profit / max loss are the P&amp;L at the option's highest / lowest price between entry and exit. Net is after estimated charges.</p>
   </section>
 </main>
-<script src="/static/strategy-meta.js?v=20261031-settings-1"></script>
+<script src="/static/strategy-meta.js?v=20261101-compound"></script>
 <script>
 const $ = id => document.getElementById(id);
 const LABELS = { ...{{ labels | tojson }}, ema25_vwap: "VWAP + EMA25", ema_pullback: "EMA pullback", smc_ema_combo: "SMC + EMA (1/day)" }, PRESETS = {{ presets | tojson }};
@@ -112,7 +112,7 @@ function charges(entry, exit, qty) {
 // Harmonic, then EMA pullback, then the rest — the Overview's order.
 const shownPresets = () => { const first = ['harmonic','harmonic_2y','harmonic_power','harmonic_2y_compound','pdh_breakout','pdh_compound','ema_pullback','sensex_swing','sensex_bigleg'].filter(p => PRESETS.includes(p)); return [...first, ...PRESETS.filter(p => !first.includes(p))]; };
 // Paper quantity is independent of each broker's live lot settings.
-const paperLots = () => 1;
+const paperLots = p => S?.state?.paper_lots?.[p] ?? 1;   // compounding strategies: their compounded lots
 let S = null, busy = false;
 $('replay').max = todayIST();
 async function api(path, body) {

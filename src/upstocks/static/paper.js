@@ -16,7 +16,8 @@ const account = b => accounts().find(a => a.broker === b);
 const anyLive = p => accounts().some(a => a.live[p]);
 const lotSize = p => S.state.lot_sizes?.[p] ?? S.state.lot_size;
 const paperOnly = p => (S.state.paper_only || []).includes(p);
-const paperLots = () => 1; // Match the paper journal; broker lots never resize simulations.
+// Match the paper journal: 1 lot, except a compounding strategy's current compounded lots.
+const paperLots = p => S?.state?.paper_lots?.[p] ?? 1;
 const openLive = (acc,p) => Object.entries(S.state.orders?.[acc] || {}).filter(([id,o]) => id.startsWith(p + '|') && (o.buy?.filled_qty || 0) > (o.sell?.filled_qty || 0)).length;
 async function loadBrokers() { try { B = (await api('/api/brokers')).brokers; brokerError = ''; if (S && !confirming) render(); } catch(e) { brokerError = 'Broker status unavailable: ' + e.message; } finally { showBrokerErrors(); } }
 let S = null, busy = false, saving = false, confirming = false, refreshing = false, refreshVersion = 0;
