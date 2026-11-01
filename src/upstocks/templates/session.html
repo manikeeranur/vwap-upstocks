@@ -7,6 +7,7 @@
 <title>upstocks — scan &amp; replay</title>
 {% from "_icons.html" import ui_icon %}
 {% include "_style.html" %}
+<link rel="stylesheet" href="/static/paper.css?v=20261031-no-dialog-1">
 <style>
   /* Session toolbar */
   body .toolbar { display:flex; align-items:center; flex-wrap:wrap; gap:16px 24px; padding:14px 18px; margin-bottom:20px; }
@@ -32,7 +33,6 @@
   @media (max-width:900px) { .kpis { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 
   /* Trades table */
-  body .result-card { padding:0; overflow:hidden; }
   .result-head { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:16px 20px; border-bottom:1px solid var(--border); }
   .result-head h2 { margin:0; font-size:14px; } .result-head span { font-size:12px; color:var(--muted); }
   .tbl-wrap { overflow:auto; }
@@ -87,15 +87,13 @@
     <div class="kpi"><span>Trades</span><b id="tradeCount">—</b><small id="winRate">—</small></div>
   </div>
 
-  <section class="card result-card" aria-labelledby="result-title">
+  <section aria-labelledby="result-title">
     <div class="result-head"><h2 id="result-title">Trades</h2><span id="resultDay">—</span></div>
-    <div class="tbl-wrap"><table class="trades">
-      <thead><tr><th>Strategy</th><th>Option</th><th>Entry</th><th>Exit</th><th>Status</th><th class="num">Max profit</th><th class="num">Max loss</th><th class="num">P&amp;L</th><th class="num">Charges</th><th class="num">Net</th></tr></thead>
-      <tbody id="results" data-skeleton-kind="table" aria-busy="true">{{ skeleton("table",5) }}</tbody>
-    </table></div>
-    <p class="foot-note">P&amp;L uses one simulated lot per trade, matching Overview and the paper journal. Max profit / max loss are the P&amp;L at the option's highest / lowest price between entry and exit.</p>
+    <div id="strats" class="strategy-list" aria-busy="true">{{ skeleton('cards',3) }}</div>
+    <p class="foot-note">P&amp;L uses one simulated lot per trade, matching Intraday trading and the paper journal. Max profit / max loss are the P&amp;L at the option's highest / lowest price between entry and exit. Net is after estimated charges.</p>
   </section>
 </main>
+<script src="/static/strategy-meta.js?v=20261031-settings-1"></script>
 <script>
 const $ = id => document.getElementById(id);
 const LABELS = { ...{{ labels | tojson }}, ema25_vwap: "VWAP + EMA25", ema_pullback: "EMA pullback", smc_ema_combo: "SMC + EMA (1/day)" }, PRESETS = {{ presets | tojson }};
@@ -112,11 +110,9 @@ function charges(entry, exit, qty) {
   return brokerage + stt + exchange + clearing + gst + sebi + stamp;
 }
 // Harmonic, then EMA pullback, then the rest — the Overview's order.
-const shownPresets = () => { const first = ['harmonic','harmonic_2y','harmonic_power','ema_pullback','sensex_swing','sensex_bigleg'].filter(p => PRESETS.includes(p)); return [...first, ...PRESETS.filter(p => !first.includes(p))]; };
+const shownPresets = () => { const first = ['harmonic','harmonic_2y','harmonic_power','harmonic_2y_compound','pdh_breakout','pdh_compound','ema_pullback','sensex_swing','sensex_bigleg'].filter(p => PRESETS.includes(p)); return [...first, ...PRESETS.filter(p => !first.includes(p))]; };
 // Paper quantity is independent of each broker's live lot settings.
 const paperLots = () => 1;
-const signed = v => `<span class="${v >= 0 ? 'up' : 'down'}">${money(v)}</span>`;
-const peak = (price, t, qty) => price == null ? '<span class="muted">—</span>' : `${signed((price - t.entry) * qty)}<span class="at">@ ₹${fmt(price)}</span>`;
 let S = null, busy = false;
 $('replay').max = todayIST();
 async function api(path, body) {
@@ -136,27 +132,38 @@ function render() {
   $('scanBtn').disabled = $('replayBtn').disabled = busy || view.running;
   $('resultDay').textContent = view.day ? `${view.day}${replay ? ' · Replay' : ' · Today'} · scanned ${view.scanned_at} IST` : 'No scans yet';
 
+  // Cards like Intraday trading: a card per strategy, a block per trade.
+  const DESC = STRATEGY_META.descriptions, ICONS = STRATEGY_META.icons;
+  const STATUS = {OPEN:'Open', SL:'Stop-loss hit', TARGET:'Target hit', TIME_EXIT:'Time exit', EOD:'Session close'};
+  const pk = (price, t, qty) => price == null ? '—' : `<b class="${price >= t.entry ? 'up' : 'down'}">${money((price - t.entry) * qty)}</b> <span class="muted">@ ₹${fmt(price)}</span>`;
+  const field = (label, value, sub='') => `<div><dt>${label}</dt><dd>${value}</dd>${sub ? `<dd class="paper-sub">${sub}</dd>` : ''}</div>`;
   let gross = 0, fees = 0, count = 0, won = 0;
-  const rows = [];
+  const cards = [];
   for (const p of shownPresets()) {
     const trades = view.results?.[p] || [], err = view.errors?.[p];
     if (!trades.length && !err) continue;
-    const qty = paperLots(p) * (state.lot_sizes?.[p] ?? state.lot_size), name = `<b>${esc(LABELS[p] || p)}</b>`;
-    if (err && !trades.length) { rows.push(`<tr class="first"><td>${name}</td><td colspan="9" class="err-cell">${esc(err)}</td></tr>`); continue; }
-    trades.forEach((t, i) => {
-      const st = t.open ? 'OPEN' : t.status, pnl = t.pnl * qty, fee = charges(t.entry, t.exit, qty);
-      gross += pnl; fees += fee; count++; if (pnl - fee > 0) won++;
-      rows.push(`<tr data-key="${esc(t.id)}" class="${i ? '' : 'first'}"><td>${i ? '' : name}</td>
-        <td><span class="opt ${esc(t.type)}">${esc(t.symbol)}</span></td>
-        <td>${ampm(t.entry_time)} · ₹${fmt(t.entry)}</td>
-        <td>${t.open ? '<span class="muted">open</span>' : `${ampm(t.exit_time)} · ₹${fmt(t.exit)}`}</td>
-        <td><span class="badge ${esc(st)}">${esc(st === 'TIME_EXIT' ? 'TIME EXIT' : st)}</span></td>
-        <td class="num">${peak(t.peak_high, t, qty)}</td><td class="num">${peak(t.peak_low, t, qty)}</td>
-        <td class="num">${signed(pnl)}</td><td class="num down">${money(-fee)}</td><td class="num"><b>${signed(pnl - fee)}</b></td></tr>`);
-    });
+    const qty = paperLots(p) * (state.lot_sizes?.[p] ?? state.lot_size);
+    let sp = 0, sf = 0;
+    const blocks = trades.map(t => {
+      const st = t.open ? 'OPEN' : t.status, pnl = t.pnl * qty, fee = charges(t.entry, t.exit, qty), pc = pnl >= 0 ? 'up' : 'down';
+      gross += pnl; fees += fee; sp += pnl; sf += fee; count++; if (pnl - fee > 0) won++;
+      return `<article class="paper-trade${t.open ? ' is-open' : ''}" data-key="${esc(t.id)}">
+        <header class="paper-trade-head"><div class="paper-trade-id"><h4 class="${t.type === 'PE' ? 'opt-pe' : 'opt-ce'}">${esc(t.symbol)}</h4><span class="paper-status ${esc(st)}">${esc(STATUS[st] || st)}</span></div>
+          <div class="paper-trade-pnl"><b class="${pc}">${money(pnl)}</b><span class="${pc}">${fmt(t.pnl)} pts</span></div></header>
+        <dl class="paper-facts">${field('Entry', `₹${fmt(t.entry)}`, ampm(t.entry_time))}${field(t.open ? 'Last price' : 'Exit', t.open ? '<span class="muted">open</span>' : `₹${fmt(t.exit)}`, t.open ? '' : ampm(t.exit_time))}${field('Stop-loss', t.sl > 0 ? `₹${fmt(t.sl)}` : 'None')}${field('Target', t.target > 0 ? `₹${fmt(t.target)}` : 'Index target')}${field('Max profit', pk(t.peak_high, t, qty))}${field('Max loss', pk(t.peak_low, t, qty))}${field('Charges', `<span class="down">${money(-fee)}</span>`)}${field('Net', `<b class="${pnl - fee >= 0 ? 'up' : 'down'}">${money(pnl - fee)}</b>`)}</dl>
+      </article>`;
+    }).join('');
+    const closed = trades.filter(t => !t.open), wins = closed.filter(t => t.pnl > 0).length;
+    cards.push(`<section class="card strat${trades.length ? ' paper-strategy' : ''}" data-key="${esc(p)}" aria-label="${esc(LABELS[p] || p)}">
+      <div class="strategy-top"><div class="strategy-title"><span class="strategy-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="${ICONS[PRESETS.indexOf(p)] || ICONS[0]}"/></svg></span>
+        <div><h3>${esc(LABELS[p] || p)}</h3><p>${DESC[p] || ''}</p>${trades.length ? `<div class="strategy-meta"><span>${trades.length} trade${trades.length === 1 ? '' : 's'}</span>${closed.length ? `<span>${wins}W / ${closed.length - wins}L</span>` : ''}</div>` : ''}</div></div>
+        <div class="strategy-pnl"><span class="pnl-label">Net after charges</span><b class="${sp - sf >= 0 ? 'up' : 'down'}">${money(sp - sf)}</b><small>P&amp;L ${money(sp)} · charges ${money(-sf)}</small></div></div>
+      ${err ? `<p class="strategy-error" role="status">${esc(err)}</p>` : ''}
+      ${trades.length ? `<div class="paper-trades">${blocks}</div>` : ''}
+    </section>`);
   }
-  if (count) rows.push(`<tr class="total"><td colspan="7">Total · ${count} ${count === 1 ? 'trade' : 'trades'}</td><td class="num">${signed(gross)}</td><td class="num down">${money(-fees)}</td><td class="num">${signed(gross - fees)}</td></tr>`);
-  StableDOM.html($('results'),rows.join('') || '<tr><td colspan="10" class="empty">No scan results yet. Scan now or replay a day.</td></tr>');
+  StableDOM.html($('strats'), cards.join('') || '<div class="card empty-state"><div><b>No scan results yet</b><p>Scan now or replay a day.</p></div></div>');
+  $('strats').setAttribute('aria-busy','false');
 
   $('kpis').hidden = !count;
   const paint = (id, v) => { $(id).textContent = money(v); $(id).className = v >= 0 ? 'up' : 'down'; };
@@ -167,13 +174,13 @@ function render() {
 let loading=false;
 async function load() {
   if (busy || loading) return;loading=true;
-  const done=LoadingUI.begin('#results',{initial:!S,kind:'table',retry:load});
+  const done=LoadingUI.begin('#strats',{initial:!S,kind:'cards',retry:load});
   try { S = await api('/api/paper'); render(); } catch (e) {done(e); info('Unable to update. ' + e.message); }
   finally{done();loading=false;}
 }
 async function scan(day) {
   if (busy || !S) return;
-  const done=LoadingUI.begin('#results',{label:day?'Replaying…':'Scanning…'});
+  const done=LoadingUI.begin('#strats',{label:day?'Replaying…':'Scanning…'});
   busy = true; $('scanBtn').disabled = $('replayBtn').disabled = true;
   $('scanBtn').textContent = day ? 'Scan now' : 'Scanning…'; $('replayBtn').textContent = day ? 'Replaying…' : 'Replay day';
   info(day ? `Replaying ${day}… The first request can take a minute.` : 'Scanning completed candles…');

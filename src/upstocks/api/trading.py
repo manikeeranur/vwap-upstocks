@@ -20,6 +20,12 @@ async def paper_execution_details(request: Request):
     return await trading.execution_details.get(trading.snapshot(request.state.user_id, intraday=True))
 
 
+@router.get("/api/compounding")
+async def compounding_state(request: Request):
+    """Capital and lots of the compounding strategies."""
+    return request.app.state.compounding.snapshot()
+
+
 @router.get("/api/paper/fills")
 async def paper_fills(request: Request):
     """Real fill prices of today's live orders, for the Overview's live P&L."""

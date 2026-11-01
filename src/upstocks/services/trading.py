@@ -54,6 +54,17 @@ class TradingService:
         if self._task is None:
             self._task = asyncio.create_task(self._loop(), name="market-scanner")
             self._reconcile_task = asyncio.create_task(self._reconcile_loop(), name="order-reconciliation")
+            if self.view.get("day") and self.view.get("results"):
+                # The saved session has no peaks (they are added after a scan): work them out again on start.
+                self._report_task = asyncio.create_task(self._enrich_loaded(), name="trade-statistics")
+
+    async def _enrich_loaded(self):
+        try:
+            day = date.fromisoformat(self.view["day"])
+            await asyncio.wait_for(asyncio.gather(*(self._peaks(day, ts) for ts in self.view["results"].values())), 60)
+            self.view_revision = uuid.uuid4().hex
+        except Exception:
+            log.warning("Optional trade statistics unavailable", exc_info=True)
 
     def worker_health(self):
         return {"running": bool(self._task and not self._task.done() and self._reconcile_task and not self._reconcile_task.done()),
@@ -338,13 +349,18 @@ class TradingService:
         async with self._scan_lock:
             self.view["running"] = True
             try:
-                results, errors = {}, {}
+                results, errors, runs = {}, {}, {}
+                def engine(name):   # one engine run per distinct strategy (live.SAME_TRADES share one)
+                    if name not in runs:
+                        runs[name] = asyncio.ensure_future(asyncio.wait_for(live.run_engine(name, day), 45))
+                    return runs[name]
                 async def calculate(preset):
                     cfg = self.state["config"][preset]
                     if not (cfg["on"] or self._any_live(preset) or (is_today and self._open_positions(preset))):
                         return preset, None, None
                     try:
-                        return preset, await asyncio.wait_for(live.run_engine(preset, day), 45), None
+                        trades = await asyncio.shield(engine(live.SAME_TRADES.get(preset, preset)))
+                        return preset, (deepcopy(trades) if trades is not None else None), None
                     except Exception as exc:
                         log.exception("Strategy scan failed", extra={"preset": preset})
                         return preset, None, redact(str(exc)) or "Strategy scan timed out"
@@ -399,10 +415,11 @@ class TradingService:
                 return deepcopy(view)
             finally:
                 self.view["running"] = False
-                for task in locals().get("tasks", []):
+                pending = list(locals().get("tasks", [])) + list((locals().get("runs") or {}).values())
+                for task in pending:
                     if not task.done():
                         task.cancel()
-                await asyncio.gather(*locals().get("tasks", []), return_exceptions=True)
+                await asyncio.gather(*pending, return_exceptions=True)
                 self.last_cycle = time.monotonic()
 
     def _credentials(self, account):

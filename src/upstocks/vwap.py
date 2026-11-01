@@ -121,6 +121,11 @@ class Settings:
     harm_min_leg: float = 0             # skip the day when the signal's leg is smaller (index points); 0 = any
     underlying: str = "NIFTY"           # the index whose options are traded: "NIFTY" or "SENSEX" (harmonic engine)
     harm_elliott: bool = False          # Harmonic Power Trail: trail / book profit by Elliott waves (harmonic.resolve_elliott)
+    # Previous-day Breakout (pdh.py): yesterday's range filter (% of price), target (× range), strike in the money.
+    pdh_width_min: float = 0.25
+    pdh_width_max: float = 0.8
+    pdh_target: float = 2.0
+    pdh_itm: float = 0
     trail_start: float = 0              # 0 = no trailing stop
     trail_giveback: float = 40
     slippage: float = 0.0
@@ -198,6 +203,14 @@ PRESETS["harmonic_2y"] = {**PRESETS["harmonic"], "harm_fib": 0.60, "harm_zz": 0.
 # Harmonic Power Trail — Harmonic Optimized's entry and stop-loss; profit is trailed and booked by
 # Elliott waves on NIFTY (harmonic.resolve_elliott) instead of the % trail and the reversal exit.
 PRESETS["harmonic_power"] = {**PRESETS["harmonic_2y"], "harm_elliott": True, "trail_start": 0, "rev_exit": False}
+# Previous-day Breakout (pdh.py) — see that module for the rules and the 2-year result.
+PRESETS["pdh_breakout"] = {"strategy": "pdh", "entry_start": "09:15", "last_entry": "12:00", "time_exit": "15:15",
+                           "sl_pct": 35, "rev_exit": True, "ep_rev_activate": 0, "max_trades": 1,
+                           "pdh_width_min": 0.25, "pdh_width_max": 0.8, "pdh_target": 2.0, "pdh_itm": 0}
+# Compounding versions: the same trades; services/compounding.py re-sizes their lots each month
+# from ₹1,50,000 plus their own paper profit (see COMPOUNDING there).
+PRESETS["harmonic_2y_compound"] = dict(PRESETS["harmonic_2y"])
+PRESETS["pdh_compound"] = dict(PRESETS["pdh_breakout"])
 # SENSEX Harmonic — the Harmonic engine on SENSEX options (lot 20, 100-point strikes), one trade a day,
 # paper only. Picked 2026-10-30 from a 2-year SENSEX test (Oct 2024 – Sep 2026, after charges, each
 # strategy paying its own brokerage); run together as 3 lots of sensex_swing + 2 lots of sensex_bigleg:

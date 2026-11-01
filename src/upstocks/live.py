@@ -2,20 +2,25 @@
 from dataclasses import replace
 from datetime import date, datetime, timedelta
 
-from . import combo, ema_pullback, harmonic, smc, upstox, vwap
+from . import combo, ema_pullback, harmonic, pdh, smc, upstox, vwap
 
 PRESETS = ["frontend_live", "smc_live", "ema25_vwap", "ema_pullback", "smc_tuned", "smc_ema_combo", "harmonic", "harmonic_2y",
-           "sensex_swing", "sensex_bigleg", "harmonic_power"]
+           "sensex_swing", "sensex_bigleg", "harmonic_power", "pdh_breakout", "harmonic_2y_compound", "pdh_compound"]
 
 
 LABELS = {"frontend_live": "VWAP 9:30", "smc_live": "SMC", "ema25_vwap": "VWAP + EMA25 + SuperTrend",
           "ema_pullback": "EMA9/EMA26 pullback (Mani)", "smc_tuned": "SMC Tuned",
           "smc_ema_combo": "SMC + EMA pullback (1 trade a day)", "harmonic": "Harmonic", "harmonic_2y": "Harmonic Optimized",
           "sensex_swing": "SENSEX Harmonic Swing", "sensex_bigleg": "SENSEX Harmonic Big Leg",
-          "harmonic_power": "Harmonic Power Trail"}
+          "harmonic_power": "Harmonic Power Trail", "pdh_breakout": "Previous-day Breakout",
+          "harmonic_2y_compound": "Harmonic Optimized Compounding", "pdh_compound": "Previous-day Breakout Compounding"}
 
 
 FRESH_MIN = 3
+
+# Strategies whose trades are exactly another's (same settings, only the lots differ): a scan runs the
+# engine once for both.
+SAME_TRADES = {"harmonic_2y_compound": "harmonic_2y", "pdh_compound": "pdh_breakout"}
 
 
 KEEP = ("date", "expiry", "symbol", "strike", "type", "instrument_key", "entry_time", "entry", "sl", "target",
@@ -67,6 +72,8 @@ async def run_engine(preset: str, day: date) -> list[dict] | None:
         res = await combo.run_day(day, st, spot[d])
     elif st.strategy == "harmonic":
         res = await harmonic.run_day(day, st, spot[d], prev)
+    elif st.strategy == "pdh":
+        res = await pdh.run_day(day, st, spot[d], prev)
     else:
         res = await vwap.run_day(day, st, spot[d], prev)
     return [vwap.trade_dict(t) for t in res.trades]

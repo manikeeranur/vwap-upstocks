@@ -27,6 +27,8 @@
     <div id="paperIntraday" aria-busy="true">{{ skeleton('cards',4) }}</div>
     <div class="settings-section-head"><div><h2>Stock portfolio</h2><p>Simulated Momentum 12–1 tuned portfolio. Capital and entry source are set on <a href="/stocks">Stock portfolios</a>.</p></div></div>
     <div id="paperStocks"></div>
+    <div class="settings-section-head"><div><h2>Compounding strategies</h2><p>The same trades as their base strategy, but the lots grow with profit: each starts with ₹1,50,000, adds its paper profit every day, and its lots are re-sized on the first trading day of each month (1–10 lots).</p></div></div>
+    <div id="paperCompound"></div>
   </section>
 
   <section class="mode-panel" id="panel-live" role="tabpanel" aria-labelledby="tab-live" hidden>
@@ -35,6 +37,8 @@
     <div id="liveIntraday" aria-busy="true">{{ skeleton('cards',3) }}</div>
     <div class="settings-section-head"><div><h2>Stock portfolios</h2><p>Real limit orders on monthly decisions. Capital and entry source are set on <a href="/stocks">Stock portfolios</a>.</p></div></div>
     <div id="liveStocks"></div>
+    <div class="settings-section-head"><div><h2>Compounding strategies</h2><p>Live follows the same automatic lots as paper — re-sized on the first trading day of each month from the strategy's capital. Lots can't be typed here.</p></div></div>
+    <div id="liveCompound"></div>
   </section>
 </main>
 <script>window.SETTINGS_CONFIG = {labels: {{ labels | tojson }}, presets: {{ presets | tojson }}};</script>

@@ -4,15 +4,17 @@ const LABELS = { ...window.SETTINGS_CONFIG.labels, ...STRATEGY_META.labels }, PR
 const DESCRIPTIONS = STRATEGY_META.descriptions, STRATEGY_ICONS = STRATEGY_META.icons;
 const BROKER_NAMES = {paper:'Paper', upstox:'Upstox', kite:'Kite', indmoney:'INDmoney'}, BROKER_ORDER = ['upstox','kite','indmoney'];
 // Same order as the Intraday trading page.
-const FIRST = ['harmonic','harmonic_2y','harmonic_power','ema_pullback','sensex_swing','sensex_bigleg'];
-const ORDERED = [...FIRST.filter(p => PRESETS.includes(p)), ...PRESETS.filter(p => !FIRST.includes(p))];
+const FIRST = ['harmonic','harmonic_2y','harmonic_power','harmonic_2y_compound','pdh_breakout','pdh_compound','ema_pullback','sensex_swing','sensex_bigleg'];
+// Compounding strategies have their own section: their lots are set from their capital, not by hand.
+const COMPOUND = ['harmonic_2y_compound','pdh_compound'].filter(p => PRESETS.includes(p));
+const ORDERED = [...FIRST.filter(p => PRESETS.includes(p)), ...PRESETS.filter(p => !FIRST.includes(p))].filter(p => !COMPOUND.includes(p));
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money = n => `${n < 0 ? '−' : ''}₹${Math.abs(n).toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2})}`;
 const rupees = paise => '₹' + (Number(paise) / 100).toLocaleString('en-IN', {maximumFractionDigits:0});
 const icon = p => `<span class="strategy-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="${STRATEGY_ICONS[PRESETS.indexOf(p)] || STRATEGY_ICONS[0]}"/></svg></span>`;
 const toggle = (attrs,checked,label,extra='') => `<label class="check tog"><input type="checkbox" role="switch" ${attrs} aria-label="${esc(label)}" ${checked ? 'checked' : ''} ${extra}><span class="sw"></span></label>`;
 
-let P = null, ST = null, B = null, saving = false, refreshing = false;
+let P = null, ST = null, B = null, C = null, saving = false, refreshing = false;
 async function api(path, body) {
   const r = await appFetch(path, body === undefined ? {quiet:!!P} : {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
   const j = await r.json().catch(() => ({}));
@@ -24,7 +26,7 @@ const account = b => accounts().find(a => a.broker === b);
 const paperOnly = p => (P.state.paper_only || []).includes(p);
 const loginNeeded = b => P.market_calendar?.login_alerts_required && B && !B[b]?.logged_in;
 const lotSize = p => P.state.lot_sizes?.[p] ?? P.state.lot_size;
-const liveStrategies = () => ORDERED.filter(p => accounts().some(a => a.live[p]));
+const liveStrategies = () => [...ORDERED, ...COMPOUND].filter(p => accounts().some(a => a.live[p]));
 const livePortfolios = () => (ST?.portfolios || []).filter(p => p.broker !== 'paper');
 const status = text => { $('saveState').textContent = text; };
 
@@ -68,6 +70,22 @@ function renderPaper() {
     </article>`;
   }).join('') + '</div>');
   $('paperIntraday').setAttribute('aria-busy','false');
+  // Compounding: a card per strategy, like the stock portfolio cards.
+  StableDOM.html($('paperCompound'),COMPOUND.length ? `<div class="stock-grid">${COMPOUND.map(p => {
+    const name = LABELS[p] || p, isOn = !!cfg[p]?.on, c = C?.strategies?.[p], list = results[p] || [];
+    const lots = c?.lots ?? 1, total = list.reduce((a,t) => a + t.pnl,0) * lots * lotSize(p), open = list.filter(t => t.open).length;
+    const live = accounts().filter(a => a.live[p]).map(a => BROKER_NAMES[a.broker]);
+    return `<article class="stock-set${isOn ? ' on' : ''}" data-key="${esc(p)}">
+      <header><div class="stock-name">${icon(p)}<div><h3>${esc(name)}</h3><p>${isOn ? 'Simulating' : 'Off'}${live.length ? ` · live on ${esc(live.join(', '))}` : ''}</p></div></div></header>
+      <div class="stock-toggles">
+        <div class="stock-toggle"><div><b>Paper scanning</b><small>Simulate this strategy's trades</small></div>${toggle(`data-on="${esc(p)}"`,isOn,`Paper scanning for ${name}`)}</div>
+        <div class="stock-toggle"><div><b>Lots: auto · ${lots} lot${lots === 1 ? '' : 's'} · ${lots * lotSize(p)} qty</b><small>${c ? `₹${(c.per_lot / 1000).toFixed(0)}k a lot · max ${C.max_lots} · re-sized on the first trading day of each month` : ''}</small></div></div>
+        <div class="stock-toggle"><div><b>Today</b><small>${list.length ? `${list.length} trade${list.length === 1 ? '' : 's'}${open ? ` · ${open} open` : ''}` : isOn ? 'No trades today' : 'Not scanning'}</small></div>${list.length ? `<b class="${total >= 0 ? 'up' : 'down'}">${money(total)}</b>` : ''}</div>
+        ${c ? `<div class="stock-toggle"><div><b>Safe to withdraw in your broker app</b><small>${money(c.safe_withdraw)} · capital above ${C.max_lots} lots isn't traded, so taking it out never lowers the lots. Withdrawing more than this makes the app trade more lots than your account holds.</small></div></div>` : ''}
+      </div>
+      <footer><span>Capital <b>${c ? money(c.capital) : '—'}</b></span><span>${c ? `started ${money(c.start_capital)} on ${esc(C.start)}` : ''}</span></footer>
+    </article>`;
+  }).join('')}</div>` : '');
   const paper = (ST?.portfolios || []).filter(p => p.broker === 'paper');
   StableDOM.html($('paperStocks'),ST ? (paper.length ? `<div class="stock-grid">${paper.map(stockCard).join('')}</div>` : '<div class="settings-card empty">No paper stock portfolio yet.</div>') : '<div class="settings-card empty">Stock portfolio settings unavailable.</div>');
 }
@@ -84,7 +102,8 @@ function renderLive() {
     <div class="master-side"><div class="broker-pills">${brokers || '<span class="muted">No broker accounts</span>'}</div>
       <button class="btn ${paused ? 'primary' : 'ghost danger'}" type="button" id="pauseAll" ${saving || typeof P.state.revision !== 'number' ? 'disabled' : ''} aria-pressed="${paused}">${paused ? 'Resume live entries' : 'Pause all live entries'}</button></div>`);
   $('master').classList.toggle('paused',paused); $('master').setAttribute('aria-busy','false');
-  $('liveCounts').innerHTML = accs.map(a => `<span class="count-chip${ORDERED.some(p => a.live[p]) ? ' live' : ''}">${brokerLogo(a.broker,14)}${BROKER_NAMES[a.broker]} <b>${ORDERED.filter(p => a.live[p]).length}</b> live</span>`).join('');
+  const ALL = [...ORDERED, ...COMPOUND];
+  $('liveCounts').innerHTML = accs.map(a => `<span class="count-chip${ALL.some(p => a.live[p]) ? ' live' : ''}">${brokerLogo(a.broker,14)}${BROKER_NAMES[a.broker]} <b>${ALL.filter(p => a.live[p]).length}</b> live</span>`).join('');
   if (!accs.length) { StableDOM.html($('liveIntraday'),'<div class="settings-card empty">No broker accounts. <a href="/brokers">Connect a broker</a> to place live orders.</div>'); }
   else {
     const head = `<div class="intra-row intra-head" aria-hidden="true"><span>Strategy</span>${accs.map(a => `<span class="th-broker">${brokerLogo(a.broker,16)}${BROKER_NAMES[a.broker]} · live &amp; lots${loginNeeded(a.broker) ? '<small>Not logged in today</small>' : ''}</span>`).join('')}</div>`;
@@ -102,6 +121,19 @@ function renderLive() {
     StableDOM.html($('liveIntraday'),`<div class="intra-table">${head}${rows}</div>`);
   }
   $('liveIntraday').setAttribute('aria-busy','false');
+  // Compounding: a card per strategy, like the stock portfolios — a live switch per broker, lots shown (automatic).
+  StableDOM.html($('liveCompound'),!COMPOUND.length ? '' : !accs.length ? '<div class="settings-card empty">No broker accounts. <a href="/brokers">Connect a broker</a> to place live orders.</div>'
+    : `<div class="stock-grid">${COMPOUND.map(p => {
+      const name = LABELS[p] || p, c = C?.strategies?.[p], on = accs.filter(a => a.live[p]);
+      return `<article class="stock-set${on.length ? ' on live-on' : ''}" data-key="${esc(p)}">
+        <header><div class="stock-name">${icon(p)}<div><h3>${esc(name)}</h3><p>${on.length ? `Live on ${esc(on.map(a => BROKER_NAMES[a.broker]).join(', '))}` : 'Live off — switch a broker on below'}</p></div></div>
+          ${on.length ? '<span class="live-tag">LIVE</span>' : ''}</header>
+        <div class="stock-toggles">${accs.map(a => { const n = BROKER_NAMES[a.broker], lots = a.lots[p] ?? 1;
+          return `<div class="stock-toggle"><div><b>${brokerLogo(a.broker,16)} ${n}</b><small>auto · ${lots} lot${lots === 1 ? '' : 's'} · ${lots * lotSize(p)} qty${loginNeeded(a.broker) ? ' · not logged in today' : ''}</small></div>${toggle(`data-live="${p}" data-broker="${a.broker}"`,!!a.live[p],`${n} live orders for ${name}`)}</div>`; }).join('')}
+        </div>
+        <footer><span>Capital <b>${c ? money(c.capital) : '—'}</b></span><span>${c ? `₹${(c.per_lot / 1000).toFixed(0)}k a lot · max ${C.max_lots} · safe to withdraw ${money(c.safe_withdraw)}` : ''}</span></footer>
+      </article>`;
+    }).join('')}</div>`);
   const live = livePortfolios();
   StableDOM.html($('liveStocks'),ST ? (live.length ? `<div class="stock-grid">${live.map(stockCard).join('')}</div>` : '<div class="settings-card empty">No live stock portfolios.</div>') : '<div class="settings-card empty">Stock portfolio settings unavailable.</div>');
 }
@@ -129,7 +161,8 @@ async function refresh() {
   if (refreshing || saving || document.activeElement?.matches('#main input[type=number]')) return;
   refreshing = true;
   try {
-    const [paper, stocks] = await Promise.allSettled([api('/api/paper'), api('/api/stocks')]);
+    const [paper, stocks, compound] = await Promise.allSettled([api('/api/paper'), api('/api/stocks'), api('/api/compounding')]);
+    if (compound.status === 'fulfilled') C = compound.value;
     if (paper.status === 'rejected') throw paper.reason;
     if (saving) return;
     P = paper.value; ST = stocks.status === 'fulfilled' ? stocks.value : ST;
@@ -150,7 +183,15 @@ async function save(run, success) {
   catch (e) { if (e.state && P) P.state = e.state; status('Not saved: ' + e.message); notifyUI(e.message,true); }
   finally { saving = false; render(); }
 }
-const configure = async body => { P.state = (await api('/api/paper/config',{...body, revision:P.state.revision})).state; };
+const configure = async body => {
+  try { P.state = (await api('/api/paper/config',{...body, revision:P.state.revision})).state; }
+  catch (e) {
+    if (!e.state || e.state.revision === P.state.revision) throw e;
+    // Settings changed elsewhere meanwhile (e.g. the monthly compounding re-size): apply this change on the new revision.
+    P.state = e.state;
+    P.state = (await api('/api/paper/config',{...body, revision:P.state.revision})).state;
+  }
+};
 const saveIntraday = (body, message) => save(() => configure(body), message);
 
 async function onChange(e) {
@@ -187,7 +228,7 @@ LoadingUI.on($('main'),'click', async e => {
   if (e.target.closest('[data-go-live]')) { showTab('live',true); return; }
   const bulk = e.target.closest('[data-bulk]');
   if (bulk && P && !saving) {
-    const turnOn = bulk.dataset.bulk === 'on', targets = ORDERED.filter(p => !!P.state.config[p]?.on !== turnOn);
+    const turnOn = bulk.dataset.bulk === 'on', targets = [...ORDERED, ...COMPOUND].filter(p => !!P.state.config[p]?.on !== turnOn);
     if (!turnOn && !await confirmUI({title:'Turn off all paper strategies?', message:'Paper scanning stops for every intraday strategy. Live settings are not changed.', confirmText:'Turn all off', facts:[['Strategies',String(targets.length)]]})) return;
     return save(async () => { for (const p of targets) await configure({preset:p, on:turnOn}); }, `Paper scanning ${turnOn ? 'on' : 'off'} for ${targets.length} strateg${targets.length === 1 ? 'y' : 'ies'}.`);
   }
