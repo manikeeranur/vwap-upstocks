@@ -226,6 +226,29 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
                 await task
                 await self.trading.stop()
 
+    async def test_slow_strategy_run_carries_on_into_the_next_scan(self):
+        calls, release = [], asyncio.Event()
+        async def engine(preset, day):
+            calls.append(preset)
+            if preset == PRESET:
+                await release.wait()
+            return []
+        with patch("upstocks.live.run_engine", engine), patch.object(self.trading, "_act", AsyncMock()), \
+             patch.object(self.trading, "_peaks", AsyncMock()), patch.object(self.trading, "SCAN_WAIT", 0.05):
+            try:
+                first = await self.trading.scan(execute_live=False)
+                self.assertIn("continues in the next scan", first["errors"][PRESET])
+                self.trading.SCAN_WAIT = 1
+                pending = asyncio.create_task(self.trading.scan(execute_live=False))
+                await asyncio.sleep(0.02)
+                release.set()
+                second = await pending
+                self.assertNotIn(PRESET, second["errors"])
+                self.assertEqual(calls.count(PRESET), 1)   # the slow run was awaited again, not restarted
+            finally:
+                release.set()
+                await self.trading.stop()
+
     async def test_ack_only_buy_cannot_be_sold(self):
         await self.live()
         with patch("upstocks.upstox.place_market_order", AsyncMock(return_value="ack")) as broker, patch("upstocks.live.market_open", return_value=True):

@@ -25,6 +25,8 @@ log = logging.getLogger(__name__)
 
 
 class TradingService:
+    SCAN_WAIT = 45   # seconds a scan waits for one strategy's engine before reporting it as still running
+
     def __init__(self, repository, vault=None):
         self.repository = repository
         self.calendar = ExchangeCalendar(repository)
@@ -47,6 +49,7 @@ class TradingService:
         self._fills_lock = asyncio.Lock()
         self._skipped = set()   # (account, trade id) already reported as "not logged in"
         self._peak_cache = {}   # closed trade -> (peak high, peak low)
+        self._engine_runs = {}  # strategy -> (day, engine run) — see scan()
         self._historical_retry = {}
         self._fills_cache = {}  # account -> (monotonic time, {order id: fill price})
 
@@ -80,6 +83,8 @@ class TradingService:
 
     async def stop(self):
         tasks = [t for t in (self._task, self._reconcile_task, self._report_task) if t]
+        tasks += [run for _, run in self._engine_runs.values() if not run.done()]
+        self._engine_runs.clear()
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
@@ -360,18 +365,29 @@ class TradingService:
                 results, errors, runs = {}, {}, {}
                 def engine(name):   # one engine run per distinct strategy (live.SAME_TRADES share one)
                     if name not in runs:
-                        runs[name] = asyncio.ensure_future(asyncio.wait_for(live.run_engine(name, day), 45))
+                        # A run still going from the previous scan (it outlived that scan's wait while Upstox was
+                        # rate limited) is awaited again instead of being restarted, so its downloads aren't wasted.
+                        prev = self._engine_runs.get(name)
+                        if prev and prev[0] == day and not prev[1].done():
+                            runs[name] = prev[1]
+                        else:
+                            runs[name] = asyncio.ensure_future(live.run_engine(name, day))
+                            runs[name].add_done_callback(lambda f: f.cancelled() or f.exception())
+                            self._engine_runs[name] = (day, runs[name])
                     return runs[name]
                 async def calculate(preset):
                     cfg = self.state["config"][preset]
                     if not (cfg["on"] or self._any_live(preset) or (is_today and self._open_positions(preset))):
                         return preset, None, None
                     try:
-                        trades = await asyncio.shield(engine(live.SAME_TRADES.get(preset, preset)))
+                        trades = await asyncio.wait_for(asyncio.shield(engine(live.SAME_TRADES.get(preset, preset))), self.SCAN_WAIT)
                         return preset, (deepcopy(trades) if trades is not None else None), None
+                    except TimeoutError:
+                        log.warning("Strategy scan still running; it carries on into the next scan", extra={"preset": preset})
+                        return preset, None, f"Strategy scan took over {self.SCAN_WAIT} s (Upstox slow or rate limited); it continues in the next scan"
                     except Exception as exc:
                         log.exception("Strategy scan failed", extra={"preset": preset})
-                        return preset, None, redact(str(exc)) or "Strategy scan timed out"
+                        return preset, None, redact(str(exc)) or "Strategy scan failed"
 
                 tasks = [asyncio.create_task(calculate(p)) for p in live.PRESETS]
                 for finished in asyncio.as_completed(tasks):
@@ -426,7 +442,8 @@ class TradingService:
                 return deepcopy(view)
             finally:
                 self.view["running"] = False
-                pending = list(locals().get("tasks", [])) + list((locals().get("runs") or {}).values())
+                # Engine runs are left going: an unfinished one is picked up by the next scan (stop() cancels them).
+                pending = list(locals().get("tasks", []))
                 for task in pending:
                     if not task.done():
                         task.cancel()
