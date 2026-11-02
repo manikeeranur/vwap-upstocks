@@ -11,11 +11,13 @@
 - Exits as the live VWAP app: SL −sl_pct % on the candle low (exchange SL-M), SL to entry once
   the close is +breakeven_pct %, target +target_pct % on the minute close, time_exit.
 
-VWAP Touch Expiry (touch_expiry_only + touch_ema 50): the same rules, only on NIFTY's weekly expiry day, and a
+VWAP Touch Expiry (touch_expiry_only + touch_ema 50): the same entries, only on NIFTY's weekly expiry day, and a
 confirmation counts only while NIFTY's last completed N-min close is below its EMA50 (above for CE; warmed with the
-previous session) — otherwise the search goes on. Oct 2024 – Sep 2026, 1 lot, after charges: +₹46,806 and +₹76,087
-(66 trades, 64 % won); Oct 2026 (unseen) +₹10,032. On expiry days the filter beat the plain rules in both years;
-on other days, and on SENSEX expiry days, it made less.
+previous session) — otherwise the search goes on. On expiry days the filter beat the plain rules in both years; on
+other days, and on SENSEX expiry days, it made less. Exits: target 60 %, stop to entry at +15 %, and profit locks —
+once +20 % the SL moves to +5 %, once +30 % to +15 % (8 of the 66 trades used to give back a +15–30 % gain to ~₹0).
+Oct 2024 – Sep 2026, 1 lot, after charges: +₹59,311 and +₹81,531, max drawdown ₹13,984, 47 of 66 trades won;
+Oct 2026 (unseen) +₹14,811. (Target 40 % without locks: +₹46,806 and +₹76,087, drawdown ₹17,716.)
 
 Chosen 2026-11-02 from a 2-year test (Oct 2024 – Sep 2026, 1 lot, after charges, no slippage):
 +₹2,13,063 and +₹1,81,626, max drawdown ₹25,610; Oct 2026 (after the test, unseen) about ₹0.

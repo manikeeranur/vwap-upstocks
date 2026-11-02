@@ -1,5 +1,8 @@
 import unittest
+from dataclasses import replace
+from datetime import date
 
+from upstocks.vwap import Settings, resolve_live
 from upstocks.vwap_touch import signal
 
 
@@ -33,6 +36,18 @@ class SignalTest(unittest.TestCase):
         bars = ARM_TOUCH + [bar("09:18", 103, 108, 103, 107), bar("09:19", 107, 108, 106, 107)]
         self.assertIsNone(signal(bars, 1, 2.0, "09:20", "14:30"))
         self.assertIsNone(signal(bars, 1, 2.0, "09:15", "09:18"))
+
+
+class ProfitLockTest(unittest.TestCase):
+    def test_a_locked_gain_is_kept_when_the_option_falls_back(self):
+        s = replace(Settings(start=date(2026, 1, 1), end=date(2026, 1, 1)), sl_on_low=True, stagnant_hours=0,
+                    breakeven_pct=15, target_pct=60, time_exit="15:15", profit_locks=((20, 5), (30, 15)))
+        bars = [bar("10:00", 100, 100, 100, 100), bar("10:01", 100, 132, 100, 131),   # close +31 % → SL to +15
+                bar("10:02", 131, 131, 110, 112)]                                     # falls through 115
+        status, exit_p, *_ = resolve_live(bars, 0, 100.0, "10:00", s, 65.0, 160.0)
+        self.assertEqual((status, exit_p), ("SL", 115.0))
+        plain = replace(s, profit_locks=())
+        self.assertEqual(resolve_live(bars, 0, 100.0, "10:00", plain, 65.0, 160.0)[0], "EOD")   # only at entry: still open
 
 
 if __name__ == "__main__":

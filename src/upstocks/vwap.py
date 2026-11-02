@@ -132,6 +132,9 @@ class Settings:
     touch_tol: float = 2.0
     touch_expiry_only: bool = False     # VWAP Touch Expiry: trade only on NIFTY's weekly expiry day
     touch_ema: int = 0                  # …and only while NIFTY is below this EMA (PE) / above (CE); 0 = off
+    # resolve_live profit locks: ((gain %, locked %), …) — once the option's close has been gain % above entry,
+    # the SL-M moves up to entry + locked %. Empty = off.
+    profit_locks: tuple = ()
     trail_start: float = 0              # 0 = no trailing stop
     trail_giveback: float = 40
     slippage: float = 0.0
@@ -225,7 +228,9 @@ PRESETS["harmonic_2y_compound"] = dict(PRESETS["harmonic_2y"])
 PRESETS["pdh_compound"] = dict(PRESETS["pdh_breakout"])
 PRESETS["vwap_touch_compound"] = dict(PRESETS["vwap_touch"])
 # VWAP Touch Expiry — VWAP Touch only on NIFTY's expiry day, with NIFTY below its 3-min EMA50 (see vwap_touch.py).
-PRESETS["vwap_touch_expiry"] = {**PRESETS["vwap_touch"], "touch_expiry_only": True, "touch_ema": 50}
+# Exits: target 60 %; once +20 % the SL locks +5 %, once +30 % it locks +15 % (stop to entry at +15 % as VWAP Touch).
+PRESETS["vwap_touch_expiry"] = {**PRESETS["vwap_touch"], "touch_expiry_only": True, "touch_ema": 50, "target_pct": 60,
+                                "profit_locks": ((20, 5), (30, 15))}
 # SENSEX Harmonic — the Harmonic engine on SENSEX options (lot 20, 100-point strikes), one trade a day,
 # paper only. Picked 2026-10-30 from a 2-year SENSEX test (Oct 2024 – Sep 2026, after charges, each
 # strategy paying its own brokerage); run together as 3 lots of sensex_swing + 2 lots of sensex_bigleg:
@@ -462,6 +467,9 @@ def resolve_live(bars: list[Bar], entry_i: int, entry: float, mark: str, s: Sett
         peak = max(peak, _round2(c - entry))
         if s.breakeven_pct > 0 and not moved and peak > 0 and peak / entry * 100 >= s.breakeven_pct:
             sl, moved = entry, True
+        for gain, keep in s.profit_locks:
+            if peak / entry * 100 >= gain:
+                sl, moved = max(sl, _round2(entry * (1 + keep / 100))), True
         if t1 is not None and t1_time is None and c >= t1:
             t1_time = now
         if not s.sl_on_low and c <= sl:   # SMC: cron sees the close at/below SL
