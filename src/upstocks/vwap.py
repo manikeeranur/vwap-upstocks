@@ -130,6 +130,8 @@ class Settings:
     touch_side: str = "PE"
     touch_pick: str = "09:36"
     touch_tol: float = 2.0
+    touch_expiry_only: bool = False     # VWAP Touch Expiry: trade only on NIFTY's weekly expiry day
+    touch_ema: int = 0                  # …and only while NIFTY is below this EMA (PE) / above (CE); 0 = off
     trail_start: float = 0              # 0 = no trailing stop
     trail_giveback: float = 40
     slippage: float = 0.0
@@ -222,6 +224,8 @@ PRESETS["vwap_touch"] = {"strategy": "vwap_touch", "touch_side": "PE", "touch_pi
 PRESETS["harmonic_2y_compound"] = dict(PRESETS["harmonic_2y"])
 PRESETS["pdh_compound"] = dict(PRESETS["pdh_breakout"])
 PRESETS["vwap_touch_compound"] = dict(PRESETS["vwap_touch"])
+# VWAP Touch Expiry — VWAP Touch only on NIFTY's expiry day, with NIFTY below its 3-min EMA50 (see vwap_touch.py).
+PRESETS["vwap_touch_expiry"] = {**PRESETS["vwap_touch"], "touch_expiry_only": True, "touch_ema": 50}
 # SENSEX Harmonic — the Harmonic engine on SENSEX options (lot 20, 100-point strikes), one trade a day,
 # paper only. Picked 2026-10-30 from a 2-year SENSEX test (Oct 2024 – Sep 2026, after charges, each
 # strategy paying its own brokerage); run together as 3 lots of sensex_swing + 2 lots of sensex_bigleg:

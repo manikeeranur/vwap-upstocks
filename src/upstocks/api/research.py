@@ -20,7 +20,8 @@ PRESET_LABELS = {"frontend_live": "VWAP 9:30 — frontend LIVE rules", "smc_live
                  "sensex_swing": "SENSEX Harmonic Swing", "sensex_bigleg": "SENSEX Harmonic Big Leg",
                  "harmonic_power": "Harmonic Power Trail", "pdh_breakout": "Previous-day Breakout",
                  "harmonic_2y_compound": "Harmonic Optimized Compounding", "pdh_compound": "Previous-day Breakout Compounding",
-                 "vwap_touch": "VWAP Touch (PE)", "vwap_touch_compound": "VWAP Touch Compounding"}
+                 "vwap_touch": "VWAP Touch (PE)", "vwap_touch_compound": "VWAP Touch Compounding",
+                 "vwap_touch_expiry": "VWAP Touch Expiry (EMA50)"}
 
 
 async def _job(request, jid):

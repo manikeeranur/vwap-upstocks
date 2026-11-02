@@ -6,7 +6,7 @@ from . import combo, ema_pullback, harmonic, pdh, smc, upstox, vwap, vwap_touch
 
 PRESETS = ["frontend_live", "smc_live", "ema25_vwap", "ema_pullback", "smc_tuned", "smc_ema_combo", "harmonic", "harmonic_2y",
            "sensex_swing", "sensex_bigleg", "harmonic_power", "pdh_breakout", "harmonic_2y_compound", "pdh_compound",
-           "vwap_touch", "vwap_touch_compound"]
+           "vwap_touch", "vwap_touch_compound", "vwap_touch_expiry"]
 
 
 LABELS = {"frontend_live": "VWAP 9:30", "smc_live": "SMC", "ema25_vwap": "VWAP + EMA25 + SuperTrend",
@@ -15,7 +15,8 @@ LABELS = {"frontend_live": "VWAP 9:30", "smc_live": "SMC", "ema25_vwap": "VWAP +
           "sensex_swing": "SENSEX Harmonic Swing", "sensex_bigleg": "SENSEX Harmonic Big Leg",
           "harmonic_power": "Harmonic Power Trail", "pdh_breakout": "Previous-day Breakout",
           "harmonic_2y_compound": "Harmonic Optimized Compounding", "pdh_compound": "Previous-day Breakout Compounding",
-          "vwap_touch": "VWAP Touch (PE)", "vwap_touch_compound": "VWAP Touch Compounding"}
+          "vwap_touch": "VWAP Touch (PE)", "vwap_touch_compound": "VWAP Touch Compounding",
+          "vwap_touch_expiry": "VWAP Touch Expiry (EMA50)"}
 
 
 FRESH_MIN = 3

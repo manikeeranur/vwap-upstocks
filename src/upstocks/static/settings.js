@@ -4,7 +4,7 @@ const LABELS = { ...window.SETTINGS_CONFIG.labels, ...STRATEGY_META.labels }, PR
 const DESCRIPTIONS = STRATEGY_META.descriptions, STRATEGY_ICONS = STRATEGY_META.icons;
 const BROKER_NAMES = {paper:'Paper', upstox:'Upstox', kite:'Kite', indmoney:'INDmoney'}, BROKER_ORDER = ['upstox','kite','indmoney'];
 // Same order as the Intraday trading page.
-const FIRST = ['harmonic','harmonic_2y','harmonic_power','harmonic_2y_compound','pdh_breakout','pdh_compound','vwap_touch','vwap_touch_compound','ema_pullback','sensex_swing','sensex_bigleg'];
+const FIRST = ['harmonic','harmonic_2y','harmonic_power','harmonic_2y_compound','pdh_breakout','pdh_compound','vwap_touch','vwap_touch_compound','vwap_touch_expiry','ema_pullback','sensex_swing','sensex_bigleg'];
 // Compounding strategies have their own section: their lots are set from their capital, not by hand.
 const COMPOUND = ['harmonic_2y_compound','pdh_compound','vwap_touch_compound'].filter(p => PRESETS.includes(p));
 const ORDERED = [...FIRST.filter(p => PRESETS.includes(p)), ...PRESETS.filter(p => !FIRST.includes(p))].filter(p => !COMPOUND.includes(p));

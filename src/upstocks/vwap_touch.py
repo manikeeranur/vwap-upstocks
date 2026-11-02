@@ -11,6 +11,12 @@
 - Exits as the live VWAP app: SL −sl_pct % on the candle low (exchange SL-M), SL to entry once
   the close is +breakeven_pct %, target +target_pct % on the minute close, time_exit.
 
+VWAP Touch Expiry (touch_expiry_only + touch_ema 50): the same rules, only on NIFTY's weekly expiry day, and a
+confirmation counts only while NIFTY's last completed N-min close is below its EMA50 (above for CE; warmed with the
+previous session) — otherwise the search goes on. Oct 2024 – Sep 2026, 1 lot, after charges: +₹46,806 and +₹76,087
+(66 trades, 64 % won); Oct 2026 (unseen) +₹10,032. On expiry days the filter beat the plain rules in both years;
+on other days, and on SENSEX expiry days, it made less.
+
 Chosen 2026-11-02 from a 2-year test (Oct 2024 – Sep 2026, 1 lot, after charges, no slippage):
 +₹2,13,063 and +₹1,81,626, max drawdown ₹25,610; Oct 2026 (after the test, unseen) about ₹0.
 ₹1 slippage a side: +₹1,91,750 and +₹1,59,142. Entry starts 09:30–11:00 were all profitable in both
@@ -18,16 +24,18 @@ years (10:00 best). CE with the same rules lost money (−₹84,197 in year 2), 
 """
 from __future__ import annotations
 
+from bisect import bisect_right
 from dataclasses import replace
 from datetime import date, datetime
 
 from . import upstox
 from .vwap import (STEP, DayResult, Settings, Trade, _add, _market, _nearest_expiry, _round2, aggregate,
-                   resolve_live, span_rows, vwap_series)
+                   ema_series, resolve_live, span_rows, vwap_series)
 
 
-def signal(bars: list, cm: int, tol: float, start: str, last: str):
-    """(1-min entry index, entry price, candle, its VWAP, touch candle) of the first confirmation, or None."""
+def signal(bars: list, cm: int, tol: float, start: str, last: str, ok=None):
+    """(1-min entry index, entry price, candle, its VWAP, touch candle) of the first confirmation, or None.
+    ok(i), if given, must also hold for the confirming N-min candle i; when it doesn't, the search starts over."""
     nm = aggregate(bars, cm)
     vw = vwap_series(nm)
     armed, touch = False, None
@@ -50,7 +58,7 @@ def signal(bars: list, cm: int, tol: float, start: str, last: str):
                 return None
             if mark >= start:
                 j = next((k for k, b in enumerate(bars) if b[0] >= mark), None)
-                if j is not None:
+                if j is not None and (ok is None or ok(i)):
                     return j, close, c, w, touch
             armed, touch = False, None
     return None
@@ -63,6 +71,9 @@ async def run_day(day: date, s: Settings, spot_bars: list, prev_spot: list | Non
         res.note = "no expiry"
         return res
     d = day.isoformat()
+    if s.touch_expiry_only and expiry != d:
+        res.note = f"not an expiry day (next expiry {expiry}) — trades only on NIFTY's expiry day"
+        return res
     cutoff = "99:99"
     if day == upstox.today_ist():  # live: leave out the minute still forming
         cutoff = f"{datetime.now(upstox.IST):%H:%M}"
@@ -87,10 +98,25 @@ async def run_day(day: date, s: Settings, spot_bars: list, prev_spot: list | Non
     if not pick:
         res.note = f"no {side} in ₹{s.min_premium:g}–{s.max_premium:g} at {s.touch_pick}"
         return res
-    sig = signal(bars, s.candle_minutes, s.touch_tol, s.entry_start, s.last_entry)
+    ok = None
+    if s.touch_ema:  # NIFTY's last completed N-min close below its EMA (above for CE), warmed with the previous session
+        prev = list(prev_spot or [])
+        if not prev:  # backtests pass only today's bars: fetch the previous session
+            from .harmonic import vwap_days
+            prev = await vwap_days(day)
+        pa, ta = aggregate(prev, s.candle_minutes), aggregate([b for b in spot_bars if b[0] < cutoff], s.candle_minutes)
+        idx, times, nm = pa + ta, [c[0] for c in ta], aggregate(bars, s.candle_minutes)
+        ema = ema_series([c[4] for c in idx], s.touch_ema)
+        sign = -1 if side == "PE" else 1
+
+        def ok(i):
+            k = len(pa) + bisect_right(times, nm[i][0]) - 1
+            return k >= 1 and ema[k] is not None and sign * (idx[k][4] - ema[k]) > 0
+    sig = signal(bars, s.candle_minutes, s.touch_tol, s.entry_start, s.last_entry, ok)
     if not sig:
         res.note = (f"{pick['trading_symbol']}: no {s.candle_minutes}-min VWAP touch + close above the touch candle's high "
-                    f"{s.entry_start}–{s.last_entry}")
+                    f"{s.entry_start}–{s.last_entry}" + (f" with NIFTY {'below' if side == 'PE' else 'above'} its EMA{s.touch_ema}"
+                                                         if s.touch_ema else ""))
         return res
     j, entry, candle, w, touch = sig
     mark = bars[j][0]
@@ -108,6 +134,6 @@ async def run_day(day: date, s: Settings, spot_bars: list, prev_spot: list | Non
         exit_time=exit_t, exit=exit_p, pnl=pnl, pnl_pct=_round2(pnl / entry * 100), peak=peak, sl_to_breakeven=moved,
         spot=before[-1][4],
         why=f"{cm}-min VWAP touch at {_add(touch[0], 1)} (low {touch[3]:.2f} vs VWAP) · close {entry:.2f} above its high "
-            f"{touch[2]:.2f} · VWAP {w:.2f}",
+            f"{touch[2]:.2f} · VWAP {w:.2f}" + (f" · NIFTY {'below' if side == 'PE' else 'above'} EMA{s.touch_ema}" if s.touch_ema else ""),
     ))
     return res
