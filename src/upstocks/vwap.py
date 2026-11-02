@@ -126,6 +126,10 @@ class Settings:
     pdh_width_max: float = 0.8
     pdh_target: float = 2.0
     pdh_itm: float = 0
+    # VWAP Touch (vwap_touch.py): side traded, when the strike is picked, how close to VWAP counts as a touch (%).
+    touch_side: str = "PE"
+    touch_pick: str = "09:36"
+    touch_tol: float = 2.0
     trail_start: float = 0              # 0 = no trailing stop
     trail_giveback: float = 40
     slippage: float = 0.0
@@ -207,6 +211,12 @@ PRESETS["harmonic_power"] = {**PRESETS["harmonic_2y"], "harm_elliott": True, "tr
 PRESETS["pdh_breakout"] = {"strategy": "pdh", "entry_start": "09:15", "last_entry": "12:00", "time_exit": "15:15",
                            "sl_pct": 35, "rev_exit": True, "ep_rev_activate": 0, "max_trades": 1,
                            "pdh_width_min": 0.25, "pdh_width_max": 0.8, "pdh_target": 2.0, "pdh_itm": 0}
+# VWAP Touch (vwap_touch.py) — see that module for the rules and the 2-year result.
+PRESETS["vwap_touch"] = {"strategy": "vwap_touch", "touch_side": "PE", "touch_pick": "09:36", "touch_tol": 2.0,
+                         "candle_minutes": 3, "min_premium": 300, "max_premium": 500, "chain_strikes": 15,
+                         "entry_start": "10:00", "last_entry": "14:30", "sl_pct": 35, "target_pct": 40,
+                         "breakeven_pct": 15, "time_exit": "15:15", "max_trades": 1, "stagnant_hours": 0,
+                         "live": False, "strong_green": False}
 # Compounding versions: the same trades; services/compounding.py re-sizes their lots each month
 # from ₹1,50,000 plus their own paper profit (see COMPOUNDING there).
 PRESETS["harmonic_2y_compound"] = dict(PRESETS["harmonic_2y"])

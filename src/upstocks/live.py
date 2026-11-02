@@ -2,10 +2,11 @@
 from dataclasses import replace
 from datetime import date, datetime, timedelta
 
-from . import combo, ema_pullback, harmonic, pdh, smc, upstox, vwap
+from . import combo, ema_pullback, harmonic, pdh, smc, upstox, vwap, vwap_touch
 
 PRESETS = ["frontend_live", "smc_live", "ema25_vwap", "ema_pullback", "smc_tuned", "smc_ema_combo", "harmonic", "harmonic_2y",
-           "sensex_swing", "sensex_bigleg", "harmonic_power", "pdh_breakout", "harmonic_2y_compound", "pdh_compound"]
+           "sensex_swing", "sensex_bigleg", "harmonic_power", "pdh_breakout", "harmonic_2y_compound", "pdh_compound",
+           "vwap_touch"]
 
 
 LABELS = {"frontend_live": "VWAP 9:30", "smc_live": "SMC", "ema25_vwap": "VWAP + EMA25 + SuperTrend",
@@ -13,7 +14,8 @@ LABELS = {"frontend_live": "VWAP 9:30", "smc_live": "SMC", "ema25_vwap": "VWAP +
           "smc_ema_combo": "SMC + EMA pullback (1 trade a day)", "harmonic": "Harmonic", "harmonic_2y": "Harmonic Optimized",
           "sensex_swing": "SENSEX Harmonic Swing", "sensex_bigleg": "SENSEX Harmonic Big Leg",
           "harmonic_power": "Harmonic Power Trail", "pdh_breakout": "Previous-day Breakout",
-          "harmonic_2y_compound": "Harmonic Optimized Compounding", "pdh_compound": "Previous-day Breakout Compounding"}
+          "harmonic_2y_compound": "Harmonic Optimized Compounding", "pdh_compound": "Previous-day Breakout Compounding",
+          "vwap_touch": "VWAP Touch (PE)"}
 
 
 FRESH_MIN = 3
@@ -74,6 +76,8 @@ async def run_engine(preset: str, day: date) -> list[dict] | None:
         res = await harmonic.run_day(day, st, spot[d], prev)
     elif st.strategy == "pdh":
         res = await pdh.run_day(day, st, spot[d], prev)
+    elif st.strategy == "vwap_touch":
+        res = await vwap_touch.run_day(day, st, spot[d], prev)
     else:
         res = await vwap.run_day(day, st, spot[d], prev)
     return [vwap.trade_dict(t) for t in res.trades]

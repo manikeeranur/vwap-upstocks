@@ -4,7 +4,7 @@ from datetime import date, timedelta
 import logging
 import uuid
 
-from .. import combo, ema_pullback, harmonic, pdh, smc, upstox, vwap
+from .. import combo, ema_pullback, harmonic, pdh, smc, upstox, vwap, vwap_touch
 from ..observability import redact, request_id
 
 log = logging.getLogger(__name__)
@@ -71,6 +71,8 @@ class BacktestService:
                             result = await harmonic.run_day(date.fromisoformat(day), settings, bars, prev_spot.get(day))
                         elif settings.strategy == "pdh":
                             result = await pdh.run_day(date.fromisoformat(day), settings, bars, prev_spot.get(day))
+                        elif settings.strategy == "vwap_touch":
+                            result = await vwap_touch.run_day(date.fromisoformat(day), settings, bars, prev_spot.get(day))
                         else:
                             result = await vwap.run_day(date.fromisoformat(day), settings, bars, prev_spot[day])
                         out = {"date": result.date, "expiry": result.expiry, "note": result.note,
