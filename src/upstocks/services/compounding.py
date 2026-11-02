@@ -23,7 +23,8 @@ MIN_LOTS, MAX_LOTS = 1, 10
 RESIZE_AT, BOOK_AT = "09:05", "15:35"
 # capital per lot ≈ the highest premium of one lot + its 2-year max drawdown (rounded).
 COMPOUNDING = {"harmonic_2y_compound": {"start_capital": 150_000, "per_lot": 75_000},
-               "pdh_compound": {"start_capital": 150_000, "per_lot": 36_000}}
+               "pdh_compound": {"start_capital": 150_000, "per_lot": 36_000},
+               "vwap_touch_compound": {"start_capital": 150_000, "per_lot": 56_000}}
 
 
 def lots_for(capital: float, per_lot: float) -> int:

@@ -289,7 +289,7 @@ function render() {
 }
 const editingConfig = () => S && document.activeElement?.matches('#strats input');
 // Harmonic, then EMA pullback, then the rest.
-const shownPresets = () => { const first = ['harmonic','harmonic_2y','harmonic_power','harmonic_2y_compound','pdh_breakout','pdh_compound','vwap_touch','ema_pullback','sensex_swing','sensex_bigleg'].filter(p => PRESETS.includes(p)); return [...first, ...PRESETS.filter(p => !first.includes(p))]; };
+const shownPresets = () => { const first = ['harmonic','harmonic_2y','harmonic_power','harmonic_2y_compound','pdh_breakout','pdh_compound','vwap_touch','vwap_touch_compound','ema_pullback','sensex_swing','sensex_bigleg'].filter(p => PRESETS.includes(p)); return [...first, ...PRESETS.filter(p => !first.includes(p))]; };
 function sessionLabel() {
   const session=S?.intraday_session;
   if(!session?.day)return 'Trading calendar unavailable';
@@ -382,7 +382,7 @@ async function loadCompounding() {
   try {
     const c = await api('/api/compounding');
     for (const [p, v] of Object.entries(c.strategies)) {
-      DESCRIPTIONS[p] = `${p === 'pdh_compound' ? 'Previous-day Breakout' : 'Harmonic Optimized'} · capital ${money(v.capital)} · ${v.lots} lot${v.lots === 1 ? '' : 's'} (re-sized monthly at ₹${(v.per_lot / 1000).toFixed(0)}k a lot, max ${c.max_lots}) · from ${c.start}`;
+      DESCRIPTIONS[p] = `${{pdh_compound: 'Previous-day Breakout', vwap_touch_compound: 'VWAP Touch (PE)'}[p] || 'Harmonic Optimized'} · capital ${money(v.capital)} · ${v.lots} lot${v.lots === 1 ? '' : 's'} (re-sized monthly at ₹${(v.per_lot / 1000).toFixed(0)}k a lot, max ${c.max_lots}) · from ${c.start}`;
     }
     if (typeof S !== 'undefined' && S) render();
   } catch {}

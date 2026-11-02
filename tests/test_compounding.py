@@ -86,6 +86,7 @@ class CompoundingTests(unittest.TestCase):
         asyncio.run(svc.tick(at("2026-11-02", "09:05")))
         self.assertIn(("harmonic_2y_compound", "kite", 2), calls)
         self.assertIn(("pdh_compound", "upstox", 4), calls)
+        self.assertIn(("vwap_touch_compound", "upstox", 2), calls)
         self.assertEqual(svc.state["harmonic_2y_compound"]["capital"], 150_000)      # not before 15:35
         asyncio.run(svc.tick(at("2026-11-02", "15:35")))
         expected = round(150_000 + 100 * 130 - compounding.charges(400, 500, 130), 2)

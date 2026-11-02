@@ -6,7 +6,7 @@ from . import combo, ema_pullback, harmonic, pdh, smc, upstox, vwap, vwap_touch
 
 PRESETS = ["frontend_live", "smc_live", "ema25_vwap", "ema_pullback", "smc_tuned", "smc_ema_combo", "harmonic", "harmonic_2y",
            "sensex_swing", "sensex_bigleg", "harmonic_power", "pdh_breakout", "harmonic_2y_compound", "pdh_compound",
-           "vwap_touch"]
+           "vwap_touch", "vwap_touch_compound"]
 
 
 LABELS = {"frontend_live": "VWAP 9:30", "smc_live": "SMC", "ema25_vwap": "VWAP + EMA25 + SuperTrend",
@@ -15,14 +15,14 @@ LABELS = {"frontend_live": "VWAP 9:30", "smc_live": "SMC", "ema25_vwap": "VWAP +
           "sensex_swing": "SENSEX Harmonic Swing", "sensex_bigleg": "SENSEX Harmonic Big Leg",
           "harmonic_power": "Harmonic Power Trail", "pdh_breakout": "Previous-day Breakout",
           "harmonic_2y_compound": "Harmonic Optimized Compounding", "pdh_compound": "Previous-day Breakout Compounding",
-          "vwap_touch": "VWAP Touch (PE)"}
+          "vwap_touch": "VWAP Touch (PE)", "vwap_touch_compound": "VWAP Touch Compounding"}
 
 
 FRESH_MIN = 3
 
 # Strategies whose trades are exactly another's (same settings, only the lots differ): a scan runs the
 # engine once for both.
-SAME_TRADES = {"harmonic_2y_compound": "harmonic_2y", "pdh_compound": "pdh_breakout"}
+SAME_TRADES = {"harmonic_2y_compound": "harmonic_2y", "pdh_compound": "pdh_breakout", "vwap_touch_compound": "vwap_touch"}
 
 
 KEEP = ("date", "expiry", "symbol", "strike", "type", "instrument_key", "entry_time", "entry", "sl", "target",
