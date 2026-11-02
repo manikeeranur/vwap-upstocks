@@ -237,7 +237,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
              patch.object(self.trading, "_peaks", AsyncMock()), patch.object(self.trading, "SCAN_WAIT", 0.05):
             try:
                 first = await self.trading.scan(execute_live=False)
-                self.assertIn("continues in the next scan", first["errors"][PRESET])
+                self.assertNotIn(PRESET, first["errors"])   # still running: no error, last trades kept
                 self.trading.SCAN_WAIT = 1
                 pending = asyncio.create_task(self.trading.scan(execute_live=False))
                 await asyncio.sleep(0.02)

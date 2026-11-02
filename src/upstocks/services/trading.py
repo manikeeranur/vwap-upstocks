@@ -22,6 +22,7 @@ from .exchange_calendar import ExchangeCalendar
 from .execution_details import ExecutionDetails
 
 log = logging.getLogger(__name__)
+STILL_RUNNING = object()   # scan(): a strategy whose engine run outlived the scan's wait
 
 
 class TradingService:
@@ -384,7 +385,7 @@ class TradingService:
                         return preset, (deepcopy(trades) if trades is not None else None), None
                     except TimeoutError:
                         log.warning("Strategy scan still running; it carries on into the next scan", extra={"preset": preset})
-                        return preset, None, f"Strategy scan took over {self.SCAN_WAIT} s (Upstox slow or rate limited); it continues in the next scan"
+                        return preset, STILL_RUNNING, None
                     except Exception as exc:
                         log.exception("Strategy scan failed", extra={"preset": preset})
                         return preset, None, redact(str(exc)) or "Strategy scan failed"
@@ -392,6 +393,12 @@ class TradingService:
                 tasks = [asyncio.create_task(calculate(p)) for p in live.PRESETS]
                 for finished in asyncio.as_completed(tasks):
                     preset, trades, error = await finished
+                    if trades is STILL_RUNNING:
+                        # Keep showing this strategy's last trades today (no orders act on them); its run finishes
+                        # in the background and the next scan uses it.
+                        if self.view.get("day") == day.isoformat() and preset in (self.view.get("results") or {}):
+                            results[preset] = deepcopy(self.view["results"][preset])
+                        continue
                     if error:
                         errors[preset] = error
                         continue
