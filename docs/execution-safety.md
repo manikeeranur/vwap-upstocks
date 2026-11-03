@@ -264,6 +264,8 @@ Paper and live peak high/low reports consume only 1-minute candles returned to a
 scanner engine. Capture is task-local, including shared or disk-cached reads;
 ordinary research requests cannot populate this reporting store. Wider contract
 ranges are sliced to the scanned session and overlapping minutes are merged.
+Only minutes complete at the original candle read time are retained; a cache hit
+does not promote an earlier, partially formed bar into a final candle.
 The store is bounded to 256 instrument/day pairs, at most 1,440 rows per pair.
 
 Neither peak-reporting path calls the market-data API, including a cache miss,

@@ -3,6 +3,8 @@
 This module has no broker client or fetch path. Context-local capture excludes
 research/download requests, even when they share an in-flight network read.
 """
+from __future__ import annotations
+
 from collections import OrderedDict
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -10,7 +12,7 @@ from datetime import date, datetime, timedelta, timezone
 import logging
 
 log = logging.getLogger(__name__)
-_capture = ContextVar("scanner_candle_capture", default=None)
+_capture: ContextVar[tuple[ScannerCandles, date] | None] = ContextVar("scanner_candle_capture", default=None)
 IST = timezone(timedelta(hours=5, minutes=30))
 
 
@@ -19,7 +21,7 @@ class ScannerCandles:
     MAX_ROWS_PER_DAY = 1440
 
     def __init__(self):
-        self._days = OrderedDict()
+        self._days: OrderedDict[tuple[str, date], dict[str, tuple]] = OrderedDict()
 
     @contextmanager
     def capture(self, day: date):
@@ -29,17 +31,19 @@ class ScannerCandles:
         finally:
             _capture.reset(token)
 
-    def record(self, instrument, interval, day, rows):
+    def record(self, instrument, interval, day, rows, fetched_at=None):
         if interval != "1m":
             return
         # Copy only the scanned session from the engine's wider contract range.
         # Merge partial ranges and replace revised minutes; never mutate engine data.
+        received = datetime.fromtimestamp(fetched_at, IST) if fetched_at is not None else datetime.now(IST)
         updates = {}
         for row in rows:
             try:
                 at = datetime.fromisoformat(row[0])
                 at = at.replace(tzinfo=IST) if at.tzinfo is None else at.astimezone(IST)
-                if at.date() == day and len(row) >= 5 and at.second == 0 and at.microsecond == 0:
+                if (at.date() == day and len(row) >= 5 and at.second == 0 and at.microsecond == 0
+                        and at + timedelta(minutes=1) <= received):
                     updates[at.isoformat()] = (at.isoformat(), *row[1:])
             except (ValueError, TypeError, IndexError):
                 continue
@@ -58,12 +62,12 @@ class ScannerCandles:
         return tuple(self._days.get((instrument, day), {}).values())
 
 
-def observe(instrument, interval, rows):
+def observe(instrument, interval, rows, fetched_at=None):
     capture = _capture.get()
     if capture is not None:
         store, day = capture
         try:
-            store.record(instrument, interval, day, rows)
+            store.record(instrument, interval, day, rows, fetched_at)
         except Exception:
             # Optional reporting must never fail an engine or alter order decisions.
             log.warning("Unable to retain scanner candles for reporting", exc_info=True)

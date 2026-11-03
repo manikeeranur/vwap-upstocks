@@ -359,7 +359,10 @@ async def candles(instrument_key: str, interval: str, start: date, end: date, ex
         fut.add_done_callback(completed)
     # Both creator and followers are isolated; close() still cancels the real task.
     rows = await asyncio.shield(fut)
-    observe(instrument_key, interval, rows)
+    cached = _cache.get(key_)
+    # Use the original read time: a TTL hit must not finalize an old forming bar.
+    if cached and cached[1] is rows:
+        observe(instrument_key, interval, rows, cached[0])
     return rows
 
 

@@ -1,6 +1,6 @@
 """Scanner provenance and bounded, cache-only reporting snapshots."""
 import asyncio
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 import unittest
 from unittest.mock import AsyncMock, patch
 
@@ -45,6 +45,21 @@ class CaptureTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(fetch.await_count, 2)  # exactly the scanner's existing hist + intraday reads
             self.assertEqual(self.store.rows(KEY, DAY), tuple(map(tuple, ROWS)))
             self.assertEqual(self.store.rows(KEY, DAY-timedelta(days=1)), ())
+
+    async def test_ttl_hit_cannot_turn_a_forming_candle_into_a_final_peak(self):
+        received = datetime(2026, 11, 3, 9, 30, 30, tzinfo=upstox.IST).timestamp()
+        with patch("upstocks.upstox._fetch_candles", AsyncMock(return_value=ROWS)) as fetch:
+            with self.store.capture(DAY), patch("upstocks.upstox.time.time", return_value=received):
+                await upstox.candles(KEY, "1m", DAY, DAY, False)
+            self.assertEqual(self.store.rows(KEY, DAY), ())
+            with self.store.capture(DAY), patch("upstocks.upstox.time.time", return_value=received+40):
+                await upstox.candles(KEY, "1m", DAY, DAY, False)
+            self.assertEqual(fetch.await_count, 1)
+            self.assertEqual(self.store.rows(KEY, DAY), ())  # 09:30 was incomplete when actually fetched
+            with self.store.capture(DAY), patch("upstocks.upstox.time.time", return_value=received+61):
+                await upstox.candles(KEY, "1m", DAY, DAY, False)
+            self.assertEqual(fetch.await_count, 2)  # normal scanner refresh, not a reporting request
+            self.assertEqual(self.store.rows(KEY, DAY), (tuple(ROWS[0]),))
 
     async def test_shared_read_from_research_is_captured_by_scanner_waiter_only(self):
         entered, release = asyncio.Event(), asyncio.Event()
