@@ -61,6 +61,10 @@ class UpstoxError(RuntimeError):
     pass
 
 
+class MarketDataUnavailable(UpstoxError):
+    """A bounded, retryable failure of a read-only market-data request."""
+
+
 def _token() -> str:
     t = os.environ.get("UPSTOX_ACCESS_TOKEN")
     if not t:
@@ -195,9 +199,26 @@ async def _throttle() -> None:
 
 async def _get(path: str, params: dict | None = None) -> dict:
     headers = {"Accept": "application/json", "Authorization": f"Bearer {_token()}"}
+    transient_failures = 0
     for attempt in range(6):
         await _throttle()
-        r = await client().get(path, params=params, headers=headers)
+        try:
+            r = await client().get(path, params=params, headers=headers)
+        except httpx.TransportError as exc:
+            transient_failures += 1
+            if transient_failures >= 3 or attempt == 5:
+                reason = "timed out" if isinstance(exc, httpx.TimeoutException) else "connection failed"
+                raise MarketDataUnavailable(f"Upstox market data {reason} after {transient_failures} attempts") from exc
+            log.warning("Market-data read interrupted; retrying", extra={"attempt": transient_failures, "error_type": type(exc).__name__})
+            await asyncio.sleep(2 ** (transient_failures - 1))
+            continue
+        if r.status_code in (502, 503, 504):
+            transient_failures += 1
+            if transient_failures >= 3 or attempt == 5:
+                raise MarketDataUnavailable(f"Upstox market data temporarily unavailable (HTTP {r.status_code})")
+            log.warning("Market-data service unavailable; retrying", extra={"attempt": transient_failures, "status_code": r.status_code})
+            await asyncio.sleep(2 ** (transient_failures - 1))
+            continue
         if r.status_code == 429 and attempt < 5:  # still limited (e.g. budget used elsewhere) — wait it out
             await asyncio.sleep(min(15.0 * (attempt + 1), 60.0))
             continue
@@ -315,18 +336,27 @@ async def candles(instrument_key: str, interval: str, start: date, end: date, ex
         hist = await candles(instrument_key, interval, start, today - timedelta(days=1), expired)
         intra = await candles(instrument_key, interval, today, end, expired)
         return hist + [r for r in intra if r[0][:10] >= today.isoformat()]
-    if key_ in _inflight:  # same range already being fetched (parallel days) — share it
-        return await _inflight[key_]
-    if end <= today - timedelta(days=2):
-        fut = asyncio.ensure_future(_disk_cached(key_, lambda: _fetch_candles(instrument_key, interval, start, end, expired)))
-    else:  # recent: may still grow — today's for a minute, yesterday's for 15 min
-        ttl = 50 if end >= today else 900
-        fut = asyncio.ensure_future(_cached(key_, ttl, lambda: _fetch_candles(instrument_key, interval, start, end, expired)))
-    _inflight[key_] = fut
-    try:
-        return await fut
-    finally:
-        _inflight.pop(key_, None)
+    fut = _inflight.get(key_)
+    if fut is None:
+        if end <= today - timedelta(days=2):
+            read = _disk_cached(key_, lambda: _fetch_candles(instrument_key, interval, start, end, expired))
+        else:  # recent: may still grow — today's for a minute, yesterday's for 15 min
+            ttl = 50 if end >= today else 900
+            read = _cached(key_, ttl, lambda: _fetch_candles(instrument_key, interval, start, end, expired))
+        fut = asyncio.ensure_future(read)
+        _inflight[key_] = fut
+
+        def completed(task):
+            # The request owns cleanup, not whichever caller happened to start it.
+            # A timed-out peak calculation must not cancel another strategy's read.
+            if _inflight.get(key_) is task:
+                _inflight.pop(key_, None)
+            if not task.cancelled():
+                task.exception()  # consume failures even when all callers have left
+
+        fut.add_done_callback(completed)
+    # Both creator and followers are isolated; close() still cancels the real task.
+    return await asyncio.shield(fut)
 
 
 async def _fetch_candles(instrument_key: str, interval: str, start: date, end: date, expired: bool) -> list[list]:

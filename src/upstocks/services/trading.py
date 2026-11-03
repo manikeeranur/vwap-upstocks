@@ -26,6 +26,7 @@ STILL_RUNNING = object()   # scan(): a strategy whose engine run outlived the sc
 
 
 class TradingService:
+    WORKER_CHECK_INTERVAL = 5
     SCAN_WAIT = 45   # seconds a scan waits for one strategy's engine before reporting it as still running
 
     def __init__(self, repository, vault=None):
@@ -41,6 +42,9 @@ class TradingService:
         self._task = None
         self._reconcile_task = None
         self._report_task = None
+        self._watch_task = None
+        self._stopping = False
+        self._worker_restarts = 0
         self.last_cycle = None
         self.last_reconcile = None
         self.started_at = time.monotonic()
@@ -56,11 +60,30 @@ class TradingService:
 
     def start(self):
         if self._task is None:
+            self._stopping = False
             self._task = asyncio.create_task(self._loop(), name="market-scanner")
             self._reconcile_task = asyncio.create_task(self._reconcile_loop(), name="order-reconciliation")
+            self._watch_task = asyncio.create_task(self._watch_workers(), name="trading-worker-watch")
             if self.view.get("day") and self.view.get("results"):
                 # The saved session has no peaks (they are added after a scan): work them out again on start.
                 self._report_task = asyncio.create_task(self._enrich_loaded(), name="trade-statistics")
+
+    async def _watch_workers(self):
+        """Recover an unexpectedly exited worker without restarting the web app."""
+        while not self._stopping:
+            await asyncio.sleep(self.WORKER_CHECK_INTERVAL)
+            for field, name, factory in (("_task", "market-scanner", self._loop),
+                                          ("_reconcile_task", "order-reconciliation", self._reconcile_loop)):
+                task = getattr(self, field)
+                if self._stopping or task is None or not task.done():
+                    continue
+                failure = None if task.cancelled() else task.exception()
+                reason = "CancelledError" if task.cancelled() else type(failure).__name__ if failure else "Unexpected return"
+                log.error("Trading worker stopped unexpectedly; restarting",
+                          extra={"worker": name, "error_type": reason},
+                          exc_info=(type(failure), failure, failure.__traceback__) if failure else None)
+                self._worker_restarts += 1
+                setattr(self, field, asyncio.create_task(factory(), name=name))
 
     def _paper_lots(self, preset):
         """Paper trades 1 lot — except a compounding strategy, which trades its current compounded lots
@@ -78,18 +101,20 @@ class TradingService:
             log.warning("Optional trade statistics unavailable", exc_info=True)
 
     def worker_health(self):
-        return {"running": bool(self._task and not self._task.done() and self._reconcile_task and not self._reconcile_task.done()),
+        return {"running": bool(self._task and not self._task.done() and self._reconcile_task and not self._reconcile_task.done() and self._watch_task and not self._watch_task.done()),
                 "stale": time.monotonic() - (self.last_cycle or self.started_at) > 180 or time.monotonic() - (self.last_reconcile or self.started_at) > 120,
-                "reconciliation_stale": time.monotonic() - (self.last_reconcile or self.started_at) > 120}
+                "reconciliation_stale": time.monotonic() - (self.last_reconcile or self.started_at) > 120,
+                "restarts": self._worker_restarts}
 
     async def stop(self):
-        tasks = [t for t in (self._task, self._reconcile_task, self._report_task) if t]
+        self._stopping = True
+        tasks = [t for t in (self._task, self._reconcile_task, self._report_task, self._watch_task) if t]
         tasks += [run for _, run in self._engine_runs.values() if not run.done()]
         self._engine_runs.clear()
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
-        self._task = self._reconcile_task = self._report_task = None
+        self._task = self._reconcile_task = self._report_task = self._watch_task = None
 
     async def _reconcile_loop(self):
         while True:
@@ -364,6 +389,7 @@ class TradingService:
             self.view["running"] = True
             try:
                 results, errors, runs = {}, {}, {}
+                refreshed = set()
                 def engine(name):   # one engine run per distinct strategy (live.SAME_TRADES share one)
                     if name not in runs:
                         # A run still going from the previous scan (it outlived that scan's wait while Upstox was
@@ -383,12 +409,22 @@ class TradingService:
                     try:
                         trades = await asyncio.wait_for(asyncio.shield(engine(live.SAME_TRADES.get(preset, preset))), self.SCAN_WAIT)
                         return preset, (deepcopy(trades) if trades is not None else None), None
+                    except asyncio.CancelledError:
+                        # Cancellation of the scan/shutdown must still propagate. A cancelled
+                        # child engine is an isolated strategy failure, not scanner shutdown.
+                        if (task := asyncio.current_task()) is not None and task.cancelling():
+                            raise
+                        log.warning("Strategy engine interrupted; retrying next scan", extra={"preset": preset})
+                        return preset, None, "Market-data calculation interrupted; retrying automatically"
                     except TimeoutError:
                         log.warning("Strategy scan still running; it carries on into the next scan", extra={"preset": preset})
                         return preset, STILL_RUNNING, None
                     except Exception as exc:
                         log.exception("Strategy scan failed", extra={"preset": preset})
-                        return preset, None, redact(str(exc)) or "Strategy scan failed"
+                        message = redact(str(exc)) or f"Strategy scan failed ({type(exc).__name__})"
+                        if isinstance(exc, upstox.MarketDataUnavailable):
+                            message += "; retrying automatically"
+                        return preset, None, message
 
                 tasks = [asyncio.create_task(calculate(p)) for p in live.PRESETS]
                 for finished in asyncio.as_completed(tasks):
@@ -401,7 +437,10 @@ class TradingService:
                         continue
                     if error:
                         errors[preset] = error
-                        continue
+                        if self.view.get("day") == day.isoformat() and preset in (self.view.get("results") or {}):
+                            results[preset] = deepcopy(self.view["results"][preset])
+                        continue  # retained display data must never drive an order
+
                     cfg = self.state["config"][preset]
                     if not (cfg["on"] or self._any_live(preset) or (is_today and self._open_positions(preset))):
                         continue
@@ -416,6 +455,7 @@ class TradingService:
                         trade["orders"] = ({acc: deepcopy(o[trade["id"]]) for acc, o in self.state["orders"].items() if trade["id"] in o}
                                            if is_today else {})
                     results[preset] = trades
+                    refreshed.add(preset)
                 view = {"day": day.isoformat(), "scanned_at": f"{live.now_ist():%H:%M:%S}",
                         "results": results, "errors": errors, "running": False}
                 def journal_sessions():
@@ -424,7 +464,7 @@ class TradingService:
                                 "trades": [{**{k: t.get(k) for k in live.KEEP}, "id": t["id"], "open": t["open"],
                                             "live": any(o.get("buy", {}).get("order_id") for o in t["orders"].values())}
                                            for t in trades]}
-                            for p, trades in results.items()}
+                            for p, trades in results.items() if p in refreshed}
                 sessions = journal_sessions() if is_today and live.market_open() else None
                 if sessions is None and results and (not is_today or live.now_ist().strftime("%H:%M") > "15:30"):
                     # A replay (or a scan after the close) fills strategies with no recorded session that day.

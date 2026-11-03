@@ -237,3 +237,23 @@ calculations retain their calculation timestamp and remain estimates.
 References: Kite https://kite.trade/docs/connect/v3/margins/#virtual-contract-note ;
 Upstox https://upstox.com/developer/api-documentation/get-brokerage/ ;
 INDmoney https://api-docs.indstocks.com/margin_calculation/ .
+
+
+## Scanner recovery and shared candle reads
+
+A candle download is shared until the request itself finishes. Cancelling a page request,
+a peak calculation, or one strategy waiter does not cancel that download for other strategies.
+Application shutdown explicitly cancels and awaits all shared reads.
+
+Only read-only market-data GETs retry transient transport failures and HTTP 502/503/504,
+with at most three transient failures and short backoff inside the existing rate limiter.
+Authentication errors fail immediately; broker order submission is never retried by this policy.
+After exhaustion, the strategy reports the cause and retries on its next scan. Previous results
+can remain visible, but cannot place orders or overwrite the last successful journal session.
+
+A five-second supervisor restarts a scanner or reconciliation worker that unexpectedly exits.
+It logs the reason and exposes a restart count in readiness. Normal shutdown disables supervision
+before cancelling workers. A slow worker is reported stale rather than force-cancelled while it
+might be handling broker execution.
+
+Regression checks: `tests/test_market_data_resilience.py` and `tests/test_scanner_recovery.py`.
