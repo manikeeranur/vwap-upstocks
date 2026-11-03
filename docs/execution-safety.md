@@ -257,3 +257,22 @@ before cancelling workers. A slow worker is reported stale rather than force-can
 might be handling broker execution.
 
 Regression checks: `tests/test_market_data_resilience.py` and `tests/test_scanner_recovery.py`.
+
+## Scanner-only intraday peak reporting
+
+Paper and live peak high/low reports consume only 1-minute candles returned to a
+scanner engine. Capture is task-local, including shared or disk-cached reads;
+ordinary research requests cannot populate this reporting store. Wider contract
+ranges are sliced to the scanned session and overlapping minutes are merged.
+The store is bounded to 256 instrument/day pairs, at most 1,440 rows per pair.
+
+Neither peak-reporting path calls the market-data API, including a cache miss,
+page refresh, replay or application restart. Missing/incomplete coverage stays
+unavailable. Open peaks include a `through` timestamp and refresh from the next
+scanner snapshot without a failure cooldown. Complete closed peaks are saved in
+SQLite only after the exit minute has finished, retaining price, time and points.
+Existing saved closed reports remain readable; there is no API backfill for old
+trades. Strategy signal/trailing-stop calculations are unchanged.
+
+Regression checks: `tests/test_scanner_candles.py`, `tests/test_execution_details.py`
+and the paper peak cases in `tests/test_services.py`.

@@ -1,6 +1,6 @@
 """Read-only intraday price excursions; never changes execution or paper results."""
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 import hashlib
 import json
 import logging
@@ -60,8 +60,9 @@ def candle_peaks(rows, start, end, entry):
 
 
 class ExecutionDetails:
-    def __init__(self, repository):
+    def __init__(self, repository, candles):
         self.repository = repository
+        self.candles = candles
         self._lock = asyncio.Lock()
         self._recent = {}
 
@@ -99,34 +100,40 @@ class ExecutionDetails:
                     if end is None or end < start or end.date() != start.date():
                         continue  # No invented multi-day range for an intraday record.
                     work.append((info, instrument, start, end, buy["fill_price"], closed, buy.get("contract", {}).get("expiry")))
-            semaphore = asyncio.Semaphore(3)
             async def one(item):
-                async with semaphore:
-                    info, instrument, start, end, entry, closed, expiry = item
-                    key = "execution_peaks:v1:" + hashlib.sha256(json.dumps([instrument, start.isoformat(), end.isoformat() if closed else "open", entry, closed, expiry]).encode()).hexdigest()
-                    try:
-                        saved = self._recent.get(key)
-                        if saved:
-                            info.update(saved[1])
-                            return
-                        stored = await asyncio.to_thread(self.repository.get_json, key) if closed else None
-                        if stored:
-                            info.update(stored)
-                            self._recent[key] = (time.monotonic()+60, stored)
-                            return
-                        expired = bool(expiry and expiry < now.date().isoformat())
-                        rows = await asyncio.wait_for(upstox.candles(instrument, "1m", start.date(), end.date(), expired), 6)
-                        peaks = candle_peaks(rows, start, end, entry)
-                        if peaks and peaks["starts_at_entry"] and (not closed or peaks["ends_at_exit"]):
-                            details = {"status": "available", "candle_source": "upstox", **peaks}
-                            if closed:
-                                await asyncio.to_thread(self.repository.set_json, key, details)
-                        else:
-                            details = {"status": "incomplete" if peaks else "unavailable"}
-                    except Exception:
-                        log.warning("Execution candle details unavailable", extra={"instrument": instrument})
-                        details = {"status": "unavailable"}
-                    self._recent[key] = (time.monotonic()+60, details)
-                    info.update(details)
+                info, instrument, start, end, entry, closed, expiry = item
+                info.update(await self.peaks(instrument, start, end, entry, closed, expiry, now))
             await asyncio.gather(*(one(item) for item in work))
         return result
+
+    async def peaks(self, instrument, start, end, entry, closed, expiry, now):
+        """Use scanner snapshots or persisted closed peaks; never request candles.
+
+        Open/missing/incomplete results are recomputed on the next request so a
+        new scan is visible immediately. Only complete closed results are cached.
+        """
+        self._recent = {k: v for k, v in self._recent.items() if v[0] > time.monotonic()}
+        if len(self._recent) >= 256:
+            self._recent.pop(next(iter(self._recent)))
+        key = "execution_peaks:v1:" + hashlib.sha256(json.dumps([instrument, start.isoformat(), end.isoformat() if closed else "open", entry, closed, expiry]).encode()).hexdigest()
+        try:
+            saved = self._recent.get(key)
+            if closed and saved and saved[0] > time.monotonic():
+                return saved[1]
+            stored = await asyncio.to_thread(self.repository.get_json, key) if closed else None
+            if stored:
+                self._recent[key] = (time.monotonic()+60, stored)
+                return stored
+            rows = self.candles.rows(instrument, start.date())
+            peaks = candle_peaks(rows, start, end, entry)
+            exit_minute_complete = end.replace(second=0, microsecond=0) + timedelta(minutes=1) <= now
+            if peaks and peaks["starts_at_entry"] and (not closed or (peaks["ends_at_exit"] and exit_minute_complete)):
+                details = {"status": "available", "candle_source": "scanner", **peaks}
+                if closed:
+                    await asyncio.to_thread(self.repository.set_json, key, details)
+                    self._recent[key] = (time.monotonic()+60, details)
+                return details
+            return {"status": "incomplete" if peaks else "unavailable"}
+        except Exception:
+            log.warning("Execution candle details unavailable", extra={"instrument": instrument}, exc_info=True)
+            return {"status": "unavailable"}

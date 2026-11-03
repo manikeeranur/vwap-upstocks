@@ -20,7 +20,7 @@ test('compact row shows actual filled prices, IST order clocks, points and fee q
 });
 test('absent timestamps and candles remain unavailable, never synthesized from a strategy signal',()=>{
   const c=context();const r=row();r.buy={filled_qty:65,fill_price:403.9};
-  const html=c.executionCard(r);assert.ok(html.includes('Time unavailable'));assert.ok(html.includes('Candles unavailable'));
+  const html=c.executionCard(r);assert.ok(html.includes('Time unavailable'));assert.ok(html.includes('Scanner candles unavailable'));
   assert.equal(c.savedOrderTime({created_at:day+'T05:32:29Z',filled_qty:65},day),day+'T05:32:29Z');
   assert.equal(c.executionClock(day+'T05:32:29Z'),'11:02:29');
 });

@@ -19,7 +19,8 @@ from ..order_evidence import current_attempt, apply_evidence, combine
 from ..observability import redact
 from ..repository import account_id
 from .exchange_calendar import ExchangeCalendar
-from .execution_details import ExecutionDetails
+from .execution_details import ExecutionDetails, timestamp
+from ..scanner_candles import ScannerCandles
 
 log = logging.getLogger(__name__)
 STILL_RUNNING = object()   # scan(): a strategy whose engine run outlived the scan's wait
@@ -32,7 +33,8 @@ class TradingService:
     def __init__(self, repository, vault=None):
         self.repository = repository
         self.calendar = ExchangeCalendar(repository)
-        self.execution_details = ExecutionDetails(repository)
+        self.scanner_candles = ScannerCandles()
+        self.execution_details = ExecutionDetails(repository, self.scanner_candles)
         self.vault = vault
         self.state = repository.state()
         self.view = repository.get_view()
@@ -53,7 +55,6 @@ class TradingService:
         self._fee_retry = {}
         self._fills_lock = asyncio.Lock()
         self._skipped = set()   # (account, trade id) already reported as "not logged in"
-        self._peak_cache = {}   # closed trade -> (peak high, peak low)
         self._engine_runs = {}  # strategy -> (day, engine run) — see scan()
         self._historical_retry = {}
         self._fills_cache = {}  # account -> (monotonic time, {order id: fill price})
@@ -65,7 +66,7 @@ class TradingService:
             self._reconcile_task = asyncio.create_task(self._reconcile_loop(), name="order-reconciliation")
             self._watch_task = asyncio.create_task(self._watch_workers(), name="trading-worker-watch")
             if self.view.get("day") and self.view.get("results"):
-                # The saved session has no peaks (they are added after a scan): work them out again on start.
+                # Restore saved peak reports without requesting any market data.
                 self._report_task = asyncio.create_task(self._enrich_loaded(), name="trade-statistics")
 
     async def _watch_workers(self):
@@ -213,28 +214,18 @@ class TradingService:
         return out
 
     async def _peaks(self, day, trades):
-        """The option's highest and lowest price from entry to exit (or now, while open), from 1-minute candles.
-        Closed trades never change, so they are worked out once."""
-        async def one(t):
-            key = (day.isoformat(), t.get("id"), t.get("exit_time"), t.get("open"))
-            if not t.get("open") and key in self._peak_cache:
-                t["peak_high"], t["peak_low"] = self._peak_cache[key]
+        """Display extrema reuse scanner candles; closed reports survive restarts."""
+        async def one(trade):
+            start = timestamp(trade.get("entry_time"), day)
+            now = live.now_ist()
+            end = now if trade.get("open") else timestamp(trade.get("exit_time"), day)
+            if start is None or end is None or end < start or end.date() != start.date():
                 return
-            try:
-                expired = str(t.get("expiry") or "")[:10] < upstox.today_ist().isoformat()
-                rows = await upstox.candles(t["instrument_key"], "1m", day, day, expired)
-            except Exception:
-                log.warning("Peak candles unavailable", extra={"trade": t.get("id")})
-                return
-            end = "23:59" if t.get("open") else (t.get("exit_time") or "23:59")
-            window = [r for r in rows if t["entry_time"] <= r[0][11:16] <= end]
-            if not window:
-                return
-            hi = max([float(r[2]) for r in window] + [float(t["entry"])])
-            lo = min([float(r[3]) for r in window] + [float(t["entry"])])
-            t["peak_high"], t["peak_low"] = round(hi, 2), round(lo, 2)
-            if not t.get("open"):
-                self._peak_cache[key] = (t["peak_high"], t["peak_low"])
+            details = await self.execution_details.peaks(
+                trade["instrument_key"], start, end, float(trade["entry"]),
+                not trade.get("open"), trade.get("expiry"), now)
+            if details["status"] == "available":
+                trade["peak_high"], trade["peak_low"] = details["high"]["price"], details["low"]["price"]
         await asyncio.gather(*(one(t) for t in trades if t.get("instrument_key") and t.get("entry_time")))
 
     async def live_fills(self, user_id):
@@ -390,6 +381,10 @@ class TradingService:
             try:
                 results, errors, runs = {}, {}, {}
                 refreshed = set()
+                async def run_engine(name):
+                    with self.scanner_candles.capture(day):
+                        return await live.run_engine(name, day)
+
                 def engine(name):   # one engine run per distinct strategy (live.SAME_TRADES share one)
                     if name not in runs:
                         # A run still going from the previous scan (it outlived that scan's wait while Upstox was
@@ -398,7 +393,7 @@ class TradingService:
                         if prev and prev[0] == day and not prev[1].done():
                             runs[name] = prev[1]
                         else:
-                            runs[name] = asyncio.ensure_future(live.run_engine(name, day))
+                            runs[name] = asyncio.ensure_future(run_engine(name))
                             runs[name].add_done_callback(lambda f: f.cancelled() or f.exception())
                             self._engine_runs[name] = (day, runs[name])
                     return runs[name]

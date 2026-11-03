@@ -92,6 +92,28 @@ class ScannerRecoveryTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn(PRESET, [call.args[0] for call in act.await_args_list])
             self.assertFalse(result["running"])
 
+    async def test_scan_captures_engine_candles_without_report_downloads(self):
+        day = self.now.date()
+        rows = [[f"{day}T09:30:00+05:30", 100, 110, 95, 105],
+                [f"{day}T09:31:00+05:30", 105, 120, 90, 110]]
+        for preset, cfg in self.service.state["config"].items():
+            cfg["on"] = preset == PRESET
+        async def engine(name, scan_day):
+            await upstox.candles("NSE_FO|1", "1m", scan_day, scan_day, False)
+            return [{"date": str(scan_day), "instrument_key": "NSE_FO|1", "entry_time": "09:30", "entry": 100,
+                     "exit_time": "09:31", "exit": 110, "status": "TARGET", "pnl": 10, "expiry": "2026-11-10"}]
+        upstox._cache.clear()
+        with patch("upstocks.live.run_engine", engine), \
+             patch("upstocks.upstox._fetch_candles", AsyncMock(return_value=rows)) as fetch, \
+             patch.object(self.service, "_act", AsyncMock()) as act:
+            await self.service.scan(execute_live=False)
+            await self.service._report_task
+            trade = self.service.view["results"][PRESET][0]
+            self.assertEqual((trade["peak_high"], trade["peak_low"]), (120, 90))
+            self.assertEqual(fetch.await_count, 1)
+            act.assert_not_awaited()
+        upstox._cache.clear()
+
     async def test_external_scan_cancellation_still_propagates(self):
         entered = asyncio.Event()
         async def engine(*args):

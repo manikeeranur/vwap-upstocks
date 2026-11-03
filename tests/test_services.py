@@ -131,11 +131,29 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
                 ["2026-10-12T13:39:00+05:30", 0, 999, 1, 0]]
         trade = {"id": "x", "instrument_key": "NSE_FO|1", "expiry": "2099-01-01", "entry_time": "10:01", "entry": 460,
                  "exit_time": "13:38", "open": False}
-        with patch("upstocks.upstox.candles", new=AsyncMock(return_value=rows)) as candles:
+        self.trading.scanner_candles.record("NSE_FO|1", "1m", date(2026, 10, 12), rows)
+        with patch("upstocks.upstox.candles", new=AsyncMock(side_effect=AssertionError("No peak fetch"))) as candles:
             await self.trading._peaks(date(2026, 10, 12), [trade])
             await self.trading._peaks(date(2026, 10, 12), [dict(trade)])   # closed: worked out once
         self.assertEqual((trade["peak_high"], trade["peak_low"]), (636.7, 455))
-        self.assertEqual(candles.await_count, 1)
+        candles.assert_not_awaited()
+
+    async def test_paper_peak_cache_miss_and_restart_never_fetch(self):
+        trade = {"id": "x", "instrument_key": "NSE_FO|1", "expiry": "2099-01-01", "entry_time": "10:01", "entry": 100,
+                 "exit_time": "10:02", "open": False}
+        day = date(2026, 10, 12)
+        with patch("upstocks.upstox.candles", AsyncMock()) as candles:
+            await self.trading._peaks(day, [trade])
+            self.assertNotIn("peak_high", trade)
+            self.trading.scanner_candles.record("NSE_FO|1", "1m", day,
+                [["2026-10-12T10:01:00+05:30", 100, 110, 95, 105],
+                 ["2026-10-12T10:02:00+05:30", 105, 120, 90, 110]])
+            await self.trading._peaks(day, [trade])
+            restarted = TradingService(self.repo)
+            restored = {k: v for k, v in trade.items() if not k.startswith("peak_")}
+            await restarted._peaks(day, [restored])
+            self.assertEqual((restored["peak_high"], restored["peak_low"]), (120, 90))
+            candles.assert_not_awaited()
 
     async def test_reconciliation_tracks_quantities_and_terminal_status(self):
         today = upstox.today_ist().isoformat()

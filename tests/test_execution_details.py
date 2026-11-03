@@ -1,9 +1,11 @@
 """Execution display analytics use real fills and minute candles, without trading."""
 from copy import deepcopy
+from datetime import date
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
 
+from upstocks.scanner_candles import ScannerCandles
 from upstocks.services.execution_details import ExecutionDetails, candle_peaks, order_time, timestamp
 
 DAY = "2026-10-30"
@@ -47,15 +49,20 @@ class DetailsTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.saved = {}
         self.repo = SimpleNamespace(get_json=self.saved.get, set_json=self.saved.__setitem__)
-        self.details = ExecutionDetails(self.repo)
+        self.candles = ScannerCandles()
+        self.candles.record("NSE_FO|1", "1m", date.fromisoformat(DAY), ROWS)
+        self.details = ExecutionDetails(self.repo, self.candles)
+        self.fetch = AsyncMock(side_effect=AssertionError("Reporting must not request candles"))
+        patcher = patch("upstocks.upstox.candles", self.fetch)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     async def test_live_fill_basis_persists_and_survives_restart_without_mutation(self):
         data = snapshot()
         original = deepcopy(data)
-        with patch("upstocks.upstox.candles", AsyncMock(return_value=ROWS)) as fetch:
-            first = await self.details.get(data)
-            second = await ExecutionDetails(self.repo).get(data)
-        self.assertEqual(fetch.await_count, 1)
+        first = await self.details.get(data)
+        second = await ExecutionDetails(self.repo, ScannerCandles()).get(data)
+        self.fetch.assert_not_awaited()
         info = first["accounts"]["1:kite"][TID]
         self.assertEqual(info["points"], -10)
         self.assertEqual(info["entry_at"], DAY+"T11:02:29+05:30")
@@ -64,20 +71,57 @@ class DetailsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(data, original)
 
     async def test_incomplete_candles_are_not_reported_as_full_trade_peaks(self):
-        with patch("upstocks.upstox.candles", AsyncMock(return_value=ROWS[1:])):
-            result = await self.details.get(snapshot())
+        self.candles._days.clear()
+        self.candles.record("NSE_FO|1", "1m", date.fromisoformat(DAY), ROWS[1:])
+        result = await self.details.get(snapshot())
         info = result["accounts"]["1:kite"][TID]
         self.assertEqual(info["status"], "incomplete")
         self.assertIsNone(info["high"])
         self.assertFalse(self.saved)
 
-    async def test_failure_is_cooled_down_and_fills_remain_visible(self):
-        with patch("upstocks.upstox.candles", AsyncMock(side_effect=TimeoutError)) as fetch, self.assertLogs("upstocks.services.execution_details", level="WARNING"):
-            first = await self.details.get(snapshot())
-            await self.details.get(snapshot())
-        self.assertEqual(fetch.await_count, 1)
+    async def test_cache_miss_never_fetches_and_new_scanner_rows_are_immediately_visible(self):
+        self.candles._days.clear()
+        first = await self.details.get(snapshot())
+        self.assertEqual(first["accounts"]["1:kite"][TID]["status"], "unavailable")
         self.assertEqual(first["accounts"]["1:kite"][TID]["points"], -10)
         self.assertFalse(self.saved)
+        self.candles.record("NSE_FO|1", "1m", date.fromisoformat(DAY), ROWS)
+        second = await self.details.get(snapshot())
+        self.assertEqual(second["accounts"]["1:kite"][TID]["high"]["points"], 20)
+        self.assertEqual(second["accounts"]["1:kite"][TID]["candle_source"], "scanner")
+        self.fetch.assert_not_awaited()
+
+    async def test_open_peaks_refresh_without_caching_or_persistence(self):
+        data = snapshot()
+        data["state"]["orders"]["1:kite"][TID].pop("sell")
+        first = await self.details.get(data)
+        self.candles.record("NSE_FO|1", "1m", date.fromisoformat(DAY),
+                            [[DAY+"T11:05:00+05:30", 100, 150, 80, 110]])
+        second = await self.details.get(data)
+        self.assertEqual(first["accounts"]["1:kite"][TID]["high"]["price"], 120)
+        self.assertEqual(second["accounts"]["1:kite"][TID]["high"]["price"], 150)
+        self.assertEqual(second["accounts"]["1:kite"][TID]["through"], DAY+"T11:05:00+05:30")
+        self.assertFalse(self.saved)
+        self.fetch.assert_not_awaited()
+
+    async def test_in_progress_exit_minute_is_not_persisted_as_final(self):
+        data = snapshot()
+        data["intraday_session"]["server_now"] = DAY+"T11:04:30+05:30"
+        result = await self.details.get(data)
+        self.assertEqual(result["accounts"]["1:kite"][TID]["status"], "incomplete")
+        self.assertFalse(self.saved)
+        data["intraday_session"]["server_now"] = DAY+"T11:05:00+05:30"
+        result = await self.details.get(data)
+        self.assertEqual(result["accounts"]["1:kite"][TID]["status"], "available")
+        self.fetch.assert_not_awaited()
+
+    async def test_storage_failure_preserves_fills_and_never_fetches(self):
+        with patch.object(self.repo, "get_json", side_effect=OSError("database unavailable")), self.assertLogs("upstocks.services.execution_details", level="WARNING"):
+            result = await self.details.get(snapshot())
+        info = result["accounts"]["1:kite"][TID]
+        self.assertEqual(info["status"], "unavailable")
+        self.assertEqual(info["points"], -10)
+        self.fetch.assert_not_awaited()
 
     async def test_no_history_or_unfilled_order_analytics(self):
         data = snapshot()
@@ -92,10 +136,9 @@ class DetailsTests(unittest.IsolatedAsyncioTestCase):
             fetch.assert_not_awaited()
 
     async def test_updated_fill_price_invalidates_cached_points(self):
-        with patch("upstocks.upstox.candles", AsyncMock(return_value=ROWS)) as fetch:
-            await self.details.get(snapshot())
-            data = snapshot()
-            data["state"]["orders"]["1:kite"][TID]["buy"]["fill_price"] = 105
-            result = await self.details.get(data)
-        self.assertEqual(fetch.await_count, 2)
+        await self.details.get(snapshot())
+        data = snapshot()
+        data["state"]["orders"]["1:kite"][TID]["buy"]["fill_price"] = 105
+        result = await self.details.get(data)
+        self.fetch.assert_not_awaited()
         self.assertEqual(result["accounts"]["1:kite"][TID]["high"]["points"], 15)

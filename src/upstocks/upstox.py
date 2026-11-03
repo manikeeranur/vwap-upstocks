@@ -22,6 +22,8 @@ from urllib.parse import quote
 
 import httpx
 
+from .scanner_candles import observe
+
 from collections import deque
 from pathlib import Path
 import hashlib
@@ -356,7 +358,9 @@ async def candles(instrument_key: str, interval: str, start: date, end: date, ex
 
         fut.add_done_callback(completed)
     # Both creator and followers are isolated; close() still cancels the real task.
-    return await asyncio.shield(fut)
+    rows = await asyncio.shield(fut)
+    observe(instrument_key, interval, rows)
+    return rows
 
 
 async def _fetch_candles(instrument_key: str, interval: str, start: date, end: date, expired: bool) -> list[list]:
