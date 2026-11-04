@@ -89,9 +89,11 @@ async function api(path, body) {
   return j;
 }
 const initials = n => (n || '?').split(/\s+/).filter(Boolean).slice(0,2).map(w => w[0]).join('').toUpperCase();
+// Only Kite returns a photo; Upstox and INDmoney cards reuse Kite's.
 function profileCard(p) {
   if (!p || !(p.name || p.user_id)) return '';
-  const pic = p.avatar ? `<img class="avatar" src="${esc(p.avatar)}" alt="" referrerpolicy="no-referrer">` : `<span class="avatar">${esc(initials(p.name || p.user_id))}</span>`;
+  const avatar = p.avatar || last?.brokers.kite?.profile?.avatar;
+  const pic = avatar ? `<img class="avatar" src="${esc(avatar)}" alt="" referrerpolicy="no-referrer">` : `<span class="avatar">${esc(initials(p.name || p.user_id))}</span>`;
   return `<div class="profile">${pic}<div><b>${esc(p.name || p.user_id)}</b>${p.user_id ? `<span>Client ID · ${esc(p.user_id)}</span>` : ''}</div></div>`;
 }
 // INDstocks has no login page: paste the day's token, or generate one from MPIN + authenticator code.
