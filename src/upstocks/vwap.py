@@ -240,7 +240,7 @@ PRESETS["vwap_touch_expiry"] = {**PRESETS["vwap_touch"], "touch_expiry_only": Tr
 # Vol Breakout (Expiry) (vol_breakout.py) — see that module for the rules and the 2-year result.
 PRESETS["vol_breakout"] = {"strategy": "vol_breakout", "vb_k": 0.15, "vb_atr_days": 14, "vb_closes": 2, "vb_itm_pct": 1.6,
                            "entry_start": "09:16", "last_entry": "10:00", "sl_pct": 10, "target_pct": 300,
-                           "trail_start": 20, "trail_giveback": 50, "time_exit": "15:29", "max_trades": 1,
+                           "trail_start": 20, "trail_giveback": 50, "time_exit": "15:20", "max_trades": 1,
                            "live": False, "strong_green": False, "stagnant_hours": 0, "breakeven_pct": 0}
 # SENSEX Harmonic — the Harmonic engine on SENSEX options (lot 20, 100-point strikes), one trade a day,
 # paper only. Picked 2026-10-30 from a 2-year SENSEX test (Oct 2024 – Sep 2026, after charges, each

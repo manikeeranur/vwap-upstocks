@@ -6,11 +6,12 @@
 - Option: that day's expiry, ~vb_itm_pct % of the level in the money (CE strike below, PE above), entry at the
   next minute's open.
 - Exits: SL −sl_pct %; once the high is +trail_start %, the stop trails to give back trail_giveback % of the best
-  gain; a target cap (target_pct, never reached in the test); otherwise out at the day's last minute (15:29).
+  gain; a target cap (target_pct, never reached in the test); otherwise out at time_exit (15:20, that minute's open).
 
-Chosen 2026-11-05 from a 2-year test (Oct 2024 – Sep 2026, 1 lot, after charges, no slippage): +₹73,054 and
-+₹71,476, max drawdown ₹14,623, 52 of 100 trades won; Oct 2026 (unseen) +₹6,732. ₹2 slippage a side: +₹1,25,273 in
-all. 63 % of ~29,000 neighbouring settings were profitable in all three periods. Tried and worse: the day(s) before
+Chosen 2026-11-05 from a 2-year test (Oct 2024 – Sep 2026, 1 lot, after charges, no slippage): +₹73,655 and
++₹68,685, max drawdown ₹14,623, 52 of 100 trades won; Oct 2026 (unseen) +₹6,731. Holding to 15:29 made ₹2,190 more,
+but a live order can't be sold after the 15:29 candle completes; 15:15–15:25 exits all give about the same. With the
+15:29 exit, ₹2 slippage a side left +₹1,25,273 of +₹1,51,262. 63 % of ~29,000 neighbouring settings were profitable in all three periods. Tried and worse: the day(s) before
 expiry (more trades, 2.5–5× the drawdown), SENSEX (more drawdown than profit), a first-touch entry, small targets.
 """
 from __future__ import annotations
@@ -53,6 +54,8 @@ def resolve(ob: list, ei: int, s: Settings):
     sl0, tg = entry * (1 - s.sl_pct / 100), entry * (1 + s.target_pct / 100)
     stop, peak = sl0, entry
     for t, o, h, l, *_ in ob[ei:]:
+        if t >= s.time_exit:
+            return "TIME_EXIT", o, t, peak - entry, stop > sl0
         if l <= stop:
             return ("TRAIL" if stop > sl0 else "SL"), min(o, stop), t, peak - entry, stop > sl0
         if h >= tg:
@@ -60,8 +63,7 @@ def resolve(ob: list, ei: int, s: Settings):
         peak = max(peak, h)
         if s.trail_start and peak >= entry * (1 + s.trail_start / 100):
             stop = max(stop, peak - (peak - entry) * s.trail_giveback / 100)
-    t, c = ob[-1][0], ob[-1][4]
-    return ("TIME_EXIT" if t >= s.time_exit else "EOD"), c, t, peak - entry, stop > sl0
+    return "EOD", ob[-1][4], ob[-1][0], peak - entry, stop > sl0
 
 
 async def run_day(day: date, s: Settings, spot_bars: list, history: list[list]) -> DayResult:

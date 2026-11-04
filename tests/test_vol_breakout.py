@@ -43,9 +43,13 @@ class ResolveTest(unittest.TestCase):
         status, price, t, peak, trailed = resolve(ob, 0, S)
         self.assertEqual((status, price, t, peak, trailed), ("TRAIL", 120, "09:20", 40, True))
 
-    def test_held_to_the_last_minute(self):
-        ob = [bar("09:18", 100, 105, 98, 104), bar("15:29", 104, 106, 103, 105)]
-        self.assertEqual(resolve(ob, 0, S)[:3], ("TIME_EXIT", 105, "15:29"))
+    def test_time_exit_at_that_minutes_open(self):
+        ob = [bar("09:18", 100, 105, 98, 104), bar("15:20", 104, 106, 103, 105), bar("15:21", 105, 106, 104, 105)]
+        self.assertEqual(resolve(ob, 0, S)[:3], ("TIME_EXIT", 104, "15:20"))
+
+    def test_still_open_before_the_time_exit(self):
+        ob = [bar("09:18", 100, 105, 98, 104), bar("11:00", 104, 106, 103, 105)]
+        self.assertEqual(resolve(ob, 0, S)[:3], ("EOD", 105, "11:00"))
 
 
 if __name__ == "__main__":
