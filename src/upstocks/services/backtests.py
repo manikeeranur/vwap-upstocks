@@ -4,7 +4,7 @@ from datetime import date, timedelta
 import logging
 import uuid
 
-from .. import combo, ema_pullback, harmonic, pdh, smc, upstox, vwap, vwap_touch
+from .. import combo, ema_pullback, harmonic, pdh, smc, upstox, vol_breakout, vwap, vwap_touch
 from ..observability import redact, request_id
 
 log = logging.getLogger(__name__)
@@ -47,10 +47,11 @@ class BacktestService:
         token = request_id.set(None)
         try:
             last = min(settings.end, upstox.today_ist())
-            allspot = await vwap.trading_days_and_spot(settings.start - timedelta(days=7) if settings.index_trend else settings.start, last,
-                                                       settings.underlying)
+            lookback = 30 if settings.strategy == "vol_breakout" else 7 if settings.index_trend else 0
+            allspot = await vwap.trading_days_and_spot(settings.start - timedelta(days=lookback), last, settings.underlying)
             keys = sorted(allspot)
             prev_spot = {day: allspot[keys[i - 1]] if i else [] for i, day in enumerate(keys)}
+            history = {day: [allspot[k] for k in keys[max(0, i - 30):i]] for i, day in enumerate(keys)}
             spot = {day: bars for day, bars in allspot.items() if settings.start.isoformat() <= day <= last.isoformat()}
             weekdays = [settings.start + timedelta(days=i) for i in range((last - settings.start).days + 1)]
             missing = [day.isoformat() for day in weekdays if day.weekday() < 5 and day.isoformat() not in spot]
@@ -73,6 +74,8 @@ class BacktestService:
                             result = await pdh.run_day(date.fromisoformat(day), settings, bars, prev_spot.get(day))
                         elif settings.strategy == "vwap_touch":
                             result = await vwap_touch.run_day(date.fromisoformat(day), settings, bars, prev_spot.get(day))
+                        elif settings.strategy == "vol_breakout":
+                            result = await vol_breakout.run_day(date.fromisoformat(day), settings, bars, history[day])
                         else:
                             result = await vwap.run_day(date.fromisoformat(day), settings, bars, prev_spot[day])
                         out = {"date": result.date, "expiry": result.expiry, "note": result.note,

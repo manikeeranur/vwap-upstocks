@@ -2,11 +2,11 @@
 from dataclasses import replace
 from datetime import date, datetime, timedelta
 
-from . import combo, ema_pullback, harmonic, pdh, smc, upstox, vwap, vwap_touch
+from . import combo, ema_pullback, harmonic, pdh, smc, upstox, vol_breakout, vwap, vwap_touch
 
 PRESETS = ["frontend_live", "smc_live", "ema25_vwap", "ema_pullback", "smc_tuned", "smc_ema_combo", "harmonic", "harmonic_2y",
            "sensex_swing", "sensex_bigleg", "harmonic_power", "pdh_breakout", "harmonic_2y_compound", "pdh_compound",
-           "vwap_touch", "vwap_touch_compound", "vwap_touch_expiry"]
+           "vwap_touch", "vwap_touch_compound", "vwap_touch_expiry", "vol_breakout"]
 
 
 LABELS = {"frontend_live": "VWAP 9:30", "smc_live": "SMC", "ema25_vwap": "VWAP + EMA25 + SuperTrend",
@@ -16,7 +16,7 @@ LABELS = {"frontend_live": "VWAP 9:30", "smc_live": "SMC", "ema25_vwap": "VWAP +
           "harmonic_power": "Harmonic Power Trail", "pdh_breakout": "Previous-day Breakout",
           "harmonic_2y_compound": "Harmonic Optimized Compounding", "pdh_compound": "Previous-day Breakout Compounding",
           "vwap_touch": "VWAP Touch (PE)", "vwap_touch_compound": "VWAP Touch Compounding",
-          "vwap_touch_expiry": "VWAP Touch Expiry (EMA50)"}
+          "vwap_touch_expiry": "VWAP Touch Expiry (EMA50)", "vol_breakout": "Vol Breakout (Expiry)"}
 
 
 FRESH_MIN = 3
@@ -86,7 +86,7 @@ def filter_saved_smc_entries(view: dict, now: datetime) -> None:
 async def run_engine(preset: str, day: date) -> list[dict] | None:
     """The preset's trades on `day`, or None if its index has no candles that day (holiday)."""
     st = replace(vwap.Settings(start=day, end=day), **vwap.PRESETS[preset])
-    spot = await vwap.trading_days_and_spot(day - timedelta(days=7), day, st.underlying)
+    spot = await vwap.trading_days_and_spot(day - timedelta(days=30 if st.strategy == "vol_breakout" else 7), day, st.underlying)
     d = day.isoformat()
     if d not in spot:
         return None
@@ -104,6 +104,8 @@ async def run_engine(preset: str, day: date) -> list[dict] | None:
         res = await pdh.run_day(day, st, spot[d], prev)
     elif st.strategy == "vwap_touch":
         res = await vwap_touch.run_day(day, st, spot[d], prev)
+    elif st.strategy == "vol_breakout":
+        res = await vol_breakout.run_day(day, st, spot[d], [spot[k] for k in keys[:keys.index(d)]])
     else:
         res = await vwap.run_day(day, st, spot[d], prev)
     return [vwap.trade_dict(t) for t in res.trades]

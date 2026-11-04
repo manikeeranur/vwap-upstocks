@@ -289,7 +289,7 @@ function render() {
 }
 const editingConfig = () => S && document.activeElement?.matches('#strats input');
 // Harmonic, then EMA pullback, then the rest.
-const shownPresets = () => { const first = ['harmonic','harmonic_2y','harmonic_power','harmonic_2y_compound','pdh_breakout','pdh_compound','vwap_touch','vwap_touch_compound','vwap_touch_expiry','ema_pullback','sensex_swing','sensex_bigleg'].filter(p => PRESETS.includes(p)); return [...first, ...PRESETS.filter(p => !first.includes(p))]; };
+const shownPresets = () => { const first = ['harmonic','harmonic_2y','harmonic_power','harmonic_2y_compound','pdh_breakout','pdh_compound','vwap_touch','vwap_touch_compound','vwap_touch_expiry','vol_breakout','ema_pullback','sensex_swing','sensex_bigleg'].filter(p => PRESETS.includes(p)); return [...first, ...PRESETS.filter(p => !first.includes(p))]; };
 function sessionLabel() {
   const session=S?.intraday_session;
   if(!session?.day)return 'Trading calendar unavailable';

@@ -12,7 +12,7 @@ from .database import Database, utc_now
 from .fees import order_fee
 from .observability import clean, redact, request_id
 
-PRESETS = ("frontend_live", "smc_live", "ema25_vwap", "ema_pullback", "smc_tuned", "smc_ema_combo", "harmonic", "harmonic_2y", "sensex_swing", "sensex_bigleg", "harmonic_power", "pdh_breakout", "harmonic_2y_compound", "pdh_compound", "vwap_touch", "vwap_touch_compound", "vwap_touch_expiry")
+PRESETS = ("frontend_live", "smc_live", "ema25_vwap", "ema_pullback", "smc_tuned", "smc_ema_combo", "harmonic", "harmonic_2y", "sensex_swing", "sensex_bigleg", "harmonic_power", "pdh_breakout", "harmonic_2y_compound", "pdh_compound", "vwap_touch", "vwap_touch_compound", "vwap_touch_expiry", "vol_breakout")
 # Lots a newly added strategy starts with (others 1): the SENSEX pair runs as 3 + 2 lots.
 DEFAULT_LOTS = {"sensex_swing": 3, "sensex_bigleg": 2, "harmonic_2y_compound": 2, "pdh_compound": 4, "vwap_touch_compound": 2}
 BROKERS = ("upstox", "kite", "indmoney")

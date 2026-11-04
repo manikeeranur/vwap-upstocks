@@ -132,6 +132,12 @@ class Settings:
     touch_tol: float = 2.0
     touch_expiry_only: bool = False     # VWAP Touch Expiry: trade only on NIFTY's weekly expiry day
     touch_ema: int = 0                  # …and only while NIFTY is below this EMA (PE) / above (CE); 0 = off
+    # Vol Breakout (vol_breakout.py): open ± vb_k × ATR (vb_atr_days sessions), vb_closes 1-min closes beyond,
+    # option vb_itm_pct % in the money.
+    vb_k: float = 0.15
+    vb_atr_days: int = 14
+    vb_closes: int = 2
+    vb_itm_pct: float = 1.6
     # resolve_live profit locks: ((gain %, locked %), …) — once the option's close has been gain % above entry,
     # the SL-M moves up to entry + locked %. Empty = off.
     profit_locks: tuple = ()
@@ -231,6 +237,11 @@ PRESETS["vwap_touch_compound"] = dict(PRESETS["vwap_touch"])
 # Exits: target 60 %; once +20 % the SL locks +5 %, once +30 % it locks +15 % (stop to entry at +15 % as VWAP Touch).
 PRESETS["vwap_touch_expiry"] = {**PRESETS["vwap_touch"], "touch_expiry_only": True, "touch_ema": 50, "target_pct": 60,
                                 "profit_locks": ((20, 5), (30, 15))}
+# Vol Breakout (Expiry) (vol_breakout.py) — see that module for the rules and the 2-year result.
+PRESETS["vol_breakout"] = {"strategy": "vol_breakout", "vb_k": 0.15, "vb_atr_days": 14, "vb_closes": 2, "vb_itm_pct": 1.6,
+                           "entry_start": "09:16", "last_entry": "10:00", "sl_pct": 10, "target_pct": 300,
+                           "trail_start": 20, "trail_giveback": 50, "time_exit": "15:29", "max_trades": 1,
+                           "live": False, "strong_green": False, "stagnant_hours": 0, "breakeven_pct": 0}
 # SENSEX Harmonic — the Harmonic engine on SENSEX options (lot 20, 100-point strikes), one trade a day,
 # paper only. Picked 2026-10-30 from a 2-year SENSEX test (Oct 2024 – Sep 2026, after charges, each
 # strategy paying its own brokerage); run together as 3 lots of sensex_swing + 2 lots of sensex_bigleg:

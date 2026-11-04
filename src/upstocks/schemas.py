@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, 
 
 from . import vwap
 
-Preset = Literal["frontend_live", "smc_live", "ema25_vwap", "ema_pullback", "smc_ema_combo", "smc_tuned", "harmonic", "harmonic_2y", "sensex_swing", "sensex_bigleg", "harmonic_power", "pdh_breakout", "harmonic_2y_compound", "pdh_compound", "vwap_touch", "vwap_touch_compound", "vwap_touch_expiry"]
+Preset = Literal["frontend_live", "smc_live", "ema25_vwap", "ema_pullback", "smc_ema_combo", "smc_tuned", "harmonic", "harmonic_2y", "sensex_swing", "sensex_bigleg", "harmonic_power", "pdh_breakout", "harmonic_2y_compound", "pdh_compound", "vwap_touch", "vwap_touch_compound", "vwap_touch_expiry", "vol_breakout"]
 Broker = Literal["upstox", "kite", "indmoney"]
 
 
