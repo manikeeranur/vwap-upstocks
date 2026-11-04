@@ -58,6 +58,31 @@ def trade_id(p: str, t: dict) -> str:
     return f"{p}|{t['date']}|{t['entry_time']}|{t['instrument_key']}"
 
 
+def filter_saved_smc_entries(view: dict, now: datetime) -> None:
+    """Apply the scan's time boundary to a display copy of a pre-fix snapshot."""
+    if view.get("day") != now.date().isoformat():
+        return
+    current = now.strftime("%H:%M")
+    # Latest scans store HH:MM:SS; saved journal views store YYYY-MM-DD HH:MM.
+    scan_time = (view.get("scanned_at") or current).split()[-1][:5]
+    through = min(scan_time, current)
+    for preset, trades in (view.get("results") or {}).items():
+        if preset not in {"smc_live", "smc_tuned", "smc_ema_combo"}:
+            continue
+        visible = []
+        after = None
+        cooldown = vwap.PRESETS[preset].get("cooldown_min", vwap.Settings.cooldown_min)
+        for trade in trades:
+            entry = trade.get("entry_time")
+            if not entry or entry > through or (after is not None and vwap._mins(entry) <= after):
+                continue
+            visible.append(trade)
+            after = smc.reentry_blocked_through(trade.get("status", "EOD"), trade.get("pnl") or 0, trade.get("exit_time"), cooldown)
+            if after is None:
+                break
+        view["results"][preset] = visible
+
+
 async def run_engine(preset: str, day: date) -> list[dict] | None:
     """The preset's trades on `day`, or None if its index has no candles that day (holiday)."""
     st = replace(vwap.Settings(start=day, end=day), **vwap.PRESETS[preset])
@@ -68,7 +93,7 @@ async def run_engine(preset: str, day: date) -> list[dict] | None:
     keys = sorted(spot)
     prev = spot[keys[keys.index(d) - 1]] if keys.index(d) else []
     if st.strategy == "smc":
-        res = await smc.run_day(day, st, spot[d])
+        res = await smc.run_day(day, st, spot[d], as_of=now_ist())
     elif st.strategy == "ema_pullback":
         res = await ema_pullback.run_day(day, st, spot[d])
     elif st.strategy == "combo":

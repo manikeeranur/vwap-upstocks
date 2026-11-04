@@ -22,7 +22,7 @@ sweeps, OB/breaker zones) are the original's, applied to NIFTY index candles.
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from functools import cmp_to_key
 
 from . import upstox
@@ -145,7 +145,20 @@ def pick_direction(sig: dict):
     return None
 
 
-async def run_day(day: date, s: Settings, spot_bars: list[Bar]) -> DayResult:
+def reentry_blocked_through(status: str, pnl: float, exit_time: str | None, cooldown: int) -> int | None:
+    """Last blocked minute after a losing close, or None if no re-entry is allowed."""
+    if status == "EOD" or exit_time is None or not (status == "SL" or pnl < 0):
+        return None
+    return _mins(exit_time) + cooldown
+
+
+async def run_day(day: date, s: Settings, spot_bars: list[Bar], *, as_of: datetime | None = None) -> DayResult:
+    # Freeze one IST cutoff for the entire scan, including slower option requests.
+    now = (as_of or datetime.now(upstox.IST)).astimezone(upstox.IST)
+    cutoff = now.strftime("%H:%M") if day == now.date() else "24:00"
+    spot_bars = [bar for bar in spot_bars if bar[0] < cutoff]
+    if day > now.date() or not spot_bars:
+        return DayResult(day.isoformat(), None, note="no completed SMC index candles")
     expiry = await _nearest_expiry(day)
     res = DayResult(day.isoformat(), expiry)
     if not expiry:
@@ -162,7 +175,7 @@ async def run_day(day: date, s: Settings, spot_bars: list[Bar]) -> DayResult:
     async def bars(c: dict) -> list[Bar]:
         k = c["instrument_key"]
         if k not in bars_cache:
-            bars_cache[k] = _market(await day_rows(k, day, expiry, expired))
+            bars_cache[k] = [bar for bar in _market(await day_rows(k, day, expiry, expired)) if bar[0] < cutoff]
         return bars_cache[k]
 
     lo, hi = s.min_premium, s.max_premium
@@ -176,7 +189,7 @@ async def run_day(day: date, s: Settings, spot_bars: list[Bar]) -> DayResult:
             if abs(c["strike_price"] - atm) > s.chain_strikes * STEP:
                 continue
             prev = [b for b in await bars(c) if b[0] < mark]
-            if prev:
+            if prev and prev[-1][0] == _add(mark, -1):
                 legs.append((c, prev[-1][C]))
         for blo, bhi in bands:
             cands = [(c, ltp) for c, ltp in legs if blo <= ltp <= bhi]
@@ -196,7 +209,8 @@ async def run_day(day: date, s: Settings, spot_bars: list[Bar]) -> DayResult:
     async def oi_bars(c: dict) -> list[tuple]:
         k = c["instrument_key"]
         if k not in oi_cache:
-            oi_cache[k] = _bars_oi(await span_rows(k, day, expiry, expired), day.isoformat())
+            rows = _bars_oi(await span_rows(k, day, expiry, expired), day.isoformat())
+            oi_cache[k] = [bar for bar in rows if bar[0] < cutoff]
         return oi_cache[k]
 
     def resolve(c: dict, direction: str, entry: float, mark: str, why: str, spot: float, side: dict,
@@ -209,7 +223,7 @@ async def run_day(day: date, s: Settings, spot_bars: list[Bar]) -> DayResult:
         status, exit_p, exit_t = "EOD", entry, None
         all_bars = bars_cache[c["instrument_key"]]
         later = [b for b in all_bars if b[0] >= mark]
-        if s.live:  # live: once-a-minute LTP checks, like updateAlertPnL on the cron (see vwap.resolve_live)
+        if s.live and later:  # No post-entry candle yet: keep the trade open at its entry price.
             ei = next((i for i, b in enumerate(all_bars) if b[0] >= mark), len(all_bars))
             status, exit_p, exit_t, peak, moved, t1_time = resolve_live(all_bars, ei, entry, mark, s, sl0, tgt, t1)
             later = []
@@ -254,14 +268,16 @@ async def run_day(day: date, s: Settings, spot_bars: list[Bar]) -> DayResult:
 
     recent: list[tuple[str, float, int]] = []  # (dir, strike, minute) for the 3-min duplicate rule
     after = None
-    for minute in range(_mins(s.entry_start), _mins(s.last_entry) + 1):
+    # At minute m the strategy reads the index candle from m-2.
+    last_minute = min(_mins(s.last_entry), _mins(cutoff), _mins(spot_bars[-1][0]) + 2)
+    for minute in range(_mins(s.entry_start), last_minute + 1):
         if len(res.trades) >= s.max_trades:
             break
         if after is not None and minute <= after:
             continue
         mark = f"{minute // 60:02d}:{minute % 60:02d}"
         cs = [b for b in spot_bars if _add(b[0], 2) <= mark]  # what live sees: up to m-2 (see vwap.py)
-        if len(cs) < 10:
+        if len(cs) < 10 or cs[-1][0] != _add(mark, -2):
             continue
         spot = cs[-1][C]
         picked = pick_direction(analyze(cs, spot))
@@ -281,9 +297,11 @@ async def run_day(day: date, s: Settings, spot_bars: list[Bar]) -> DayResult:
         tr = resolve(c, direction, ltp, mark, why, spot, side, await oi_bars(c) if s.rev_exit else None)
         res.trades.append(tr)
         recent.append((direction, c["strike_price"], minute))
-        if not (tr.pnl < 0 or tr.status == "SL"):  # SL at breakeven fills below entry live → a loss
+        # EOD is a provisional mark for an unresolved position. Its running
+        # P&L and last-quote time must never start the re-entry clock.
+        after = reentry_blocked_through(tr.status, tr.pnl, tr.exit_time, s.cooldown_min)
+        if after is None:
             break
-        after = _mins(tr.exit_time or mark) + s.cooldown_min
     if not res.trades:
         res.note = "no SMC confluence (≥2 concepts) with an option in the premium bands before 15:00"
     return res

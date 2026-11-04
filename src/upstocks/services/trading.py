@@ -140,6 +140,7 @@ class TradingService:
         if session is not None and view.get("day") != session["day"]:
             view = self.repository.paper_view(session["day"]) if session["day"] else {
                 "day": None, "scanned_at": None, "results": {}, "errors": {}, "running": False}
+        live.filter_saved_smc_entries(view, now)
         if user_id is not None:
             mine = {a: v for a, v in state["accounts"].items() if v["user"] == user_id}
             state["accounts"] = mine
