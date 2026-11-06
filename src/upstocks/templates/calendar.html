@@ -48,6 +48,85 @@
   .day.today .n { color: var(--accent); }
   .up { color: var(--ok); } .down { color: var(--pe); } .muted { color: var(--muted); }
   .st { font-weight: 700; } .st.SL { color: var(--pe); } .st.TARGET { color: var(--ok); }
+  /* Month / Year / Custom range switch and the year + range views (one mini month per card). */
+  .viewsw { display:inline-flex; border:1px solid var(--border); border-radius:8px; overflow:hidden; background:var(--card); }
+  .viewsw button { font:inherit; font-size:13px; font-weight:600; padding:8px 14px; border:0; border-left:1px solid var(--border); background:transparent; color:var(--muted); cursor:pointer; }
+  .viewsw button:first-child { border-left:0; }
+  .viewsw button:hover { color:var(--text); }
+  .viewsw button[aria-pressed="true"] { background:var(--accent); color:#fff; }
+  /* Custom range: a trigger button that opens a two-month date-range picker with presets. */
+  .drp { position:relative; }
+  .drp-trigger { display:inline-flex; align-items:center; gap:8px; height:36px; font:inherit; font-size:14px; font-weight:600; padding:0 14px; border:1px solid var(--border); border-radius:8px; background:var(--card); color:var(--text); cursor:pointer; }
+  .drp-trigger:hover, .drp-trigger[aria-expanded="true"] { border-color:var(--accent); }
+  .drp-trigger svg { color:var(--muted); }
+  .drp-pop { position:absolute; right:0; top:calc(100% + 8px); z-index:60; display:flex; background:var(--card); border:1px solid var(--border); border-radius:14px;
+             box-shadow:0 12px 32px rgba(16,24,40,.14), 0 4px 8px rgba(16,24,40,.06); overflow:hidden; }
+  .drp-pop[hidden] { display:none; }
+  .drp-presets { display:flex; flex-direction:column; gap:2px; padding:12px; border-right:1px solid var(--border); min-width:148px; }
+  .drp-presets button { text-align:left; font:inherit; font-size:14px; padding:9px 12px; border:0; border-radius:8px; background:none; color:var(--text); cursor:pointer; white-space:nowrap; }
+  .drp-presets button:hover { background:var(--surface); }
+  .drp-presets button[aria-pressed="true"] { background:var(--accent-soft); color:var(--accent); font-weight:600; }
+  .drp-main { display:flex; flex-direction:column; min-width:0; }
+  .drp-months { display:flex; }
+  .drp-month { padding:16px 20px 12px; }
+  .drp-month + .drp-month { border-left:1px solid var(--border); }
+  .drp-mhead { position:relative; display:flex; align-items:center; justify-content:center; height:32px; margin-bottom:6px; font-weight:600; font-size:15px; }
+  .drp-nav { position:absolute; top:0; width:32px; height:32px; display:flex; align-items:center; justify-content:center; border:0; border-radius:8px; background:none; color:var(--muted); cursor:pointer; }
+  .drp-nav:hover { background:var(--surface); color:var(--text); }
+  .drp-nav.prev { left:0; } .drp-nav.next { right:0; }
+  .drp-month:first-child .drp-nav.next, .drp-month:last-child .drp-nav.prev { display:none; }
+  .drp-grid { display:grid; grid-template-columns:repeat(7, 40px); row-gap:4px; }
+  .drp-dow { height:32px; display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:600; }
+  .drp-day { position:relative; height:40px; border:0; padding:0; background:none; font:inherit; font-size:14px; color:var(--text); cursor:pointer; }
+  .drp-day > span { position:relative; z-index:1; display:flex; width:40px; height:40px; align-items:center; justify-content:center; border-radius:50%; transition:background-color .12s ease-out; }
+  .drp-day:hover > span { background:var(--surface); }
+  .drp-day:focus-visible { outline:none; } .drp-day:focus-visible > span { outline:2px solid var(--accent); outline-offset:1px; }
+  .drp-day.in { background:var(--accent-soft); }
+  .drp-day.in:hover > span { background:color-mix(in srgb, var(--accent) 18%, transparent); }
+  .drp-day.in.l { border-radius:20px 0 0 20px; } .drp-day.in.r { border-radius:0 20px 20px 0; } .drp-day.in.l.r { border-radius:20px; }
+  .drp-day.start { background:linear-gradient(90deg, transparent 50%, var(--accent-soft) 50%); }
+  .drp-day.end { background:linear-gradient(90deg, var(--accent-soft) 50%, transparent 50%); }
+  .drp-day.start.end, .drp-day.start.r, .drp-day.end.l { background:none; }
+  .drp-day.start > span, .drp-day.end > span { background:var(--accent); color:var(--accent-ink); font-weight:600; }
+  .drp-day.today > span::after { content:""; position:absolute; bottom:5px; left:50%; width:4px; height:4px; margin-left:-2px; border-radius:50%; background:var(--accent); }
+  .drp-day.start.today > span::after, .drp-day.end.today > span::after { background:var(--accent-ink); }
+  .drp-day.today:not(.start):not(.end):not(.in) > span { font-weight:700; }
+  .drp-day:disabled { color:var(--muted); opacity:.45; cursor:default; } .drp-day:disabled:hover > span { background:none; }
+  .drp-foot { display:flex; flex-wrap:wrap; align-items:center; gap:10px; padding:14px 16px; border-top:1px solid var(--border); }
+  .drp-foot input[type="date"] { font:inherit; font-size:14px; height:38px; padding:0 10px; border:1px solid var(--border); border-radius:8px; background:var(--card); color:var(--text); }
+  .drp-foot input[type="date"]:focus { outline:2px solid var(--accent); outline-offset:-1px; border-color:transparent; }
+  .drp-foot .dash { color:var(--muted); }
+  .drp-foot .sp { flex:1; }
+  .drp-btn { font:inherit; font-size:14px; font-weight:600; height:38px; padding:0 16px; border-radius:8px; cursor:pointer; border:1px solid var(--border); background:var(--card); color:var(--text); }
+  .drp-btn:hover { background:var(--surface); }
+  .drp-btn.primary { background:var(--accent); border-color:var(--accent); color:var(--accent-ink); }
+  .drp-btn.primary:hover { background:var(--accent-hover); border-color:var(--accent-hover); }
+  .drp-btn:disabled { opacity:.5; cursor:not-allowed; }
+  @media (max-width:760px) {
+    .drp-pop { position:fixed; left:8px; right:8px; top:auto; bottom:8px; flex-direction:column; max-height:calc(100dvh - 16px); overflow:auto; }
+    .drp-presets { flex-direction:row; overflow-x:auto; border-right:0; border-bottom:1px solid var(--border); padding:8px; }
+    .drp-months .drp-month + .drp-month { display:none; }
+    .drp-month:first-child .drp-nav.next { display:flex; }
+    .drp-month { flex:1; min-width:0; padding:12px; } .drp-grid { grid-template-columns:repeat(7, minmax(0, 1fr)); }
+    .drp-day > span { width:100%; max-width:40px; margin:auto; }
+    .drp-foot input[type="date"] { flex:1; min-width:0; } .drp-foot .sp { flex-basis:100%; height:0; }
+  }
+  .yearv { display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:12px; }
+  .mini { border:1px solid var(--border); border-radius:10px; padding:10px 10px 12px; background:var(--card); min-width:0; }
+  .mini-head { display:flex; justify-content:space-between; align-items:baseline; gap:8px; }
+  .mini-head button { font:inherit; font-weight:700; font-size:14px; border:0; background:none; color:var(--text); cursor:pointer; padding:0; }
+  .mini-head button:hover { color:var(--accent); text-decoration:underline; }
+  .mini-head b { font-size:13px; white-space:nowrap; }
+  .mini-sub { font-size:11px; color:var(--muted); margin:2px 0 8px; }
+  .mini-grid { display:grid; grid-template-columns:repeat(7, minmax(0, 1fr)); gap:3px; }
+  .mini-grid .dw { font-size:9px; color:var(--muted); text-align:center; font-weight:600; }
+  .mini-grid .md { aspect-ratio:1; border-radius:4px; display:flex; align-items:center; justify-content:center; border:0; padding:0;
+                   font:inherit; font-size:10px; color:var(--muted); background:transparent; min-width:0; }
+  .mini-grid button.md { cursor:pointer; color:var(--text); font-weight:600; }
+  .mini-grid button.md:hover, .mini-grid .md.sel { outline:2px solid var(--accent); outline-offset:-1px; }
+  .mini-grid .md.wk { opacity:.4; }
+  .mini-grid .md.oor { opacity:.18; }
+  .mini-grid .md.today { box-shadow:inset 0 0 0 1px var(--accent); }
   #detail { margin-top: 16px; }
   /* Day details: let long strategy names and times wrap so every column fits without sideways scrolling. */
   #detail td, #detail th { white-space: normal; padding-left: 8px; padding-right: 8px; }
@@ -77,7 +156,34 @@
     <label>Strategy <select id="strat"><option value="">All strategies</option>
       {% for p in presets %}<option value="{{ p }}">{{ {"ema25_vwap":"VWAP + EMA25","ema_pullback":"EMA pullback","smc_ema_combo":"SMC + EMA (1/day)"}.get(p, labels[p]) }}</option>{% endfor %}</select></label>
 
-    <div class="mnav"><button id="prev" type="button" aria-label="Previous month">‹</button><h2 id="mon"></h2><button id="next" type="button" aria-label="Next month">›</button></div>
+    <div class="viewsw" role="group" aria-label="Calendar view">
+      <button type="button" data-view="month" aria-pressed="true">Month</button><button type="button" data-view="year" aria-pressed="false">Year</button><button type="button" data-view="range" aria-pressed="false">Custom</button>
+    </div>
+    <div class="mnav" id="mnav"><button id="prev" type="button" aria-label="Previous month">‹</button><h2 id="mon"></h2><button id="next" type="button" aria-label="Next month">›</button></div>
+    <div class="drp" id="rangebox" hidden>
+      <button type="button" class="drp-trigger" id="drpTrigger" aria-haspopup="dialog" aria-expanded="false" aria-controls="drpPop">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+        <span id="drpLabel"></span>
+      </button>
+      <div class="drp-pop" id="drpPop" role="dialog" aria-label="Choose a date range" hidden>
+        <div class="drp-presets" id="drpPresets">
+          <button type="button" data-p="today">Today</button><button type="button" data-p="yesterday">Yesterday</button>
+          <button type="button" data-p="thisweek">This week</button><button type="button" data-p="lastweek">Last week</button>
+          <button type="button" data-p="thismonth">This month</button><button type="button" data-p="lastmonth">Last month</button>
+          <button type="button" data-p="thisyear">This year</button><button type="button" data-p="lastyear">Last year</button>
+          <button type="button" data-p="all">All time</button>
+        </div>
+        <div class="drp-main">
+          <div class="drp-months" id="drpMonths"></div>
+          <div class="drp-foot">
+            <input type="date" id="drpFrom" aria-label="Start date"><span class="dash">–</span><input type="date" id="drpTo" aria-label="End date">
+            <span class="sp"></span>
+            <button type="button" class="drp-btn" id="drpCancel">Cancel</button>
+            <button type="button" class="drp-btn primary" id="drpApply">Apply</button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
   <div class="filter-bar" aria-label="Filter historical trades">
 <label class="search-filter">Search<input type="search" id="history-search" placeholder="Stock or option symbol" maxlength="100"></label>
@@ -90,7 +196,7 @@
   <div class="broker-tiles" id="brokerTiles" hidden></div>
   <div class="card">
     <div class="cal" id="cal" data-skeleton-kind="calendar" data-skeleton-count="35" aria-busy="true">{{ skeleton("calendar",35) }}</div>
-    <p class="calendar-legend"><span>Weekend</span><span>Holiday · exchange closed</span><span>Special session · limited hours</span><span>Dates and session times: IST</span></p>
+    <p class="calendar-legend" id="legend"><span>Weekend</span><span>Holiday · exchange closed</span><span>Special session · limited hours</span><span>Dates and session times: IST</span></p>
   </div>
   <div class="card" id="detail" hidden></div>
 <p class="small" data-view-only="live">Net P&amp;L deducts saved charges. Broker-calculated charges are labeled estimated; a reconciled contract note makes them final. When charges are unavailable, gross P&amp;L is shown. Open, partial and unresolved trades are in Overview → Live.</p>
@@ -107,8 +213,51 @@ const iso = ExchangeCalendar.iso;
 const EXCHANGES = {{ exchanges | tojson }};
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const session = key => ExchangeCalendar.session(key, C?.days?.[key], EXCHANGES[$("strat").value]);
-let cur = new Date(TODAY + "T12:00:00"); cur.setDate(1);
+const parseIso = k => new Date(k + "T12:00:00");
+const ISO_RE = /^\d{4}-\d{2}-\d{2}$/;
+const shortDate = d => d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+// View state: month (default), a whole year, or a custom date range — kept in the URL so reloads and links keep it.
+const params = new URLSearchParams(location.search);
+let view = ["month", "year", "range"].includes(params.get("view")) ? params.get("view") : "month";
+let cur = parseIso(TODAY); cur.setDate(1);
+if (/^\d{4}-\d{2}$/.test(params.get("month") || "")) cur = parseIso(params.get("month") + "-01");
+else if (/^\d{4}$/.test(params.get("year") || "")) cur = parseIso(params.get("year") + "-01-01");
+const monthsBack = n => { const d = parseIso(TODAY); d.setMonth(d.getMonth() - n); d.setDate(d.getDate() + 1); return iso(d); };
+let rFrom = ISO_RE.test(params.get("from") || "") ? params.get("from") : monthsBack(3);
+let rTo = ISO_RE.test(params.get("to") || "") ? params.get("to") : TODAY;
 let J = null, C = null, sel = null, loadVersion = 0, visibleRows = [], loadController;
+
+// First and last day the current view covers.
+function bounds() {
+  if (view === "year") return [new Date(cur.getFullYear(), 0, 1), new Date(cur.getFullYear(), 11, 31)];
+  if (view === "range") return [parseIso(rFrom), parseIso(rTo)];
+  return [new Date(cur.getFullYear(), cur.getMonth(), 1), new Date(cur.getFullYear(), cur.getMonth() + 1, 0)];
+}
+function viewTitle() {
+  if (view === "year") return String(cur.getFullYear());
+  if (view === "range") return `${shortDate(parseIso(rFrom))} – ${shortDate(parseIso(rTo))}`;
+  return cur.toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+}
+function* eachDay(a, b) {
+  for (let d = new Date(a.getFullYear(), a.getMonth(), a.getDate()); iso(d) <= iso(b); d.setDate(d.getDate() + 1)) yield new Date(d);
+}
+function syncViewUi() {
+  document.querySelectorAll(".viewsw [data-view]").forEach(btn => btn.setAttribute("aria-pressed", String(btn.dataset.view === view)));
+  $("mnav").hidden = view === "range";
+  $("legend").hidden = view !== "month";
+  $("rangebox").hidden = view !== "range";
+  $("drpLabel").textContent = `${shortDate(parseIso(rFrom))} – ${shortDate(parseIso(rTo))}`;
+  const unit = view === "year" ? "year" : "month";
+  $("prev").setAttribute("aria-label", `Previous ${unit}`); $("next").setAttribute("aria-label", `Next ${unit}`);
+  $("mon").textContent = viewTitle();
+  const u = new URL(location.href);
+  ["view", "month", "year", "from", "to"].forEach(k => u.searchParams.delete(k));
+  u.searchParams.set("view", view);
+  if (view === "month") u.searchParams.set("month", iso(cur).slice(0, 7));
+  else if (view === "year") u.searchParams.set("year", String(cur.getFullYear()));
+  else { u.searchParams.set("from", rFrom); u.searchParams.set("to", rTo); }
+  history.replaceState(history.state, "", u);
+}
 const dataView = WorkspaceView.bind({onChange:render,descriptions:{
   paper:'Simulated intraday P&L · before charges',
   live:'Closed live trades · net after saved charges · estimates labeled'
@@ -126,14 +275,19 @@ function accountTiles(per, basis) {
 
 async function load() {
   const version = ++loadVersion;
-  $("mon").textContent=cur.toLocaleDateString("en-IN",{month:"long",year:"numeric"});
-  const a = new Date(cur.getFullYear(), cur.getMonth(), 1), b = new Date(cur.getFullYear(), cur.getMonth() + 1, 0);
+  syncViewUi();
+  const [a, b] = bounds();
   loadController?.abort();loadController=new AbortController();const signal=loadController.signal;
   const status=$("pageStatus");status.hidden=false;status.className="page-status";status.textContent="Loading your calendar…";
+  if (view === "range" && !(ISO_RE.test(rFrom) && ISO_RE.test(rTo) && rFrom <= rTo)) {
+    J=null;$("detail").hidden=true;status.className="page-status error";status.textContent="Pick a From date on or before the To date.";return;
+  }
+  $("cal").className = view === "month" ? "cal" : "yearv";
   const done=LoadingUI.begin(["#tiles","#cal"],{initial:true,retry:load});
   J=null;C=null;$("detail").hidden=true;$("brokerTiles").hidden=true;
-  $("calendarStatus").textContent="Checking exchange holidays…";
-  const holiday=appFetch(`/api/market/calendar?year=${cur.getFullYear()}&month=${cur.getMonth()+1}`,{signal}).then(async r=>{
+  if (view !== "month") $("calendarStatus").textContent="Tap a day for its trades, or a month name to open that month (exchange holidays are shown in Month view).";
+  else $("calendarStatus").textContent="Checking exchange holidays…";
+  const holiday=view !== "month" ? Promise.resolve() : appFetch(`/api/market/calendar?year=${cur.getFullYear()}&month=${cur.getMonth()+1}`,{signal}).then(async r=>{
     if(!r.ok)throw new Error("Holiday calendar unavailable");
     const value=await r.json();if(version!==loadVersion)return;C=value;
     $("calendarStatus").textContent=C.verified ? C.warning || "NSE / BSE exchange schedule · select a day for session details." : "Holiday dates are unavailable. Weekends are marked.";
@@ -143,7 +297,14 @@ async function load() {
     const response=await appFetch(`/api/journal?start=${iso(a)}&end=${iso(b)}`,{signal});
     if(!response.ok)throw new Error("Couldn't load the calendar. Please retry.");
     const result=await response.json();if(version!==loadVersion)return;
-    J=result;status.hidden=true;render();
+    J=result;status.hidden=true;
+    if (allTimePending) {
+      allTimePending = false;
+      const first = Object.keys(J.days || {}).sort()[0];
+      rFrom = first && first < rTo ? first : rTo;
+      syncViewUi();
+    }
+    render();
   } catch(error) {
     if(version!==loadVersion)return;
     done(error);status.className="page-status error";status.textContent=error.message;
@@ -151,23 +312,27 @@ async function load() {
   await holiday;
 }
 
+let byDay = new Map();
 function dayTrades(d) {
-  return visibleRows.filter(t => t.date === d);
+  return byDay.get(d) || [];
 }
 
 function render() {
   if (!J) return;
   visibleRows = UpstocksPnl.historyRows(J,{...dataView.get(),strategy:$("strat").value}).filter(t=>WorkspaceUI.matches(t,historyFilters.get()));
+  byDay = new Map();
+  for (const t of visibleRows) { if (!byDay.has(t.date)) byDay.set(t.date, []); byDay.get(t.date).push(t); }
   const basis = visibleRows.some(t=>t.pnlBasis === 'gross') || mode() === 'paper' ? 'gross' : 'net';
   const summary = UpstocksPnl.historySummary(visibleRows);
-  $("mon").textContent = cur.toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+  $("mon").textContent = viewTitle();
+  const [ra, rb] = bounds(), period = { month: "Month", year: "Year", range: "Range" }[view];
   const y = cur.getFullYear(), m = cur.getMonth(), first = new Date(y, m, 1), last = new Date(y, m + 1, 0);
   const lead = (first.getDay() + 6) % 7;  // Monday first
   // One strategy picked (paper): each day also shows the lots it traded (compounding strategies grow them).
   const oneStrategy = mode() === "paper" && !!$("strat").value;
   const pl = {}; let maxAbs = 1;
-  for (let d = 1; d <= last.getDate(); d++) {
-    const k = iso(new Date(y, m, d)), ts = dayTrades(k);
+  for (const dt of eachDay(ra, rb)) {
+    const k = iso(dt), ts = dayTrades(k);
     if (ts.length || J.days[k]) { pl[k] = { rs: ts.reduce((a, t) => a + t.rs, 0), n: ts.length, lots: [...new Set(ts.map(t => t.lots).filter(Boolean))] }; maxAbs = Math.max(maxAbs, Math.abs(pl[k].rs)); }
   }
   const vals = Object.entries(pl).filter(([, v]) => v.n);
@@ -179,7 +344,7 @@ function render() {
   $("brokerTiles").hidden = !showBrokers;
   if (showBrokers) {
     const per = {};   // account-wise: broker + client ID
-    for (let d = 1; d <= last.getDate(); d++) for (const t of dayTrades(iso(new Date(y, m, d))))
+    for (const t of visibleRows)
       { const k = t.broker+"|"+t.client_id; const a = per[k] ||= {broker:t.broker,client_id:t.client_id,holder:t.holder,gross:0,value:0,n:0}; a.gross += t.gross; a.value += t.rs; a.n++; }
     $("brokerTiles").innerHTML = accountTiles(per,basis + (summary.estimatedCharges ? " · estimated fees" : ""));
   }
@@ -193,12 +358,13 @@ function render() {
       tile("Red days", red, `Calendar amounts · ${basis}${estimatedCharges ? " · estimated fees" : ""}`, "down"),
     ].join("");
   } else $("tiles").innerHTML = [
-    tile(mode() === "paper" ? "Month paper P&L" : `Month live P&L${mode().includes(":") ? " · " + BROKERS[mode().split(":")[1]] : ""}`, money(net), `${vals.reduce((a, [, v]) => a + v.n, 0)} ${mode() !== "paper" ? "live " : ""}trades · gross${mode() !== "paper" ? " · real fill prices" : ""}`, net >= 0 ? "up" : "down"),
+    tile(mode() === "paper" ? `${period} paper P&L` : `${period} live P&L${mode().includes(":") ? " · " + BROKERS[mode().split(":")[1]] : ""}`, money(net), `${vals.reduce((a, [, v]) => a + v.n, 0)} ${mode() !== "paper" ? "live " : ""}trades · gross${mode() !== "paper" ? " · real fill prices" : ""}`, net >= 0 ? "up" : "down"),
     tile("Green days", green, `of ${vals.length} traded days`, "up"),
     tile("Red days", red, "", "down"),
     tile("Best day", best ? money(best[1].rs) : "—", best ? best[0] : "", best ? (best[1].rs >= 0 ? "up" : "down") : ""),
     tile("Worst day", worst ? money(worst[1].rs) : "—", worst ? worst[0] : "", worst ? (worst[1].rs >= 0 ? "up" : "down") : ""),
   ].join("");
+  if (view !== "month") { $("cal").innerHTML = miniMonths(ra, rb, pl, maxAbs, basis); renderDetail(); return; }
   const cells = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map(d => `<div class="dow">${d}</div>`);
   for (let i = 0; i < lead; i++) cells.push(`<div class="day out wk"></div>`);
   for (let d = 1; d <= last.getDate(); d++) {
@@ -218,14 +384,37 @@ function render() {
   renderDetail();
 }
 
+// Year / custom range: one small card per month with its total and a colour-coded day grid.
+function miniMonths(a, b, pl, maxAbs, basis) {
+  const from = iso(a), to = iso(b), out = [];
+  for (let md = new Date(a.getFullYear(), a.getMonth(), 1); iso(md) <= to; md = new Date(md.getFullYear(), md.getMonth() + 1, 1)) {
+    const y = md.getFullYear(), m = md.getMonth(), last = new Date(y, m + 1, 0).getDate(), lead = (md.getDay() + 6) % 7;
+    let net = 0, n = 0, green = 0, red = 0;
+    const cells = ["M", "T", "W", "T", "F", "S", "S"].map(d => `<span class="dw" aria-hidden="true">${d}</span>`);
+    for (let i = 0; i < lead; i++) cells.push(`<span class="md"></span>`);
+    for (let d = 1; d <= last; d++) {
+      const dt = new Date(y, m, d), k = iso(dt), v = pl[k], inRange = k >= from && k <= to, wk = dt.getDay() === 0 || dt.getDay() === 6;
+      const cls = `md${wk ? " wk" : ""}${inRange ? "" : " oor"}${k === TODAY ? " today" : ""}${k === sel ? " sel" : ""}`;
+      if (inRange && v && v.n) {
+        net += v.rs; n += v.n; if (v.rs > 0) green++; else if (v.rs < 0) red++;
+        const al = Math.min(0.85, 0.12 + Math.abs(v.rs) / maxAbs * 0.5);
+        cells.push(`<button type="button" class="${cls}" data-d="${k}" title="${shortDate(dt)} · ${money(v.rs)} · ${v.n} trade${v.n > 1 ? "s" : ""}" aria-label="${k}, ${money(v.rs)} ${basis}, ${v.n} trades" aria-pressed="${k === sel}" style="background:color-mix(in srgb, ${v.rs >= 0 ? "var(--ok)" : "var(--pe)"} ${Math.round(al * 100)}%, var(--card));${al > .45 ? "color:#fff;" : ""}">${d}</button>`);
+      } else cells.push(`<span class="${cls}">${d}</span>`);
+    }
+    out.push(`<div class="mini"><div class="mini-head"><button type="button" data-month="${iso(md).slice(0, 7)}" title="Open ${md.toLocaleDateString("en-IN", { month: "long", year: "numeric" })}">${md.toLocaleDateString("en-IN", { month: "short", year: "numeric" })}</button><b class="${n ? (net >= 0 ? "up" : "down") : "muted"}">${n ? money(net) : "—"}</b></div>
+      <p class="mini-sub">${n ? `${n} trade${n > 1 ? "s" : ""} · ${green} green · ${red} red` : "No trades"}</p><div class="mini-grid">${cells.join("")}</div></div>`);
+  }
+  return out.join("") || `<p class="muted">No months in this range.</p>`;
+}
+
 function renderDetail() {
   if (!sel) { $("detail").hidden = true; return; }
   const ts = dayTrades(sel), net = ts.reduce((a, t) => a + t.rs, 0), schedule = session(sel);
   const sessionNames = {NSE:"NSE equities", NFO:"NSE F&O", BSE:"BSE equities", BFO:"BSE F&O"};
   const marketInfo = schedule.sessions.map(s => `${sessionNames[s.code]}: ${s.kind === "holiday" || s.kind === "weekend" ? "Closed · " : s.kind === "open" || s.kind === "special" ? "Open · " : ""}${esc(s.label)}${s.session ? " · " + esc(s.session) : ""}`).join("<br>");
   $("detail").hidden = false;
-  $("detail").innerHTML = `<h3>${new Date(sel + "T12:00:00").toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" })} · ${ts.length ? `<span class="${net >= 0 ? "up" : "down"}">${money(net)} ${ts[0].pnlBasis || "gross"}${ts.some(t=>t.feeQuality === "estimated") ? " (est.)" : ""}</span>` : "No trades"}</h3>
-    <p class="small muted">${marketInfo}</p>
+  $("detail").innerHTML = `<h3>${new Date(sel + "T12:00:00").toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", ...(view === "month" ? {} : { year: "numeric" }) })} · ${ts.length ? `<span class="${net >= 0 ? "up" : "down"}">${money(net)} ${ts[0].pnlBasis || "gross"}${ts.some(t=>t.feeQuality === "estimated") ? " (est.)" : ""}</span>` : "No trades"}</h3>
+    ${view === "month" ? `<p class="small muted">${marketInfo}</p>` : ""}
     <div class="scroll"><table><thead><tr><th>Strategy</th><th>Option</th>${mode() === "paper" ? "<th>Simulated in → out</th><th>Lots</th><th>Entry</th><th>Exit / mark</th><th>Status</th><th>Paper gross</th>" : "<th>Broker</th><th>Qty</th><th>Buy fill</th><th>Sell fill</th><th>Gross</th><th>Charges</th><th>Live net</th>"}</tr></thead><tbody>${
       ts.map(t => `<tr><td>${esc(LABELS[t.preset] || t.preset)}</td><td>${esc(t.symbol)}</td>${mode() === "paper"
         ? `<td>${ampm(t.entry_time)} → ${t.open ? "Open" : ampm(t.exit_time)}</td><td>${t.lots ? `${t.lots} lot${t.lots === 1 ? "" : "s"} · ${t.qty} qty` : "—"}</td><td>₹${fmt(t.entry)}</td><td>₹${fmt(t.exit)}</td><td>${esc(t.open ? "OPEN" : t.status)}</td><td><b class="${t.rs >= 0 ? "up" : "down"}">${money(t.rs)}</b></td>`
@@ -235,9 +424,123 @@ function renderDetail() {
 
 }
 
-$("cal").addEventListener("click", e => { const d = e.target.closest(".day[data-d]"); if (!d) return; sel = d.dataset.d; render(); $("cal").querySelector(`[data-d="${sel}"]`)?.focus({preventScroll:true}); });
-$("prev").addEventListener("click", () => { cur.setMonth(cur.getMonth() - 1); sel = null; load(); });
-$("next").addEventListener("click", () => { cur.setMonth(cur.getMonth() + 1); sel = null; load(); });
+$("cal").addEventListener("click", e => {
+  const month = e.target.closest("[data-month]");
+  if (month) { view = "month"; cur = parseIso(month.dataset.month + "-01"); sel = null; load(); return; }
+  const d = e.target.closest("[data-d]"); if (!d) return;
+  sel = d.dataset.d; render(); $("cal").querySelector(`[data-d="${sel}"]`)?.focus({preventScroll:true});
+  if (view !== "month") $("detail").scrollIntoView({ behavior: "smooth", block: "nearest" });
+});
+const step = dir => { if (view === "year") cur.setFullYear(cur.getFullYear() + dir); else cur.setMonth(cur.getMonth() + dir); sel = null; load(); };
+$("prev").addEventListener("click", () => step(-1));
+$("next").addEventListener("click", () => step(1));
+document.querySelectorAll(".viewsw [data-view]").forEach(btn => btn.addEventListener("click", () => {
+  if (btn.dataset.view === view) return;
+  view = btn.dataset.view; sel = null; load();
+}));
+// ---- Date-range picker (Custom view) ----
+// Draft selection lives in DRP until Apply; Cancel / Esc / clicking outside drop it.
+const DRP = { start: null, end: null, hover: null, left: null, preset: null };
+let allTimePending = false;
+const addDays = (k, n) => { const d = parseIso(k); d.setDate(d.getDate() + n); return iso(d); };
+const PRESETS = {
+  today: () => [TODAY, TODAY],
+  yesterday: () => [addDays(TODAY, -1), addDays(TODAY, -1)],
+  thisweek: () => [addDays(TODAY, -parseIso(TODAY).getDay()), TODAY],
+  lastweek: () => { const sun = addDays(TODAY, -parseIso(TODAY).getDay() - 7); return [sun, addDays(sun, 6)]; },
+  thismonth: () => [TODAY.slice(0, 8) + "01", TODAY],
+  lastmonth: () => { const t = parseIso(TODAY); return [iso(new Date(t.getFullYear(), t.getMonth() - 1, 1)), iso(new Date(t.getFullYear(), t.getMonth(), 0))]; },
+  thisyear: () => [TODAY.slice(0, 4) + "-01-01", TODAY],
+  lastyear: () => { const y = Number(TODAY.slice(0, 4)) - 1; return [`${y}-01-01`, `${y}-12-31`]; },
+  all: () => ["2000-01-01", TODAY],
+};
+const CHEVRON = d => `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg>`;
+// Left month shown so the end date sits in the right-hand month.
+// On phones only one month shows, so it is the end date's own month.
+const showEnd = k => { const e = parseIso(k || TODAY), one = matchMedia("(max-width:760px)").matches; DRP.left = new Date(e.getFullYear(), e.getMonth() - (one ? 0 : 1), 1); };
+
+function drpMonth(md, side) {
+  const y = md.getFullYear(), m = md.getMonth(), last = new Date(y, m + 1, 0).getDate(), lead = md.getDay();
+  let s = DRP.start, e = DRP.end || (DRP.start && DRP.hover) || null;
+  if (s && e && e < s) [s, e] = [e, s];
+  const cells = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map(d => `<span class="drp-dow" aria-hidden="true">${d}</span>`);
+  for (let i = 0; i < lead; i++) cells.push(`<span></span>`);
+  for (let d = 1; d <= last; d++) {
+    const k = iso(new Date(y, m, d)), col = (lead + d - 1) % 7;
+    const inside = s && e && k > s && k < e, isS = k === s, isE = k === e || (isS && !e);
+    const cls = ["drp-day", inside && "in", isS && "start", isE && "end", (col === 0 || d === 1) && "l", (col === 6 || d === last) && "r", k === TODAY && "today"].filter(Boolean).join(" ");
+    cells.push(`<button type="button" class="${cls}" data-k="${k}" ${k > TODAY ? "disabled" : ""} aria-pressed="${isS || isE || !!inside}" aria-label="${parseIso(k).toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}"><span>${d}</span></button>`);
+  }
+  return `<div class="drp-month"><div class="drp-mhead">
+      <button type="button" class="drp-nav prev" data-step="-1" aria-label="Previous month">${CHEVRON("m15 18-6-6 6-6")}</button>
+      ${md.toLocaleDateString("en-IN", { month: "long", year: "numeric" })}
+      <button type="button" class="drp-nav next" data-step="1" aria-label="Next month">${CHEVRON("m9 18 6-6-6-6")}</button>
+    </div><div class="drp-grid">${cells.join("")}</div></div>`;
+}
+
+function drawPicker() {
+  const right = new Date(DRP.left.getFullYear(), DRP.left.getMonth() + 1, 1);
+  $("drpMonths").innerHTML = drpMonth(DRP.left) + drpMonth(right);
+  $("drpFrom").value = DRP.preset === "all" ? "" : DRP.start || "";
+  $("drpTo").value = DRP.end || DRP.start || "";
+  $("drpFrom").max = $("drpTo").max = TODAY;
+  document.querySelectorAll("#drpPresets [data-p]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.p === DRP.preset)));
+  $("drpApply").disabled = !DRP.start;
+}
+
+function openPicker() {
+  Object.assign(DRP, { start: rFrom, end: rTo, hover: null, preset: null });
+  showEnd(rTo);
+  $("drpPop").hidden = false; $("drpTrigger").setAttribute("aria-expanded", "true");
+  drawPicker();
+  $("drpMonths").querySelector(".drp-day.start, .drp-day.end")?.focus();
+}
+function closePicker(focusTrigger = true) {
+  if ($("drpPop").hidden) return;
+  $("drpPop").hidden = true; $("drpTrigger").setAttribute("aria-expanded", "false");
+  if (focusTrigger) $("drpTrigger").focus();
+}
+
+$("drpTrigger").addEventListener("click", () => ($("drpPop").hidden ? openPicker() : closePicker()));
+$("drpMonths").addEventListener("click", e => {
+  const nav = e.target.closest("[data-step]");
+  if (nav) { DRP.left = new Date(DRP.left.getFullYear(), DRP.left.getMonth() + Number(nav.dataset.step), 1); drawPicker(); return; }
+  const day = e.target.closest(".drp-day[data-k]"); if (!day || day.disabled) return;
+  const k = day.dataset.k; DRP.preset = null; DRP.hover = null;
+  if (!DRP.start || DRP.end) { DRP.start = k; DRP.end = null; }           // first click: new start
+  else if (k < DRP.start) { DRP.end = DRP.start; DRP.start = k; }       // second click before start: swap
+  else DRP.end = k;
+  drawPicker();
+  $("drpMonths").querySelector(`[data-k="${k}"]`)?.focus();
+});
+$("drpMonths").addEventListener("mouseover", e => {
+  const day = e.target.closest(".drp-day[data-k]");
+  if (!day || !DRP.start || DRP.end || day.dataset.k === DRP.hover) return;
+  DRP.hover = day.dataset.k; drawPicker();
+});
+$("drpPresets").addEventListener("click", e => {
+  const b = e.target.closest("[data-p]"); if (!b) return;
+  [DRP.start, DRP.end] = PRESETS[b.dataset.p](); DRP.preset = b.dataset.p; DRP.hover = null;
+  showEnd(DRP.end); drawPicker();
+});
+const typedDate = () => {
+  const f = $("drpFrom").value, t = $("drpTo").value;
+  if (!ISO_RE.test(f) && !ISO_RE.test(t)) return;
+  DRP.preset = null; DRP.hover = null;
+  DRP.start = ISO_RE.test(f) ? f : t; DRP.end = ISO_RE.test(t) ? t : f;
+  if (DRP.end < DRP.start) [DRP.start, DRP.end] = [DRP.end, DRP.start];
+  showEnd(DRP.end); drawPicker();
+};
+$("drpFrom").addEventListener("change", typedDate);
+$("drpTo").addEventListener("change", typedDate);
+$("drpCancel").addEventListener("click", () => closePicker());
+$("drpApply").addEventListener("click", () => {
+  if (!DRP.start) return;
+  rFrom = DRP.start; rTo = DRP.end || DRP.start; allTimePending = DRP.preset === "all";
+  closePicker(); sel = null; load();
+});
+document.addEventListener("mousedown", e => { if (!$("drpPop").hidden && !$("rangebox").contains(e.target)) closePicker(false); });
+document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("drpPop").hidden) { e.preventDefault(); closePicker(); } });
 
 
 load();
