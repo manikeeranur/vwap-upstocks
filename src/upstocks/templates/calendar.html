@@ -145,7 +145,7 @@
   #detail td.acct small { display:block; font-size:11px; color:var(--muted); }
   #detail td.money { font-variant-numeric:tabular-nums; }
   #detail td.net { font-weight:700; font-size:13px; }
-  .est { font-size:10px; font-weight:500; color:var(--muted); margin-left:3px; }
+  #detail td.bold { font-weight:700; }
   .pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:600; background:var(--surface); color:var(--muted); }
   .pill.SL { background:color-mix(in srgb, var(--pe) 12%, transparent); color:var(--pe); }
   .pill.TARGET { background:color-mix(in srgb, var(--ok) 12%, transparent); color:var(--ok); }
@@ -435,22 +435,20 @@ function renderDetail() {
   $("detail").hidden = false;
   const paper = mode() === "paper";
   const cls = n => (n > 0 ? "up" : n < 0 ? "down" : "muted");
-  const est = t => (t.realCh ? "" : `<span class="est">est.</span>`);
   const dateLabel = new Date(sel + "T12:00:00").toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", ...(view === "month" ? {} : { year: "numeric" }) });
-  const anyEst = ts.some(t => t.feeQuality === "estimated");
   const sum = ts.length && !paper ? UpstocksPnl.historySummary(ts) : null;
   const chip = (k, v, c = "") => `<span>${k}<b class="${c}">${v}</b></span>`;
   const head = `<div class="dt-head"><h3>${esc(dateLabel)}</h3>${ts.length
-      ? `<span class="dt-net ${cls(net)}">${money(net)} ${esc(ts[0].pnlBasis || "gross")}${anyEst ? " (est.)" : ""}</span>`
+      ? `<span class="dt-net ${cls(net)}">${money(net)} ${esc(ts[0].pnlBasis || "gross")}</span>`
       : `<span class="muted">No trades</span>`}</div>
     ${ts.length ? `<div class="dt-sum">${chip("Trades", ts.length)}${paper
       ? chip("Won", ts.filter(t => t.rs > 0).length, "up") + chip("Lost", ts.filter(t => t.rs < 0).length, "down")
-      : chip("Gross", money(sum.gross), cls(sum.gross)) + chip(sum.estimatedCharges ? "Charges (est.)" : "Charges", sum.charges === null ? "Pending" : money(-sum.charges), sum.charges === null ? "muted" : "down") + chip("Net", sum.net === null ? "Pending" : money(sum.net), sum.net === null ? "muted" : cls(sum.net))}</div>` : ""}
+      : chip("Gross", money(sum.gross), cls(sum.gross)) + chip("Charges", sum.charges === null ? "Pending" : money(-sum.charges), sum.charges === null ? "muted" : "down") + chip("Net", sum.net === null ? "Pending" : money(sum.net), sum.net === null ? "muted" : cls(sum.net))}</div>` : ""}
     ${view === "month" ? `<p class="small muted">${marketInfo}</p>` : ""}`;
   const strat = t => `<td class="l strat"><b>${esc(LABELS[t.preset] || t.preset)}</b><small>${esc(t.symbol)}</small></td>`;
   const rows = ts.map(t => paper
     ? `<tr>${strat(t)}<td class="l">${ampm(t.entry_time)} → ${t.open ? "Open" : ampm(t.exit_time)}</td><td>${t.lots ? `${t.lots} lot${t.lots === 1 ? "" : "s"} · ${t.qty} qty` : "—"}</td><td class="money">₹${fmt(t.entry)}</td><td class="money">₹${fmt(t.exit)}</td><td><span class="pill ${esc(t.open ? "OPEN" : t.status)}">${esc(t.open ? "OPEN" : t.status)}</span></td><td class="money net ${cls(t.rs)}">${money(t.rs)}</td></tr>`
-    : `<tr>${strat(t)}<td class="l acct">${esc(BROKERS[t.broker] || t.broker)}${t.client_id ? `<small>${esc(t.client_id)}</small>` : ""}</td><td>${t.qty}</td><td class="money">₹${fmt(t.buyFill)}</td><td class="money">₹${fmt(t.sellFill)}</td><td class="money ${cls(t.gross)}">${money(t.gross)}</td><td class="money ${t.feesAvailable ? "down" : "muted"}">${t.feesAvailable ? money(-t.ch) + est(t) : "Pending"}</td><td class="money net ${t.net === null ? "muted" : cls(t.net)}">${t.net === null ? "Pending" : money(t.net) + est(t)}</td></tr>`).join("");
+    : `<tr>${strat(t)}<td class="l acct">${esc(BROKERS[t.broker] || t.broker)}${t.client_id ? `<small>${esc(t.client_id)}</small>` : ""}</td><td>${t.qty}</td><td class="money">₹${fmt(t.buyFill)}</td><td class="money">₹${fmt(t.sellFill)}</td><td class="money bold ${cls(t.gross)}">${money(t.gross)}</td><td class="money bold ${t.feesAvailable ? "down" : "muted"}">${t.feesAvailable ? money(-t.ch) : "Pending"}</td><td class="money net ${t.net === null ? "muted" : cls(t.net)}">${t.net === null ? "Pending" : money(t.net)}</td></tr>`).join("");
   const foot = !ts.length ? "" : paper
     ? `<tfoot><tr><td class="l" colspan="6">Total · ${ts.length} trade${ts.length === 1 ? "" : "s"}</td><td class="money net ${cls(net)}">${money(net)}</td></tr></tfoot>`
     : `<tfoot><tr><td class="l" colspan="5">Total · ${ts.length} trade${ts.length === 1 ? "" : "s"}</td><td class="money ${cls(sum.gross)}">${money(sum.gross)}</td><td class="money ${sum.charges === null ? "muted" : "down"}">${sum.charges === null ? "Pending" : money(-sum.charges)}</td><td class="money net ${sum.net === null ? "muted" : cls(sum.net)}">${sum.net === null ? "Pending" : money(sum.net)}</td></tr></tfoot>`;
