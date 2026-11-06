@@ -28,6 +28,8 @@
   .profile b { display:block; font-size:14px; font-weight:600; }
   .profile span:not(.avatar) { display:block; font-size:12px; color:var(--muted); overflow-wrap:anywhere; }
   .avatar { width:44px; height:44px; flex:none; border-radius:50%; object-fit:cover; display:grid; place-items:center; background:var(--accent-soft); color:var(--accent); font-weight:600; font-size:15px; border:1px solid var(--border); }
+  /* Token fields are masked with CSS instead of type=password so browsers/password managers don't offer to fill or save them. */
+  .no-autofill { -webkit-text-security:disc; text-security:disc; font-family:var(--font); }
   .ind-totp { margin-top:14px; font-size:12px; } .ind-totp summary { cursor:pointer; color:var(--muted); margin-bottom:10px; }
   .totp-row { display:grid !important; grid-template-columns:1fr 1fr auto; gap:10px; align-items:end; margin-top:12px; }
   @media (max-width:520px) { .totp-row { grid-template-columns:1fr; } }
@@ -103,8 +105,8 @@ function indCard(x, s) {
       <div class="broker-head"><h2>${brokerLogo(b,26)}${NAMES[b]}</h2><span class="status ${x.logged_in ? 'ok' : s.market_calendar?.login_alerts_required ? 'bad' : ''}">${x.logged_in ? 'Logged in today' : 'Not logged in'}</span></div>
       ${profileCard(x.profile)}
       <form data-indtoken>
-        <label>Today's access token <input name="token" type="password" autocomplete="off" spellcheck="false" placeholder="Paste the token from indstocks.com"></label>
-        <div class="row" style="margin:0"><button class="btn primary" type="submit">${x.logged_in ? 'Replace token' : 'Save token'}</button><a class="btn ghost" href="https://www.indstocks.com/app/api-trading/access-tokens" target="_blank" rel="noopener">Get token ↗</a></div>
+        <label>Today's access token <input name="token" type="text" class="no-autofill" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other" placeholder="Paste the token from indstocks.com"></label>
+        <div class="row" style="margin:0"><button class="btn primary" type="submit">${x.logged_in ? 'Replace token' : 'Save token'}</button><a class="btn ghost" href="https://www.indstocks.com/app/api-trading/access-tokens" target="_blank" rel="noopener">Get token ↗</a>${x.logged_in ? `<button class="btn ghost" type="button" data-copytoken="${b}">Copy token</button>` : ''}</div>
       </form>
       <details class="ind-totp" ${x.has_key ? 'open' : ''}><summary>Or generate it here with MPIN + authenticator code</summary>
       ${x.has_key && !editing.has(b) ? `<div class="saved-keys"><div><span>Client ID</span><b>******</b></div><div></div><button class="btn ghost" type="button" data-edit="${b}">Change</button></div>
@@ -136,7 +138,15 @@ function render(s) {
       <div class="row">
         <a class="btn primary" href="/broker/${b}/login" ${x.has_key && x.has_secret ? '' : 'aria-disabled="true" style="pointer-events:none;opacity:.45"'}>${x.logged_in ? 'Log in again' : 'Log in to ' + NAMES[b]}</a>
         ${b === 'upstox' ? `<button class="btn ghost" type="button" data-approve ${x.has_key && x.has_secret ? '' : 'disabled'}>Send approval to my Upstox app</button>` : ''}
+        ${x.logged_in ? `<button class="btn ghost" type="button" data-copytoken="${b}">Copy token</button>` : ''}
       </div>
+      <details class="ind-totp"><summary>Or paste today's access token</summary>
+        <form data-tokenpaste="${b}" autocomplete="off">
+          <label>Access token <input name="token" type="text" class="no-autofill" required minlength="20" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other" placeholder="${b === 'kite' ? 'Token generated with your saved Kite API key' : 'Paste an Upstox access token'}"></label>
+          <div class="row" style="margin:0"><button class="btn ghost" type="submit" ${b === 'kite' && !x.has_key ? 'disabled' : ''}>${x.logged_in ? 'Replace token' : 'Save token'}</button></div>
+        </form>
+        <p class="meta" style="margin-top:8px">${b === 'kite' ? (x.has_key ? 'The token must come from your saved Kite app (same API key). It is checked with Kite before saving.' : 'Save your Kite API key first — a Kite token only works with the app it was issued for.') : 'Checked with Upstox before saving. Upstox tokens expire at 3:30 AM the next day.'}</p>
+      </details>
     </section>`).join('');
   filterBrokers();
   $('tgState').textContent = !s.telegram_bot ? 'Telegram bot is not configured on this server yet.' : s.telegram ? 'Reminders are on for your saved chat.' : 'No chat saved — reminders are off.';
@@ -145,6 +155,13 @@ async function load() { const done=LoadingUI.begin('#grid',{initial:!last,kind:'
 LoadingUI.on($('grid'),'submit', async e => {
   e.preventDefault();
   const f = e.target;
+  if (f.matches('[data-tokenpaste]')) {
+    const b = f.dataset.tokenpaste, button = f.querySelector('button[type=submit]'); button.disabled = true;
+    try { render(await api(`/api/brokers/${b}/token`, {token:f.token.value.trim()})); notifyUI(`${NAMES[b]} logged in for today.`); }
+    catch (x) { notifyUI(x.message, true); button.disabled = false; }
+    finally { f.token.value = ''; }
+    return;
+  }
   if (f.matches('[data-indtoken],[data-indtotp]')) {
     const button = f.querySelector('button[type=submit]'); button.disabled = true;
     try {
@@ -164,6 +181,23 @@ LoadingUI.on($('grid'),'submit', async e => {
 LoadingUI.on($('grid'),'click', async e => {
   const ed = e.target.closest('[data-edit],[data-cancel]');
   if (ed) { ed.dataset.edit ? editing.add(ed.dataset.edit) : editing.delete(ed.dataset.cancel); render(last); return; }
+  const copy = e.target.closest('[data-copytoken]');
+  if (copy) {
+    // The token is fetched only on click and goes straight to the clipboard; it is never put on the page.
+    copy.disabled = true;
+    try {
+      const fetchToken = () => api(`/api/brokers/${copy.dataset.copytoken}/token/copy`, {}).then(j => j.token);
+      // Safari only allows a clipboard write started inside the click, so hand it a promise of the text;
+      // other browsers fall back to writeText after the request.
+      if (window.ClipboardItem && navigator.clipboard?.write) {
+        const blob = fetchToken().then(t => new Blob([t], {type: 'text/plain'}));
+        await navigator.clipboard.write([new ClipboardItem({'text/plain': blob})]);
+      } else await navigator.clipboard.writeText(await fetchToken());
+      notifyUI(`${NAMES[copy.dataset.copytoken]} token copied. Anyone with it can trade on your account, so keep it private.`);
+    } catch (x) { notifyUI(x.message || 'Could not copy the token.', true); }
+    finally { copy.disabled = false; }
+    return;
+  }
   const b = e.target.closest('[data-approve]'); if (!b) return;
   b.disabled = true;
   try { await api('/api/brokers/upstox/request', {}); notifyUI('Approval sent. Tap Approve in your Upstox app; this page updates once it arrives.'); setTimeout(load, 20000); }

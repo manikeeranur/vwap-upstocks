@@ -82,6 +82,11 @@ class IndToken(Input):
     token: str = Field(min_length=20, max_length=4000, pattern=r"^\S+$")
 
 
+class BrokerToken(Input):
+    """An access token pasted on My brokers (Kite or Upstox); checked against the broker before it is saved."""
+    token: str = Field(min_length=20, max_length=4000, pattern=r"^\S+$")
+
+
 class IndTotp(Input):
     """MPIN and the current authenticator code, used once to generate a token and never stored."""
     mpin: str = Field(pattern=r"^[0-9]{4,6}$")

@@ -150,6 +150,17 @@ async def kite_exchange_token(api_key: str, api_secret: str, request_token: str)
     return d["access_token"], _profile(d.get("user_id"), d.get("user_name"), d.get("email"), d.get("avatar_url"))
 
 
+async def kite_profile(api_key: str, token: str) -> dict:
+    """Checks a pasted Kite access token: it must work with this app's API key."""
+    async with httpx.AsyncClient(timeout=20) as c:
+        r = await c.get(f"{KITE_API}/user/profile", headers=_kite_headers(api_key, token))
+    body = await _json(r, "Kite")
+    if r.status_code != 200 or body.get("status") != "success":
+        raise BrokerError("Kite token was not accepted for your saved API key")
+    d = body.get("data") or {}
+    return _profile(d.get("user_id"), d.get("user_name"), d.get("email"), d.get("avatar_url"))
+
+
 _kite_instruments: dict[str, tuple[float, dict]] = {}
 
 

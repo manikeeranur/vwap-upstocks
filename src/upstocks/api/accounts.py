@@ -9,7 +9,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from .. import accounts, brokers, upstox
 from ..observability import redact
-from ..schemas import BrokerKeys, IndTotp, IndToken, Login, TelegramSetting
+from ..schemas import BrokerKeys, BrokerToken, IndTotp, IndToken, Login, TelegramSetting
 from .common import templates
 
 router = APIRouter()
@@ -224,6 +224,43 @@ async def _ind_save(request, token):
 @router.post("/api/brokers/indmoney/token")
 async def ind_token(body: IndToken, request: Request):
     return await _ind_save(request, body.token.strip())
+
+
+@router.post("/api/brokers/{broker}/token/copy")
+async def copy_token(broker: str, request: Request):
+    """Today's saved access token, for the Copy button on My brokers. POST only (same-origin + command token),
+    never cached, only while the login is still valid, and every copy is recorded in Activity."""
+    if broker not in brokers.BROKERS:
+        raise HTTPException(404, "Unknown broker")
+    uid = request.state.user_id
+    creds = await asyncio.to_thread(_creds, request, uid, broker)
+    if not (creds.access_token and creds.token_valid()):
+        raise HTTPException(400, f"{brokers.LABELS[broker]} is not logged in today")
+    username = (await asyncio.to_thread(request.app.state.repository.user, uid) or {}).get("username", uid)
+    await request.app.state.trading._activity(f"{username} · {brokers.LABELS[broker]}: access token copied")
+    return JSONResponse({"token": creds.access_token}, headers={"Cache-Control": "no-store"})
+
+
+@router.post("/api/brokers/{broker}/token")
+async def paste_token(broker: str, body: BrokerToken, request: Request):
+    """Log in by pasting today's access token instead of the broker's login page.
+    The token is checked with the broker's profile API before it is saved (sealed, like a normal login)."""
+    if broker not in ("kite", "upstox"):
+        raise HTTPException(404, "Unknown broker")
+    uid, token = request.state.user_id, body.token.strip()
+    try:
+        if broker == "kite":
+            creds = await asyncio.to_thread(_creds, request, uid, "kite")
+            if not creds.api_key:
+                raise HTTPException(400, "Save your Kite API key first: the token only works with the app it was issued for")
+            profile = await brokers.kite_profile(creds.api_key, token)
+        else:
+            profile = await brokers.upstox_profile(token)
+    except brokers.BrokerError as exc:
+        raise HTTPException(400, redact(str(exc)))
+    await asyncio.to_thread(request.app.state.repository.save_broker_keys, uid, broker)
+    await _save_token(request, uid, broker, token, profile)
+    return await asyncio.to_thread(_status, request, uid)
 
 
 @router.post("/api/brokers/indmoney/totp")
