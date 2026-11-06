@@ -131,6 +131,26 @@
   /* Day details: let long strategy names and times wrap so every column fits without sideways scrolling. */
   #detail td, #detail th { white-space: normal; padding-left: 8px; padding-right: 8px; }
   #detail td:first-child { min-width: 120px; }
+  /* Day details: header summary chips, coloured money columns and a totals row. */
+  .dt-head { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; }
+  .dt-head h3 { margin:0; }
+  .dt-net { font-size:13px; font-weight:700; padding:4px 10px; border-radius:999px; }
+  .dt-net.up { background:color-mix(in srgb, var(--ok) 12%, transparent); } .dt-net.down { background:color-mix(in srgb, var(--pe) 12%, transparent); }
+  .dt-sum { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0 2px; }
+  .dt-sum span { font-size:12px; padding:7px 12px; border-radius:8px; background:var(--surface); color:var(--muted); }
+  .dt-sum b { margin-left:6px; font-size:13px; }
+  #detail th.l, #detail td.l { text-align:left; }
+  #detail td.strat b { display:block; font-weight:600; font-size:13px; color:var(--text); }
+  #detail td.strat small { display:block; margin-top:2px; font-size:11px; color:var(--muted); }
+  #detail td.acct small { display:block; font-size:11px; color:var(--muted); }
+  #detail td.money { font-variant-numeric:tabular-nums; }
+  #detail td.net { font-weight:700; font-size:13px; }
+  .est { font-size:10px; font-weight:500; color:var(--muted); margin-left:3px; }
+  .pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:600; background:var(--surface); color:var(--muted); }
+  .pill.SL { background:color-mix(in srgb, var(--pe) 12%, transparent); color:var(--pe); }
+  .pill.TARGET { background:color-mix(in srgb, var(--ok) 12%, transparent); color:var(--ok); }
+  .pill.OPEN { background:color-mix(in srgb, #b87824 14%, transparent); color:#a86717; }
+  #detail tfoot td { font-weight:700; background:var(--surface); border-top:1px solid var(--border); border-bottom:0; }
   .card h3 { margin: 0 0 8px; font-size: 15px; }
   @media (max-width: 700px) {
     main { padding: 16px 12px 40px; }
@@ -413,15 +433,32 @@ function renderDetail() {
   const sessionNames = {NSE:"NSE equities", NFO:"NSE F&O", BSE:"BSE equities", BFO:"BSE F&O"};
   const marketInfo = schedule.sessions.map(s => `${sessionNames[s.code]}: ${s.kind === "holiday" || s.kind === "weekend" ? "Closed · " : s.kind === "open" || s.kind === "special" ? "Open · " : ""}${esc(s.label)}${s.session ? " · " + esc(s.session) : ""}`).join("<br>");
   $("detail").hidden = false;
-  $("detail").innerHTML = `<h3>${new Date(sel + "T12:00:00").toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", ...(view === "month" ? {} : { year: "numeric" }) })} · ${ts.length ? `<span class="${net >= 0 ? "up" : "down"}">${money(net)} ${ts[0].pnlBasis || "gross"}${ts.some(t=>t.feeQuality === "estimated") ? " (est.)" : ""}</span>` : "No trades"}</h3>
-    ${view === "month" ? `<p class="small muted">${marketInfo}</p>` : ""}
-    <div class="scroll"><table><thead><tr><th>Strategy</th><th>Option</th>${mode() === "paper" ? "<th>Simulated in → out</th><th>Lots</th><th>Entry</th><th>Exit / mark</th><th>Status</th><th>Paper gross</th>" : "<th>Broker</th><th>Qty</th><th>Buy fill</th><th>Sell fill</th><th>Gross</th><th>Charges</th><th>Live net</th>"}</tr></thead><tbody>${
-      ts.map(t => `<tr><td>${esc(LABELS[t.preset] || t.preset)}</td><td>${esc(t.symbol)}</td>${mode() === "paper"
-        ? `<td>${ampm(t.entry_time)} → ${t.open ? "Open" : ampm(t.exit_time)}</td><td>${t.lots ? `${t.lots} lot${t.lots === 1 ? "" : "s"} · ${t.qty} qty` : "—"}</td><td>₹${fmt(t.entry)}</td><td>₹${fmt(t.exit)}</td><td>${esc(t.open ? "OPEN" : t.status)}</td><td><b class="${t.rs >= 0 ? "up" : "down"}">${money(t.rs)}</b></td>`
-        : `<td>${esc(BROKERS[t.broker])}${t.client_id ? "<br>"+esc(t.client_id) : ""}</td><td>${t.qty}</td><td>₹${fmt(t.buyFill)}</td><td>₹${fmt(t.sellFill)}</td><td>${money(t.gross)}</td><td>${t.feesAvailable ? money(-t.ch) + (t.realCh ? "" : " (est.)") : "Pending"}</td><td>${t.net === null ? "Pending charges" : money(t.net) + (t.realCh ? "" : " (est.)")}</td>`}</tr>`).join("")
-      || `<tr><td class="muted" colspan="${mode() === "paper" ? 8 : 9}">No ${mode() === "paper" ? "paper trades" : "closed live trades"} for this session.</td></tr>`
-    }</tbody></table></div>`;
-
+  const paper = mode() === "paper";
+  const cls = n => (n > 0 ? "up" : n < 0 ? "down" : "muted");
+  const est = t => (t.realCh ? "" : `<span class="est">est.</span>`);
+  const dateLabel = new Date(sel + "T12:00:00").toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", ...(view === "month" ? {} : { year: "numeric" }) });
+  const anyEst = ts.some(t => t.feeQuality === "estimated");
+  const sum = ts.length && !paper ? UpstocksPnl.historySummary(ts) : null;
+  const chip = (k, v, c = "") => `<span>${k}<b class="${c}">${v}</b></span>`;
+  const head = `<div class="dt-head"><h3>${esc(dateLabel)}</h3>${ts.length
+      ? `<span class="dt-net ${cls(net)}">${money(net)} ${esc(ts[0].pnlBasis || "gross")}${anyEst ? " (est.)" : ""}</span>`
+      : `<span class="muted">No trades</span>`}</div>
+    ${ts.length ? `<div class="dt-sum">${chip("Trades", ts.length)}${paper
+      ? chip("Won", ts.filter(t => t.rs > 0).length, "up") + chip("Lost", ts.filter(t => t.rs < 0).length, "down")
+      : chip("Gross", money(sum.gross), cls(sum.gross)) + chip(sum.estimatedCharges ? "Charges (est.)" : "Charges", sum.charges === null ? "Pending" : money(-sum.charges), sum.charges === null ? "muted" : "down") + chip("Net", sum.net === null ? "Pending" : money(sum.net), sum.net === null ? "muted" : cls(sum.net))}</div>` : ""}
+    ${view === "month" ? `<p class="small muted">${marketInfo}</p>` : ""}`;
+  const strat = t => `<td class="l strat"><b>${esc(LABELS[t.preset] || t.preset)}</b><small>${esc(t.symbol)}</small></td>`;
+  const rows = ts.map(t => paper
+    ? `<tr>${strat(t)}<td class="l">${ampm(t.entry_time)} → ${t.open ? "Open" : ampm(t.exit_time)}</td><td>${t.lots ? `${t.lots} lot${t.lots === 1 ? "" : "s"} · ${t.qty} qty` : "—"}</td><td class="money">₹${fmt(t.entry)}</td><td class="money">₹${fmt(t.exit)}</td><td><span class="pill ${esc(t.open ? "OPEN" : t.status)}">${esc(t.open ? "OPEN" : t.status)}</span></td><td class="money net ${cls(t.rs)}">${money(t.rs)}</td></tr>`
+    : `<tr>${strat(t)}<td class="l acct">${esc(BROKERS[t.broker] || t.broker)}${t.client_id ? `<small>${esc(t.client_id)}</small>` : ""}</td><td>${t.qty}</td><td class="money">₹${fmt(t.buyFill)}</td><td class="money">₹${fmt(t.sellFill)}</td><td class="money ${cls(t.gross)}">${money(t.gross)}</td><td class="money ${t.feesAvailable ? "down" : "muted"}">${t.feesAvailable ? money(-t.ch) + est(t) : "Pending"}</td><td class="money net ${t.net === null ? "muted" : cls(t.net)}">${t.net === null ? "Pending" : money(t.net) + est(t)}</td></tr>`).join("");
+  const foot = !ts.length ? "" : paper
+    ? `<tfoot><tr><td class="l" colspan="6">Total · ${ts.length} trade${ts.length === 1 ? "" : "s"}</td><td class="money net ${cls(net)}">${money(net)}</td></tr></tfoot>`
+    : `<tfoot><tr><td class="l" colspan="5">Total · ${ts.length} trade${ts.length === 1 ? "" : "s"}</td><td class="money ${cls(sum.gross)}">${money(sum.gross)}</td><td class="money ${sum.charges === null ? "muted" : "down"}">${sum.charges === null ? "Pending" : money(-sum.charges)}</td><td class="money net ${sum.net === null ? "muted" : cls(sum.net)}">${sum.net === null ? "Pending" : money(sum.net)}</td></tr></tfoot>`;
+  $("detail").innerHTML = `${head}
+    <div class="scroll"><table><thead><tr><th class="l">Strategy · option</th>${paper
+      ? `<th class="l">Simulated in → out</th><th>Lots</th><th>Entry</th><th>Exit / mark</th><th>Status</th><th>Paper P&amp;L</th>`
+      : `<th class="l">Broker</th><th>Qty</th><th>Buy fill</th><th>Sell fill</th><th>Gross</th><th>Charges</th><th>Net P&amp;L</th>`}</tr></thead>
+    <tbody>${rows || `<tr><td class="l muted" colspan="${paper ? 7 : 8}">No ${paper ? "paper trades" : "closed live trades"} for this session.</td></tr>`}</tbody>${foot}</table></div>`;
 }
 
 $("cal").addEventListener("click", e => {
