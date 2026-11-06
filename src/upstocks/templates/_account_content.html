@@ -165,35 +165,7 @@
     {% set rows = a.holdings.data or [] %}
     {% if a.holdings.data is not none %}
     {% if rows %}
-    {# Totals for the summary card. Brokers send day_change per share, so the day's rupee change is day_change × quantity. #}
-    {% set h = namespace(inv=0, cur=0, pnl=0, day=0, prev=0, noltp=0, noday=0) %}
-    {% for r in rows %}
-      {% set q = r.quantity or 0 %}{% set inv = (r.average_price or 0) * q %}{% set h.inv = h.inv + inv %}
-      {% if r.last_price is number %}{% set cur = r.last_price * q %}{% set h.cur = h.cur + cur %}{% set h.pnl = h.pnl + (r.pnl if r.pnl is number else cur - inv) %}{% else %}{% set h.noltp = h.noltp + 1 %}{% endif %}
-      {% if r.day_change is number and r.last_price is number %}{% set h.day = h.day + r.day_change * q %}{% set h.prev = h.prev + (r.last_price - r.day_change) * q %}{% else %}{% set h.noday = h.noday + 1 %}{% endif %}
-    {% endfor %}
-    <div class="hsum" data-account-total>
-      <div class="big"><span>Current value</span><b>{{ money(h.cur) if not h.noltp else "—" }}</b></div>
-      <div><span>Invested</span><b>{{ money(h.inv) }}</b></div>
-      <div><span>Total returns</span><b>{% if not h.noltp %}{{ pnl(h.pnl) }}<small class="{{ 'up' if h.pnl >= 0 else 'down' }}">{{ "{:+.2f}%".format(h.pnl / h.inv * 100) if h.inv else "" }}</small>{% else %}—{% endif %}</b></div>
-      <div><span>1D returns</span><b>{% if not h.noday %}{{ pnl(h.day) }}<small class="{{ 'up' if h.day >= 0 else 'down' }}">{{ "{:+.2f}%".format(h.day / h.prev * 100) if h.prev else "" }}</small>{% else %}—{% endif %}</b></div>
-    </div>
-    {# Phones: one card per stock (INDmoney-style) instead of the wide table. #}
-    <div class="hcards">
-      {% for r in rows %}
-      {% set q = r.quantity or 0 %}{% set inv = (r.average_price or 0) * q %}
-      {% set cur = r.last_price * q if r.last_price is number else none %}
-      {% set ret = (r.pnl if r.pnl is number else cur - inv) if cur is not none else none %}
-      <div class="hcard" data-account-row data-mirror="1" data-order-status="">
-        <div class="nm">{{ r.tradingsymbol or r.trading_symbol }}</div>
-        <div class="cv">{{ money(cur) if cur is not none else money(inv) }}</div>
-        <div class="sub">{{ q }} share{{ "" if q == 1 else "s" }} · Avg {{ money(r.average_price) }}</div>
-        <div class="ret">{% if ret is not none %}{{ pnl(ret) }} <span class="{{ 'up' if ret >= 0 else 'down' }}">({{ "{:+.2f}%".format(ret / inv * 100) if inv else "—" }})</span>{% else %}<span class="muted">Invested</span>{% endif %}</div>
-        <div class="meta"><span>LTP {{ money(r.last_price) }}</span>{% if r.day_change is number %}<span>1D {{ pnl(r.day_change * q) }} <span class="{{ 'up' if r.day_change >= 0 else 'down' }}">{{ "({:+.2f}%)".format(r.day_change_percentage) if r.day_change_percentage is number else "" }}</span></span>{% endif %}</div>
-      </div>
-      {% endfor %}
-    </div>
-    <div class="tbl has-cards"><table>
+    <div class="tbl"><table>
       <tr><th>Symbol</th><th class="num">Qty</th><th class="num">Avg</th><th class="num">LTP</th><th class="num">Invested</th><th class="num">Current</th><th class="num">P&amp;L</th><th class="num">Day change</th></tr>
       {% for r in rows %}
       <tr data-account-row data-order-status="{{ (r.status or '')|lower }}"><td><b>{{ r.tradingsymbol or r.trading_symbol }}</b> <span class="muted">{{ r.company_name }}</span></td><td class="num">{{ r.quantity }}</td>
@@ -213,26 +185,7 @@
     {% set rows = a.mf_holdings.data or [] %}
     {% if a.mf_holdings.data is not none %}
     {% if rows %}
-    {% set m = namespace(inv=0, cur=0) %}
-    {% for r in rows %}{% set m.inv = m.inv + (r.average_price or 0) * (r.quantity or 0) %}{% set m.cur = m.cur + (r.last_price or 0) * (r.quantity or 0) %}{% endfor %}
-    <div class="hsum hsum3" data-account-total>
-      <div class="big"><span>Current value</span><b>{{ money(m.cur) }}</b></div>
-      <div><span>Invested</span><b>{{ money(m.inv) }}</b></div>
-      <div><span>Total returns</span><b>{{ pnl(m.cur - m.inv) }}<small class="{{ 'up' if m.cur >= m.inv else 'down' }}">{{ "{:+.2f}%".format((m.cur - m.inv) / m.inv * 100) if m.inv else "" }}</small></b></div>
-    </div>
-    <div class="hcards">
-      {% for r in rows %}
-      {% set inv = (r.average_price or 0) * (r.quantity or 0) %}{% set cur = (r.last_price or 0) * (r.quantity or 0) %}
-      <div class="hcard" data-account-row data-mirror="1" data-order-status="">
-        <div class="nm">{{ r.fund or r.tradingsymbol }}</div>
-        <div class="cv">{{ money(cur) }}</div>
-        <div class="sub">{{ "{:,.3f}".format(r.quantity) if r.quantity is number else "—" }} units · Avg NAV {{ money(r.average_price) }}</div>
-        <div class="ret">{{ pnl(cur - inv) }} <span class="{{ 'up' if cur >= inv else 'down' }}">({{ "{:+.2f}%".format((cur - inv) / inv * 100) if inv else "—" }})</span></div>
-        <div class="meta"><span>NAV {{ money(r.last_price) }}{{ " · " ~ r.last_price_date if r.last_price_date else "" }}</span>{% if r.folio %}<span>Folio {{ r.folio }}</span>{% endif %}</div>
-      </div>
-      {% endfor %}
-    </div>
-    <div class="tbl has-cards"><table>
+    <div class="tbl"><table>
       <tr><th>Fund</th><th>Folio</th><th class="num">Units</th><th class="num">Avg NAV</th><th class="num">NAV</th><th class="num">Invested</th><th class="num">Current</th><th class="num">P&amp;L</th><th class="num">P&amp;L %</th></tr>
       {# Brokers' own MF pnl can be missing or 0 (Kite sends 0.0), so it is always worked out from NAVs. #}
       {% set t = namespace(inv=0, cur=0) %}
